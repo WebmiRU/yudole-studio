@@ -1,0 +1,12 @@
+# системный мусор
+.directory
+.idea
+.DS_Store
+Thumbs.db
+
+# бинарники ядра
+/core/studio
+/core/studio.exe
+
+# логи
+*.log

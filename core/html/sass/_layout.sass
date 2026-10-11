@@ -1,0 +1,182 @@
+@use "tokens"
+
+// Каркас страницы: сайдбар с разделами + рабочая область.
+
+.app
+  display: grid
+  grid-template-columns: tokens.$sidebar-w minmax(0, 1fr)
+  height: 100%
+
+// --- Сайдбар ---------------------------------------------------------------
+
+.sidebar
+  display: flex
+  flex-direction: column
+  gap: 24px
+  padding: 20px 16px
+  background: rgba(17, 20, 26, 0.72)
+  border-right: 1px solid tokens.$border
+  overflow-y: auto
+
+.brand
+  display: flex
+  align-items: center
+  gap: 10px
+  padding: 0 8px
+
+.brand__mark
+  display: grid
+  place-items: center
+  width: 30px
+  height: 30px
+  border-radius: 9px
+  background: linear-gradient(135deg, tokens.$accent, #4b3bb0)
+  box-shadow: 0 4px 14px rgba(123, 97, 255, 0.35)
+  color: tokens.$accent-ink
+  font-size: 15px
+
+.brand__name
+  font-size: 16px
+  font-weight: 600
+  letter-spacing: 0.2px
+
+.nav__label
+  padding: 0 10px 8px
+  color: tokens.$text-faint
+  font-size: 11px
+  font-weight: 600
+  letter-spacing: 0.08em
+  text-transform: uppercase
+
+.nav__item
+  display: flex
+  align-items: center
+  justify-content: space-between
+  gap: 8px
+  width: 100%
+  padding: 8px 10px
+  border: 0
+  border-radius: tokens.$radius-sm
+  background: none
+  color: tokens.$text-dim
+  font-size: 14px
+  text-align: left
+  cursor: pointer
+  transition: background 0.12s ease, color 0.12s ease
+
+.nav__item:hover
+  background: tokens.$surface-hi
+  color: tokens.$text
+
+.nav__item--parent.is-open
+  color: tokens.$text
+  font-weight: 600
+
+.nav__chevron
+  width: 7px
+  height: 7px
+  border-right: 1.5px solid currentColor
+  border-bottom: 1.5px solid currentColor
+  transform: rotate(-45deg)
+  transition: transform 0.15s ease
+
+.nav__item--parent.is-open .nav__chevron
+  transform: rotate(45deg)
+
+.nav__sublist
+  margin: 2px 0 6px 10px
+  padding-left: 10px
+  border-left: 1px solid tokens.$border
+
+.nav__item--child.is-active
+  background: rgba(123, 97, 255, 0.14)
+  color: tokens.$accent-hi
+  font-weight: 600
+
+.sidebar__foot
+  margin-top: auto
+  padding: 10px
+  border-top: 1px solid tokens.$border
+  color: tokens.$text-faint
+  font-size: 12px
+
+// --- Рабочая область -------------------------------------------------------
+
+.content
+  display: flex
+  flex-direction: column
+  min-width: 0
+  overflow-y: auto
+
+.content__head
+  padding: 26px 30px 18px
+  border-bottom: 1px solid tokens.$border
+
+.crumbs
+  display: flex
+  align-items: center
+  gap: 8px
+  font-size: 13px
+  color: tokens.$text-faint
+
+.crumbs__sep
+  opacity: 0.5
+
+.crumbs__item--current
+  color: tokens.$text
+
+.content__title
+  margin-top: 6px
+  font-size: 24px
+  font-weight: 650
+
+.content__lead
+  margin-top: 6px
+  color: tokens.$text-dim
+  font-size: 14px
+
+// Две панели: список клиентов и его опции.
+.panels
+  display: grid
+  grid-template-columns: tokens.$list-w minmax(0, 1fr)
+  gap: 22px
+  padding: 24px 30px 34px
+  align-items: start
+
+.panel
+  background: tokens.$surface
+  border: 1px solid tokens.$border
+  border-radius: tokens.$radius
+
+.panel__head
+  display: flex
+  align-items: center
+  justify-content: space-between
+  gap: 10px
+  padding: 14px 16px
+  border-bottom: 1px solid tokens.$border
+
+.panel__title
+  font-size: 13px
+  font-weight: 600
+  letter-spacing: 0.04em
+  text-transform: uppercase
+  color: tokens.$text-dim
+
+.panel__count
+  padding: 2px 8px
+  border-radius: tokens.$radius-pill
+  background: tokens.$surface-hi
+  color: tokens.$text-faint
+  font-size: 11px
+
+@media (max-width: 1080px)
+  .app
+    grid-template-columns: 1fr
+
+  .sidebar
+    border-right: 0
+    border-bottom: 1px solid tokens.$border
+
+  .panels
+    grid-template-columns: 1fr

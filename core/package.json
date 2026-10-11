@@ -1,0 +1,16 @@
+{
+  "name": "studio-core",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Веб-интерфейс ядра студии: страница настроек",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "devDependencies": {
+    "sass-embedded": "^1.105.1",
+    "vite": "^8.3.4"
+  }
+}

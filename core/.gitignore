@@ -1,0 +1,13 @@
+# бинарник ядра: go build . и его вариант для windows
+/studio
+/studio.exe
+
+# артефакты go test
+*.test
+coverage.out
+
+# node
+/node_modules/
+
+# сборка vite
+/dist/

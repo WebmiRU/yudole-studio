@@ -1,0 +1,75 @@
+@use "tokens"
+
+:root
+  color-scheme: dark
+
+*,
+*::before,
+*::after
+  box-sizing: border-box
+
+html,
+body
+  height: 100%
+
+body
+  margin: 0
+  background-color: tokens.$bg
+  background-image: radial-gradient(1200px 600px at 15% -10%, #1a1830 0%, transparent 60%)
+  color: tokens.$text
+  font-family: tokens.$font
+  font-size: 15px
+  line-height: 1.5
+  -webkit-font-smoothing: antialiased
+
+h1,
+h2,
+h3,
+p,
+ul,
+ol,
+figure
+  margin: 0
+  padding: 0
+
+ul,
+ol
+  list-style: none
+
+button,
+input,
+select,
+textarea
+  font: inherit
+  color: inherit
+
+a
+  color: tokens.$accent-hi
+  text-decoration: none
+
+:focus-visible
+  outline: 2px solid tokens.$accent-hi
+  outline-offset: 2px
+
+::selection
+  background: tokens.$accent
+  color: tokens.$accent-ink
+
+// Тонкий скроллбар под тёмную тему.
+*
+  scrollbar-width: thin
+  scrollbar-color: tokens.$border-hi transparent
+
+*::-webkit-scrollbar
+  width: 10px
+  height: 10px
+
+*::-webkit-scrollbar-thumb
+  background: tokens.$border-hi
+  border: 3px solid transparent
+  border-radius: tokens.$radius-pill
+  background-clip: content-box
+
+*::-webkit-scrollbar-thumb:hover
+  background: #3b4354
+  background-clip: content-box

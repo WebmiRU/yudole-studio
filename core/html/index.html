@@ -1,0 +1,66 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Studio — настройки</title>
+</head>
+<body>
+
+<div class="app">
+    <aside class="sidebar">
+        <div class="brand">
+            <span class="brand__mark" aria-hidden="true">◈</span>
+            <span class="brand__name">studio</span>
+        </div>
+
+        <nav class="nav" aria-label="Разделы настроек">
+            <p class="nav__label">Разделы</p>
+            <ul class="nav__list">
+                <li>
+                    <button type="button" class="nav__item nav__item--parent is-open" aria-expanded="true">
+                        <span class="nav__title">Плагины</span>
+                        <span class="nav__chevron" aria-hidden="true"></span>
+                    </button>
+                    <ul class="nav__sublist">
+                        <li>
+                            <a href="#" class="nav__item nav__item--child is-active" aria-current="page">Чат-клиенты</a>
+                        </li>
+                    </ul>
+                </li>
+            </ul>
+        </nav>
+
+        <p class="sidebar__foot">Ядро 0.1.0</p>
+    </aside>
+
+    <main class="content">
+        <header class="content__head">
+            <nav class="crumbs" aria-label="Путь по настройкам">
+                <span class="crumbs__item">Плагины</span>
+                <span class="crumbs__sep" aria-hidden="true">/</span>
+                <span class="crumbs__item crumbs__item--current">Чат-клиенты</span>
+            </nav>
+            <h1 class="content__title">Чат-клиенты</h1>
+            <p class="content__lead">Выберите чат-клиент и настройте параметры его подключения.</p>
+        </header>
+
+        <div class="panels">
+            <section class="panel panel--list" aria-label="Список чат-клиентов">
+                <div class="panel__head">
+                    <h2 class="panel__title">Установленные</h2>
+                    <span class="panel__count" id="clients-count">0</span>
+                </div>
+                <ul class="clients" id="clients"></ul>
+            </section>
+
+            <section class="panel panel--options" id="options" aria-label="Опции чат-клиента" aria-live="polite"></section>
+        </div>
+    </main>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+
+<script type="module" src="/js/app.js"></script>
+</body>
+</html>

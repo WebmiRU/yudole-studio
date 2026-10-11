@@ -1,0 +1,406 @@
+@use "tokens"
+
+// Список чат-клиентов, форма опций и элементы управления.
+
+// --- Список клиентов -------------------------------------------------------
+
+.clients
+  display: flex
+  flex-direction: column
+  padding: 8px
+
+// Строка списка: кнопка выбора клиента и тумблер вкл/выкл.
+.client-row
+  display: flex
+  align-items: center
+  gap: 10px
+  padding: 6px 10px 6px 4px
+  border: 1px solid transparent
+  border-radius: tokens.$radius-sm
+  transition: background 0.12s ease, border-color 0.12s ease
+
+.client-row:hover
+  background: tokens.$surface-hi
+
+.client-row.is-selected
+  background: tokens.$surface-max
+  border-color: tokens.$accent
+
+.client
+  display: grid
+  grid-template-columns: 36px minmax(0, 1fr)
+  gap: 12px
+  align-items: center
+  flex: 1
+  min-width: 0
+  padding: 6px 8px
+  border: 0
+  background: none
+  text-align: left
+  cursor: pointer
+
+.client__info
+  display: flex
+  flex-direction: column
+  min-width: 0
+
+.client__logo
+  display: grid
+  place-items: center
+  width: 36px
+  height: 36px
+  border-radius: 10px
+  background: tokens.$surface-hi
+  color: tokens.$text-dim
+  font-size: 15px
+  font-weight: 700
+
+.client-row.is-selected .client__logo
+  background: rgba(123, 97, 255, 0.18)
+  color: tokens.$accent-hi
+
+.client__name
+  font-size: 14px
+  font-weight: 600
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+
+.client__meta
+  margin-top: 2px
+  font-size: 12px
+  color: tokens.$text-faint
+  overflow: hidden
+  text-overflow: ellipsis
+  white-space: nowrap
+
+// Статусы.
+.status
+  display: inline-flex
+  align-items: center
+  gap: 6px
+  padding: 3px 9px
+  border-radius: tokens.$radius-pill
+  font-size: 11px
+  font-weight: 600
+  white-space: nowrap
+
+.status::before
+  content: ""
+  width: 6px
+  height: 6px
+  border-radius: 50%
+  background: currentColor
+
+.status--ok
+  background: rgba(70, 196, 107, 0.12)
+  color: tokens.$success
+
+.status--warn
+  background: rgba(224, 164, 88, 0.12)
+  color: tokens.$warning
+
+.status--off
+  background: tokens.$surface-hi
+  color: tokens.$text-faint
+
+// --- Форма опций -----------------------------------------------------------
+
+.options
+  display: flex
+  flex-direction: column
+
+.options__head
+  display: flex
+  align-items: flex-start
+  justify-content: space-between
+  gap: 14px
+  padding: 18px 20px
+  border-bottom: 1px solid tokens.$border
+
+.options__title
+  font-size: 17px
+  font-weight: 650
+
+.options__desc
+  margin-top: 3px
+  color: tokens.$text-dim
+  font-size: 13px
+
+.options__body
+  display: flex
+  flex-direction: column
+  padding: 6px 20px 18px
+
+.field
+  display: grid
+  grid-template-columns: 210px minmax(0, 1fr)
+  gap: 18px
+  padding: 15px 0
+  border-bottom: 1px solid tokens.$border
+
+.field:last-child
+  border-bottom: 0
+
+.field__label
+  font-size: 14px
+  font-weight: 500
+  padding-top: 8px
+
+.field__hint
+  display: block
+  margin-top: 4px
+  color: tokens.$text-faint
+  font-size: 12px
+  font-weight: 400
+
+.field__control
+  min-width: 0
+
+.input
+  width: 100%
+  max-width: 360px
+  padding: 8px 11px
+  border: 1px solid tokens.$border-hi
+  border-radius: tokens.$radius-sm
+  background: tokens.$bg
+  color: tokens.$text
+  transition: border-color 0.12s ease, box-shadow 0.12s ease
+
+.input::placeholder
+  color: tokens.$text-faint
+
+.input:hover
+  border-color: #3a4356
+
+.input:focus
+  outline: none
+  border-color: tokens.$accent
+  box-shadow: 0 0 0 3px rgba(123, 97, 255, 0.18)
+
+.input--mono
+  font-family: tokens.$mono
+  font-size: 13px
+
+.input--invalid
+  border-color: tokens.$danger
+
+.field__error
+  margin-top: 6px
+  color: tokens.$danger
+  font-size: 12px
+
+.field__error:empty
+  display: none
+
+// Список тегов: каналы, игры.
+.tags
+  display: flex
+  flex-wrap: wrap
+  gap: 6px
+  align-items: center
+  max-width: 420px
+  padding: 6px
+  border: 1px solid tokens.$border-hi
+  border-radius: tokens.$radius-sm
+  background: tokens.$bg
+  cursor: text
+
+.tags:focus-within
+  border-color: tokens.$accent
+  box-shadow: 0 0 0 3px rgba(123, 97, 255, 0.18)
+
+.tag
+  display: inline-flex
+  align-items: center
+  gap: 6px
+  padding: 3px 6px 3px 9px
+  border-radius: tokens.$radius-pill
+  background: tokens.$surface-max
+  color: tokens.$text
+  font-size: 12px
+
+.tag__remove
+  display: grid
+  place-items: center
+  width: 15px
+  height: 15px
+  border: 0
+  border-radius: 50%
+  background: rgba(255, 255, 255, 0.08)
+  color: tokens.$text-dim
+  font-size: 11px
+  line-height: 1
+  cursor: pointer
+
+.tag__remove:hover
+  background: tokens.$danger
+  color: tokens.$accent-ink
+
+.tags__input
+  flex: 1
+  min-width: 90px
+  padding: 3px 4px
+  border: 0
+  background: none
+
+.tags__input:focus
+  outline: none
+
+.tags__empty
+  padding: 3px 4px
+  color: tokens.$text-faint
+  font-size: 12px
+
+// Переключатель.
+.switch
+  display: inline-flex
+  align-items: center
+  gap: 10px
+  cursor: pointer
+
+.switch__input
+  position: absolute
+  opacity: 0
+  pointer-events: none
+
+.switch__track
+  position: relative
+  width: 38px
+  height: 22px
+  border-radius: tokens.$radius-pill
+  background: tokens.$surface-max
+  border: 1px solid tokens.$border-hi
+  transition: background 0.15s ease, border-color 0.15s ease
+
+.switch__track::after
+  content: ""
+  position: absolute
+  top: 2px
+  left: 2px
+  width: 16px
+  height: 16px
+  border-radius: 50%
+  background: tokens.$text-dim
+  transition: transform 0.15s ease, background 0.15s ease
+
+.switch__input:checked + .switch__track
+  background: tokens.$accent
+  border-color: tokens.$accent
+
+.switch__input:checked + .switch__track::after
+  transform: translateX(16px)
+  background: tokens.$accent-ink
+
+.switch__input:focus-visible + .switch__track
+  box-shadow: 0 0 0 3px rgba(123, 97, 255, 0.28)
+
+.switch__text
+  font-size: 13px
+  color: tokens.$text-dim
+
+// Компактный вариант для списка клиентов: без подписи, поменьше.
+.switch--compact .switch__track
+  width: 34px
+  height: 20px
+
+.switch--compact .switch__track::after
+  width: 14px
+  height: 14px
+
+.switch--compact .switch__input:checked + .switch__track::after
+  transform: translateX(14px)
+
+.client-row .switch--compact
+  flex: none
+
+// Выпадающий список.
+.select
+  width: 100%
+  max-width: 360px
+  padding: 8px 11px
+  border: 1px solid tokens.$border-hi
+  border-radius: tokens.$radius-sm
+  background: tokens.$bg
+  cursor: pointer
+
+.select:focus
+  outline: none
+  border-color: tokens.$accent
+  box-shadow: 0 0 0 3px rgba(123, 97, 255, 0.18)
+
+// --- Подвал формы и уведомления -------------------------------------------
+
+.options__foot
+  display: flex
+  align-items: center
+  justify-content: space-between
+  gap: 12px
+  padding: 14px 20px
+  border-top: 1px solid tokens.$border
+
+.options__note
+  color: tokens.$text-faint
+  font-size: 12px
+
+.options__actions
+  display: flex
+  gap: 8px
+
+.btn
+  padding: 8px 16px
+  border: 1px solid tokens.$border-hi
+  border-radius: tokens.$radius-sm
+  background: tokens.$surface-hi
+  color: tokens.$text
+  font-size: 14px
+  cursor: pointer
+  transition: background 0.12s ease, border-color 0.12s ease, opacity 0.12s ease
+
+.btn:hover
+  background: tokens.$surface-max
+
+.btn--primary
+  background: tokens.$accent
+  border-color: tokens.$accent
+  color: tokens.$accent-ink
+  font-weight: 600
+
+.btn--primary:hover
+  background: tokens.$accent-hi
+  border-color: tokens.$accent-hi
+
+.btn--ghost
+  background: none
+
+.btn:disabled
+  opacity: 0.5
+  cursor: not-allowed
+
+.empty
+  padding: 40px 20px
+  text-align: center
+  color: tokens.$text-faint
+
+.toast
+  position: fixed
+  right: 24px
+  bottom: 24px
+  padding: 11px 16px
+  border: 1px solid tokens.$border-hi
+  border-radius: tokens.$radius-sm
+  background: tokens.$surface-max
+  box-shadow: 0 12px 30px rgba(0, 0, 0, 0.45)
+  font-size: 14px
+  z-index: 10
+
+.toast[hidden]
+  display: none
+
+@media (max-width: 720px)
+  .field
+    grid-template-columns: 1fr
+    gap: 8px
+
+  .field__label
+    padding-top: 0
