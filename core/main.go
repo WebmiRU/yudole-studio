@@ -10,12 +10,16 @@ import (
 	"flag"
 	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
+
+	"studio/core/plugin"
 )
 
 const (
@@ -26,6 +30,9 @@ const (
 	sourceDirName = "html"
 	distDirName   = "dist"
 )
+
+// pluginsRelPath is the chat plugins directory, relative to the repository root.
+var pluginsRelPath = filepath.Join("plugins", "chat")
 
 // defaultWebDir prefers the build output and falls back to the sources, so the
 // server works before the first `npm run build`.
@@ -57,17 +64,59 @@ func isWebRoot(dir string) bool {
 	return isDir(filepath.Join(dir, distDirName)) || isDir(filepath.Join(dir, sourceDirName))
 }
 
+// defaultPluginsDir points at plugins/chat in the repository root.
+func defaultPluginsDir() string {
+	if candidate := filepath.Join(repoRoot(), pluginsRelPath); isDir(candidate) {
+		return candidate
+	}
+	// Standalone checkout without the workspace file: try next to the core.
+	if candidate := filepath.Join(baseDir(), pluginsRelPath); isDir(candidate) {
+		return candidate
+	}
+	return filepath.Join(repoRoot(), pluginsRelPath)
+}
+
+// repoRoot finds the directory holding go.work, so plugins and the core are
+// resolved from one place.
+func repoRoot() string {
+	base := baseDir()
+
+	for dir := base; ; {
+		if _, err := os.Stat(filepath.Join(dir, "go.work")); err == nil {
+			return dir
+		}
+		parent := filepath.Dir(dir)
+		if parent == dir {
+			return filepath.Dir(base)
+		}
+		dir = parent
+	}
+}
+
+// relPath shortens a path for logging: relative to the repository root when
+// the file lives inside it.
+func relPath(path string) string {
+	rel, err := filepath.Rel(repoRoot(), path)
+	if err != nil || strings.HasPrefix(rel, "..") {
+		return path
+	}
+	return filepath.ToSlash(rel)
+}
+
 func main() {
-	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	// Лог идёт в stdout: перенаправление ядра в файл забирает и логи, и
+	// сообщения об ошибках, в отличие от stderr.
+	slog.SetDefault(slog.New(slog.NewTextHandler(os.Stdout, nil)))
 
 	if err := run(); err != nil {
-		fmt.Fprintf(os.Stderr, "studio: %v\n", err)
+		fmt.Fprintf(os.Stdout, "studio: %v\n", err)
 		os.Exit(1)
 	}
 }
 
 func run() error {
 	addr := flag.String("addr", envOr("STUDIO_ADDR", defaultAddr), "address to listen on")
+	pluginsDir := flag.String("plugins", envOr("STUDIO_PLUGINS", defaultPluginsDir()), "directory with chat plugins")
 	webDir := flag.String("web", envOr("STUDIO_WEB", defaultWebDir()), "directory with the built front-end (npm run build -> dist)")
 	shutdownTimeout := flag.Duration("shutdown-timeout", 5*time.Second, "how long to wait for in-flight requests on shutdown")
 	flag.Parse()
@@ -96,6 +145,22 @@ func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// Занимаем порт до запуска плагинов: иначе при неудачном бинде мы
+	// выходим, оставив процессы плагинов сиротами.
+	listener, err := net.Listen("tcp", srv.Addr)
+	if err != nil {
+		return fmt.Errorf("listen on %s: %w", srv.Addr, err)
+	}
+
+	// Плагины живут на своём контексте: его отменяем только после того, как
+	// всем отправлен quit. Иначе CommandContext убил бы их раньше времени и
+	// плагин не успел бы завершиться сам.
+	pluginCtx, cancelPlugins := context.WithCancel(context.Background())
+	defer cancelPlugins()
+
+	plugins := startPlugins(pluginCtx, *pluginsDir)
+	defer plugins.StopAll()
+
 	listenErr := make(chan error, 1)
 	go func() {
 		slog.Info("studio: serving front-end",
@@ -106,7 +171,7 @@ func run() error {
 		// HMR живёт только в дев-сервере: собранная страница обновляется
 		// лишь после npm run build. Напоминаем, где включается разработка.
 		slog.Info("studio: для разработки с HMR — npm run dev", "url", defaultDevTarget)
-		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			listenErr <- err
 		}
 	}()
@@ -123,7 +188,37 @@ func run() error {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		return fmt.Errorf("shutdown: %w", err)
 	}
+
+	// defers above do the same on early returns; StopAll is idempotent.
+	plugins.StopAll()
+	cancelPlugins()
 	return nil
+}
+
+// startPlugins discovers and launches chat plugins. A broken plugin is logged
+// and skipped: the kernel and the other plugins keep working.
+func startPlugins(ctx context.Context, dir string) *plugin.Supervisor {
+	supervisor := &plugin.Supervisor{}
+
+	descriptors, err := plugin.Discover(dir)
+	if err != nil {
+		slog.Error("cannot read plugins", "dir", dir, "err", err)
+		return supervisor
+	}
+	if len(descriptors) == 0 {
+		slog.Info("no chat plugins found", "dir", relPath(dir))
+		return supervisor
+	}
+
+	slog.Info("scanning chat plugins", "dir", relPath(dir), "found", len(descriptors))
+	for _, d := range descriptors {
+		slog.Info("plugin found", "plugin", d.Name, "path", relPath(d.Path))
+	}
+
+	supervisor.StartAll(ctx, descriptors)
+	slog.Info("chat plugins running", "plugins", strings.Join(supervisor.Names(), ", "))
+
+	return supervisor
 }
 
 func envOr(key, fallback string) string {
