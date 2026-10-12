@@ -83,7 +83,7 @@ func (s *socket) watch(ctx context.Context, wanted func() []chat.ID) {
 			}
 			s.send(protocol.KindConnectionState, protocol.ConnectionPayload{
 				State:   protocol.ConnectionReconnecting,
-				Service: "goodgame",
+				Service: serviceName(),
 				Reason:  errText(err),
 				Attempt: attempt,
 			})
@@ -104,7 +104,7 @@ func (s *socket) watch(ctx context.Context, wanted func() []chat.ID) {
 // got into, so the caller can tell the kernel they are gone.
 func (s *socket) session(ctx context.Context, wanted func() []chat.ID) (map[chat.ID]bool, error) {
 	s.send(protocol.KindConnectionState, protocol.ConnectionPayload{
-		State: protocol.ConnectionConnecting, Service: "goodgame",
+		State: protocol.ConnectionConnecting, Service: serviceName(),
 	})
 
 	client, err := chat.Open(ctx, s.endpoint)
@@ -114,7 +114,9 @@ func (s *socket) session(ctx context.Context, wanted func() []chat.ID) (map[chat
 	defer func() { _ = client.Close() }()
 
 	s.say("GoodGame: соединение открыто")
-	s.send(protocol.KindConnectionState, protocol.ConnectionPayload{State: protocol.ConnectionOnline, Service: "goodgame"})
+	s.send(protocol.KindConnectionState, protocol.ConnectionPayload{
+		State: protocol.ConnectionOnline, Service: serviceName(),
+	})
 
 	live := map[chat.ID]bool{}
 	defer func() {
@@ -247,22 +249,15 @@ func (s *socket) sync(ctx context.Context, client *chat.Client, live map[chat.ID
 		}
 		live[id] = true
 		delete(failed, id)
-		name := joined.ChannelName
-		if name == "" {
-			name = string(id)
-		}
+
+		// Один вход — одно событие. Название канала и так уже названо в
+		// ChannelPayload, а название трансляции и счётчики отдельным событием
+		// только шумят: следом придёт то же самое из счётчиков раз в двадцать
+		// секунд.
 		s.send(protocol.KindChannelJoinSuccess, protocol.ChannelPayload{
 			Channel: string(id), Name: channelName(id),
 		})
-		s.send(protocol.KindChannelInfo, protocol.ChannelInfoPayload{
-			Channel:     string(id),
-			Name:        name,
-			Streamer:    joined.ChannelKey,
-			Clients:     joined.Clients,
-			Users:       joined.Users,
-			PremiumOnly: joined.PremiumOnly != 0,
-			SmileOnly:   joined.SmileOnlyMode,
-		})
+		_ = joined
 	}
 }
 
@@ -357,6 +352,12 @@ func (s *socket) send(kind string, payload any) {
 	default:
 		s.say("очередь переполнена, потеряно сообщение " + kind)
 	}
+}
+
+// serviceName is how we call ourselves in our own events. Не id: id — это имя
+// каталога, а человек знает плагин как GoodGame.
+func serviceName() string {
+	return describe().Title
 }
 
 // channelName is what we call a channel in our own events: the name it has in

@@ -129,8 +129,9 @@ function redraw() {
     const shown = state.entries.filter(passes);
 
     // Держим не больше сотни строк: иначе страница растёт бесконечно.
-    const trimmed = shown.slice(-100);
-    feedEl.replaceChildren(...trimmed.map(line));
+    // Неизвестные события не дают блока, поэтому null убираем.
+    const trimmed = shown.slice(-100).map(line).filter(Boolean);
+    feedEl.replaceChildren(...trimmed);
 
     if (state.stuck) {
         feedEl.scrollTop = feedEl.scrollHeight;
@@ -167,14 +168,19 @@ function line(entry) {
 // block is the shape of every message: who wrote it, a rule under the name, and
 // then the text itself.
 function block(entry, severity, head, text) {
+    const body = [...[text].flat()].filter((piece) => piece !== null && piece !== undefined && piece !== '');
+    if (body.length === 0) {
+        return null;
+    }
+
     return el('article', {class: 'msg', 'data-severity': severity}, [
         // Полоска стоит между автором и текстом, а не рядом с автором: шапка
         // выстроена в строку, и внутри неё полоска легла бы вбок.
         el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
         el('div', {class: 'msg__rule'}),
-        el('div', {class: 'msg__text'}, [...[text].flat().map(piece => (
+        el('div', {class: 'msg__text'}, body.map((piece) => (
             typeof piece === 'string' ? document.createTextNode(piece) : piece
-        ))]),
+        ))),
     ]);
 }
 
@@ -237,11 +243,16 @@ function describe(entry) {
         case 'chat.channel.unjoin.failed':
             return [`Не получилось отключиться от канала `, strong(name), `: ${reason ?? '?'}`];
         case 'chat.channel.info':
+            // Счётчики и название трансляции. Пока их не шлём, но когда
+            // начнём — покажем, а не выкинем.
             return [strong(name), channelInfo(entry.payload)];
         case 'chat.message.deleted':
             return [deletedPhrase(entry.payload)];
         default:
-            return entry.kind;
+            // Неизвестный вид события не показываем протоколом: в ленте
+            // «chat.channel.join.success» — это мусор, а не сообщение.
+            console.warn('chat: неизвестное событие', entry.kind, entry);
+            return null;
     }
 }
 

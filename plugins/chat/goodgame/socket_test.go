@@ -221,12 +221,14 @@ func TestSocketJoinsConfiguredChannels(t *testing.T) {
 	if payload.Channel != "53029" {
 		t.Errorf("канал = %q, want 53029", payload.Channel)
 	}
+	if payload.Name != "E.Wolf" {
+		t.Errorf("имя = %q, want E.Wolf из настроек", payload.Name)
+	}
 
-	info := waitKind(t, socket, protocol.KindChannelInfo)
-	var shown protocol.ChannelInfoPayload
-	info.PayloadInto(&shown)
-	if shown.Name != "канал 53029" || shown.Clients != 12 {
-		t.Errorf("info = %+v, want the name and counters from success_join", shown)
+	// События о самом канале после входа не шлём: название и так названо в
+	// ChannelPayload, а счётчики придут отдельно и без нас.
+	if extra := kindWithin(socket, time.Second, protocol.KindChannelInfo); extra != "" {
+		t.Errorf("после входа пришло лишнее событие %s", extra)
 	}
 
 	if !fake.Saw("join") {
@@ -362,6 +364,24 @@ func TestSocketReportsUnjoinOnDisconnect(t *testing.T) {
 	}
 	if payload.Channel != "53029" {
 		t.Errorf("канал = %q, want 53029", payload.Channel)
+	}
+}
+
+// kindWithin reports which of the given kinds arrived within the time, or "" if
+// none did.
+func kindWithin(socket *socket, within time.Duration, kinds ...string) string {
+	deadline := time.After(within)
+	for {
+		select {
+		case event := <-socket.events:
+			for _, kind := range kinds {
+				if event.message.Kind == kind {
+					return kind
+				}
+			}
+		case <-deadline:
+			return ""
+		}
 	}
 }
 
