@@ -598,12 +598,8 @@ func runConfiguration(ctx context.Context, config settings) error {
 			}
 			logInfo(fmt.Sprintf("Проверка эфира %d/%d не удалась: %v", attempt, maxSearchAttempts, err))
 		} else if len(lives) > 0 {
-			send(protocol.KindChannelJoinSuccess, protocol.ChannelPayload{
-				Channel: config.Channel,
-				Name:    channelTitle,
-			})
 			logInfo(fmt.Sprintf("Найдено активных чатов YouTube: %d", len(lives)))
-			return watchLiveChats(ctx, config.APIKey, config.Channel, lives)
+			return watchLiveChats(ctx, config.APIKey, config.Channel, channelTitle, lives)
 		} else {
 			logInfo(fmt.Sprintf("Активный эфир не найден: проверка %d/%d", attempt, maxSearchAttempts))
 		}
@@ -627,7 +623,7 @@ func runConfiguration(ctx context.Context, config settings) error {
 	return errSearchExhausted
 }
 
-func watchLiveChats(ctx context.Context, apiKey, channel string, lives []liveVideo) error {
+func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, lives []liveVideo) error {
 	emitConnection(protocol.ConnectionConnecting, "Подключаю поток liveChatMessages.streamList", 0)
 
 	var conn *grpc.ClientConn
@@ -664,6 +660,7 @@ func watchLiveChats(ctx context.Context, apiKey, channel string, lives []liveVid
 	}
 	results := make(chan result, len(lives))
 	var wg sync.WaitGroup
+	var joinedOnce sync.Once
 
 	for _, video := range lives {
 		video := video
@@ -671,6 +668,12 @@ func watchLiveChats(ctx context.Context, apiKey, channel string, lives []liveVid
 		go func() {
 			defer wg.Done()
 			err := readOneChat(childCtx, client, apiKey, channel, video, func() {
+				joinedOnce.Do(func() {
+					send(protocol.KindChannelJoinSuccess, protocol.ChannelPayload{
+						Channel: channel,
+						Name:    channelTitle,
+					})
+				})
 				emitConnection(protocol.ConnectionOnline, "Читаю live chat YouTube", 0)
 			})
 			results <- result{video: video, err: err}
