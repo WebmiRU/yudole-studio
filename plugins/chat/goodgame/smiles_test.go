@@ -18,7 +18,7 @@ import (
 func openTestStore(t *testing.T) *store {
 	t.Helper()
 
-	path := filepath.Join(t.TempDir(), "smiles.db")
+	path := filepath.Join(t.TempDir(), "data.db")
 	t.Setenv("GOODGAME_SMILES_DB", path)
 
 	st, err := openStore()
@@ -229,7 +229,7 @@ func TestFetchSmilesRefusesNonsense(t *testing.T) {
 }
 
 func TestOpenStoreRefusesAnUnwritablePath(t *testing.T) {
-	t.Setenv("GOODGAME_SMILES_DB", filepath.Join(t.TempDir(), "нет", "такой", "smiles.db"))
+	t.Setenv("GOODGAME_SMILES_DB", filepath.Join(t.TempDir(), "нет", "такой", "data.db"))
 	if _, err := openStore(); err == nil {
 		t.Fatal("открыли базу по несуществующему пути")
 	}
