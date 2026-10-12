@@ -2,172 +2,275 @@ package main
 
 import (
 	"context"
-	"encoding/json/v2"
-	"errors"
 	"fmt"
-	"log/slog"
-	"net/url"
+	"maps"
 	"os"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 	"time"
 
-	"github.com/coder/websocket"
-
 	"studio/core/protocol"
+	"studio/plugins/chat/goodgame/chat"
 )
 
-// GoodGame отдаёт события чата по websocket: на каждый канал (у GoodGame они
-// называются комнатами) своё соединение. Здесь только транспорт — разбор
-// сообщений в parseChat.
+// GoodGame держит все каналы в одном соединении: подключиться надо один раз,
+// а каналы добавляются и убираются прямо на ходу. Поэтому здесь не «соединение
+// на канал», а одна сессия: подключились, дождались приветствия, вошли в
+// каналы и читаем всё, что в них происходит.
 //
-//	сообщения в комнате → сообщения в stdout
-//	обрыв               → переподключение с задержкой
+//	смена настроек → к новым каналам join, от лишних unjoin
+//	обрыв         → сообщаем ядру, что каналы закрыты, и переподключаемся
 const (
-	// wsURL — адрес чата GoodGame, %s подставляется в номер комнаты.
-	wsURL = "wss://goodgame.ru/websocket/%s"
-
 	// Первая пауза перед переподключением и её потолок.
-	reconnectMin  = 2 * time.Second
-	reconnectMax  = 30 * time.Second
-	dialTimeout   = 15 * time.Second
-	readLimit     = 1 << 20 // 1 MiB на одно сообщение
-	shutdownGrace = 3 * time.Second
+	reconnectMin = 2 * time.Second
+	reconnectMax = 30 * time.Second
 )
 
-// event — то, что пришло из чата.
+// event — всё, что плагин хочет сказать ядру: готовое сообщение протокола.
 type event struct {
-	channel string
-	raw     []byte
+	message protocol.Message
 }
 
-// socket держит соединения с каналами и отдаёт их сообщения в одну очередь.
+// socket держит соединение с GoodGame и переводит его сообщения в протокол
+// ядра.
 type socket struct {
 	events chan event
 	logs   chan string
+
+	// changed будит сессию, когда список каналов поменялся.
+	changed <-chan struct{}
+	// endpoint — адрес чата; в тестах он свой.
+	endpoint string
 }
 
 func newSocket() *socket {
+	endpoint := os.Getenv("GOODGAME_CHAT_URL")
+	if endpoint == "" {
+		endpoint = chat.Endpoint
+	}
 	return &socket{
-		events: make(chan event, 64),
-		logs:   make(chan string, 16),
+		events:   make(chan event, 64),
+		logs:     make(chan string, 16),
+		changed:  channelsChanged,
+		endpoint: endpoint,
 	}
 }
 
-// watch переподключает каналы из списка и кладёт всё приходящее в очередь.
-// Список читается при каждом переподключении, чтобы смена опций применялась
-// без перезапуска.
-func (s *socket) watch(ctx context.Context, channels func() []string) {
+// watch keeps a connection to GoodGame alive for as long as the plugin runs.
+func (s *socket) watch(ctx context.Context, wanted func() []chat.ID) {
 	go func() {
-		// По одному соединению на канал: переподключаем упавшее, новые
-		// каналы подключаем, исчезнувшие закрываем.
-		type channel struct {
-			cancel context.CancelFunc
-		}
-		live := map[string]*channel{}
+		backoff := reconnectMin
+		attempt := 0
 
-		ticker := time.NewTicker(time.Second)
-		defer ticker.Stop()
+		for ctx.Err() == nil {
+			_, err := s.session(ctx, wanted)
+			attempt++
 
-		for {
-			wanted := channels()
-			keep := map[string]bool{}
-			for _, id := range wanted {
-				keep[id] = true
+			switch {
+			case ctx.Err() != nil:
+				return
+			case err != nil:
+				s.say(err.Error())
 			}
-
-			for id, r := range live {
-				if !keep[id] {
-					r.cancel()
-					delete(live, id)
-				}
-			}
-
-			for _, id := range wanted {
-				if _, ok := live[id]; ok {
-					continue
-				}
-				channelCtx, cancel := context.WithCancel(ctx)
-				live[id] = &channel{cancel: cancel}
-				go s.connect(channelCtx, id)
-			}
+			s.send(protocol.KindConnectionState, protocol.ConnectionPayload{
+				State:   protocol.ConnectionReconnecting,
+				Service: "goodgame",
+				Reason:  errText(err),
+				Attempt: attempt,
+			})
 
 			select {
 			case <-ctx.Done():
-				for _, r := range live {
-					r.cancel()
-				}
 				return
-			case <-ticker.C:
+			case <-time.After(backoff):
+			}
+			if backoff *= 2; backoff > reconnectMax {
+				backoff = reconnectMax
 			}
 		}
 	}()
 }
 
-// connect держит одно соединение с каналом, пока не придёт отмена.
-func (s *socket) connect(ctx context.Context, id string) {
-	backoff := reconnectMin
+// session is one connection from start to finish. It returns the channels we
+// got into, so the caller can tell the kernel they are gone.
+func (s *socket) session(ctx context.Context, wanted func() []chat.ID) (map[chat.ID]bool, error) {
+	s.send(protocol.KindConnectionState, protocol.ConnectionPayload{
+		State: protocol.ConnectionConnecting, Service: "goodgame",
+	})
 
-	for ctx.Err() == nil {
-		if err := s.session(ctx, id); err != nil && !errors.Is(err, context.Canceled) {
-			s.say("канал " + id + ": " + err.Error())
+	client, err := chat.Open(ctx, s.endpoint)
+	if err != nil {
+		return nil, fmt.Errorf("GoodGame: %w", err)
+	}
+	defer func() { _ = client.Close() }()
+
+	s.say("GoodGame: соединение открыто")
+	s.send(protocol.KindConnectionState, protocol.ConnectionPayload{State: protocol.ConnectionOnline, Service: "goodgame"})
+
+	live := map[chat.ID]bool{}
+	defer func() {
+		// Соединение оборвалось: во всех каналах, где мы были, нас больше
+		// нет. Ядру нужно это сказать, иначе он будет считать их нашими.
+		for _, id := range slices.Sorted(maps.Keys(live)) {
+			s.send(protocol.KindChannelUnjoinSuccessful, protocol.ChannelPayload{Channel: string(id)})
 		}
+	}()
 
+	s.sync(ctx, client, live, wanted)
+
+	for {
 		select {
 		case <-ctx.Done():
-			return
-		case <-time.After(backoff):
-		}
-		if backoff *= 2; backoff > reconnectMax {
-			backoff = reconnectMax
+			return live, nil
+
+		case <-s.changed:
+			s.sync(ctx, client, live, wanted)
+
+		case message, ok := <-client.Events():
+			if !ok {
+				return live, chat.ErrClosed
+			}
+			s.forward(message)
 		}
 	}
 }
 
-// session — одна попытка: подключиться и читать, пока соединение живо.
-func (s *socket) session(ctx context.Context, id string) error {
-	target := wsEndpoint(id)
+// sync brings the channels in line with the settings: joins the new ones, leaves
+// the ones that are no longer there, and keeps the rest as they are.
+func (s *socket) sync(ctx context.Context, client *chat.Client, live map[chat.ID]bool, wanted func() []chat.ID) {
+	list := wanted()
+	join, unjoin := chat.Diff(slices.Collect(maps.Keys(live)), list)
 
-	dialCtx, cancel := context.WithTimeout(ctx, dialTimeout)
-	defer cancel()
-
-	conn, _, err := websocket.Dial(dialCtx, target, nil)
-	if err != nil {
-		return fmt.Errorf("не подключиться к %s: %w", target, err)
-	}
-	defer conn.CloseNow()
-
-	// Читаем в отдельной горутине: отмена контекста должна разрывать и чтение.
-	readCtx, stopRead := context.WithCancel(ctx)
-	defer stopRead()
-
-	go func() {
-		<-readCtx.Done()
-		// CloseNow разрывает блокирующее Read, иначе goroutine зависнет.
-		conn.Close(websocket.StatusNormalClosure, "")
-	}()
-
-	s.say("канал " + id + ": подключено")
-	defer s.say("канал " + id + ": отключено")
-
-	conn.SetReadLimit(readLimit)
-
-	for {
-		kind, data, err := conn.Read(readCtx)
-		if err != nil {
-			return err
-		}
-		if kind != websocket.MessageText {
+	for _, id := range unjoin {
+		if err := client.Unjoin(ctx, id); err != nil {
+			s.say(fmt.Sprintf("канал %s: %v", id, err))
+			s.send(protocol.KindChannelUnjoinFailed, protocol.ChannelPayload{Channel: string(id), Reason: err.Error()})
 			continue
 		}
-
-		select {
-		case s.events <- event{channel: id, raw: data}:
-		case <-readCtx.Done():
-			return readCtx.Err()
-		}
+		delete(live, id)
+		s.send(protocol.KindChannelUnjoinSuccessful, protocol.ChannelPayload{Channel: string(id)})
 	}
+
+	for _, id := range join {
+		joined, err := client.Join(ctx, id)
+		if err != nil {
+			s.say(fmt.Sprintf("канал %s: %v", id, err))
+			s.send(protocol.KindChannelJoinFailed, protocol.ChannelPayload{Channel: string(id), Reason: err.Error()})
+			continue
+		}
+		live[id] = true
+		name := joined.ChannelName
+		if name == "" {
+			name = string(id)
+		}
+		s.send(protocol.KindChannelJoinSuccessful, protocol.ChannelPayload{Channel: string(id)})
+		s.send(protocol.KindChannelInfo, protocol.ChannelInfoPayload{
+			Channel:     string(id),
+			Name:        name,
+			Streamer:    joined.ChannelKey,
+			Clients:     joined.Clients,
+			Users:       joined.Users,
+			PremiumOnly: joined.PremiumOnly != 0,
+			SmileOnly:   joined.SmileOnlyMode,
+		})
+	}
+}
+
+// forward turns what the service said into what the kernel understands.
+func (s *socket) forward(message *chat.Message) {
+	switch message.Type {
+	case chat.TypeMessage:
+		var line chat.Line
+		if err := message.Into(&line); err != nil {
+			s.say("реплика не разобрана: " + err.Error())
+			return
+		}
+		s.send(protocol.KindMessagePublic, protocol.ChatPayload{
+			Channel: string(line.Channel),
+			User: protocol.ChatUser{
+				Name: line.UserName,
+				ID:   string(line.UserID),
+			},
+			Message: protocol.ChatLine{
+				Src:  line.Text,
+				Text: plainText(line.Text),
+			},
+		})
+
+	case chat.TypePrivateMessage:
+		// Приватные сообщения мы пока не показываем, но разбирать их
+		// научились: как только понадобится, дело за отправкой.
+		var line chat.PrivateLine
+		if err := message.Into(&line); err != nil {
+			return
+		}
+		s.send(protocol.KindMessagePrivate, protocol.ChatPayload{
+			Channel: string(line.Channel),
+			User: protocol.ChatUser{
+				Name: line.UserName,
+				ID:   string(line.UserID),
+			},
+			Message: protocol.ChatLine{
+				Src:  line.Text,
+				Text: plainText(line.Text),
+			},
+		})
+
+	case chat.TypeError:
+		var failure chat.Error
+		if err := message.Into(&failure); err != nil || failure.ErrorMsg == "" {
+			return
+		}
+		s.say("GoodGame: " + failure.Error())
+
+	case chat.TypeRemoveMessage:
+		var removed chat.Removed
+		if err := message.Into(&removed); err != nil {
+			return
+		}
+		s.send(protocol.KindMessageDeleted, protocol.DeletedMessagePayload{
+			Channel:   string(removed.Channel),
+			MessageID: strconv.FormatInt(removed.MessageID, 10),
+			By:        removed.AdminName,
+		})
+
+	// Сервер шлёт счётчики в каждый наш канал каждые секунд двадцать. Сами по
+	// себе они сейчас никому не нужны — но разбирать их мы уже умеем, чтобы
+	// потом просто включить.
+	case chat.TypeChannelCounters:
+		var counter chat.Counter
+		if err := message.Into(&counter); err != nil {
+			return
+		}
+		_ = counter
+	}
+}
+
+// send puts a message for the kernel on the way out.
+//
+// Логи плагина идут в stdout ядра, а не в stderr: stdout занят протоколом, и
+// строчка не в том формате сбила бы ядро с толку.
+func (s *socket) send(kind string, payload any) {
+	message, err := protocol.New(kind, payload)
+	if err != nil {
+		s.say("не собрать сообщение " + kind + ": " + err.Error())
+		return
+	}
+	select {
+	case s.events <- event{message: message}:
+	default:
+		s.say("очередь переполнена, потеряно сообщение " + kind)
+	}
+}
+
+// errText is what we tell the kernel about a failure: nothing is fine too.
+func errText(err error) string {
+	if err == nil {
+		return ""
+	}
+	return err.Error()
 }
 
 func (s *socket) say(text string) {
@@ -177,80 +280,14 @@ func (s *socket) say(text string) {
 	}
 }
 
-// wsEndpoint собирает адрес канала: у GoodGame у канала есть числовой номер.
-// Адрес можно переопределить переменной окружения — в тестах нужен свой.
-func wsEndpoint(channel string) string {
-	template := os.Getenv("GOODGAME_WS_URL")
-	if template == "" {
-		template = wsURL
-	}
-	if strings.Contains(template, "%s") {
-		return fmt.Sprintf(template, url.PathEscape(channel))
-	}
-	return strings.TrimRight(template, "/") + "/" + url.PathEscape(channel)
-}
-
-// channelID проверяет, что в настройках лежит именно номер канала: GoodGame
-// адресует комнаты числами, а не именами.
-func channelID(value string) (string, error) {
-	id := strings.TrimSpace(value)
-	if id == "" {
-		return "", errors.New("пустое значение")
-	}
-	if _, err := strconv.Atoi(id); err != nil {
-		return "", fmt.Errorf("%q — это не номер канала (у GoodGame он числовой)", value)
+// channelID проверяет, что в настройках лежит именно канал GoodGame: у них
+// номер, у флудилки на форуме — «r128», у турнира — «cup:…».
+func channelID(value string) (chat.ID, error) {
+	id := chat.ID(strings.TrimSpace(value))
+	if !chat.JoinChannelID(id) {
+		return "", fmt.Errorf("%q — это не канал GoodGame", value)
 	}
 	return id, nil
-}
-
-// Формат реплики — как chat.message.public.json: та же структура, что ждёт
-// ядро.
-// parseChat достаёт реплику из сообщения GoodGame. Формат ответа у них
-// менялся, поэтому берём первое осмысленное поле и не падаем на неизвестном.
-// src — канал, из которого пришла реплика.
-func parseChat(channel string, raw []byte) (protocol.ChatPayload, bool) {
-	var envelope struct {
-		Type string `json:"type"`
-		Data struct {
-			Message *struct {
-				Text     string `json:"text"`
-				UserName string `json:"user_name"`
-				Name     string `json:"name"`
-				UserID   int    `json:"user_id"`
-				Login    string `json:"login"`
-				HTML     string `json:"html"`
-			} `json:"message"`
-			MessageText string `json:"message_text"`
-		} `json:"data"`
-	}
-	if err := json.Unmarshal(raw, &envelope); err != nil {
-		return protocol.ChatPayload{}, false
-	}
-
-	if envelope.Data.Message != nil {
-		m := envelope.Data.Message
-		user := protocol.ChatUser{
-			Name:  first(m.UserName, m.Name),
-			Login: m.Login,
-		}
-		if m.UserID != 0 {
-			user.ID = strconv.Itoa(m.UserID)
-		}
-		return protocol.ChatPayload{
-			Channel: channel,
-			User:    user,
-			Message: protocol.ChatLine{Src: m.Text, Text: plainText(m.Text), Html: m.HTML},
-		}, true
-	}
-	if envelope.Data.MessageText != "" {
-		return protocol.ChatPayload{
-			Channel: channel,
-			Message: protocol.ChatLine{Src: envelope.Data.MessageText, Text: plainText(envelope.Data.MessageText)},
-		}, true
-	}
-
-	slog.Debug("goodgame: неизвестное сообщение", "kind", envelope.Type)
-	return protocol.ChatPayload{}, false
 }
 
 // plainText убирает разметку источника: GoodGame присылает коды смайлов и

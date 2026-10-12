@@ -40,11 +40,49 @@ const (
 	// direct conversation.
 	KindMessagePublic  = "chat.message.public"
 	KindMessagePrivate = "chat.message.private"
+
+	// What the plugin does with the channels it was given. These four are the
+	// same for every chat service: Twitch, YouTube, GoodGame — разница только
+	// в том, что под каналом понимается.
+	KindChannelJoinSuccessful   = "chat.channel.join.successful"
+	KindChannelJoinFailed       = "chat.channel.join.failed"
+	KindChannelUnjoinSuccessful = "chat.channel.unjoin.successful"
+	KindChannelUnjoinFailed     = "chat.channel.unjoin.failed"
+
+	// The service told us something about a channel we are in: its name, who
+	// is streaming there, how many people are watching.
+	KindChannelInfo = "chat.channel.info"
+	// A message was taken out of the chat by a moderator.
+	KindMessageDeleted = "chat.message.deleted"
+	// The connection to the service is up, down or being retried. A plugin that
+	// sits quietly on a dead connection looks like a hung one.
+	KindConnectionState = "chat.connection.state"
+)
+
+// Connection states a plugin reports.
+const (
+	ConnectionConnecting   = "connecting"
+	ConnectionOnline       = "online"
+	ConnectionReconnecting = "reconnecting"
+	ConnectionOffline      = "offline"
 )
 
 // IsChatKind reports whether a kind carries a chat line.
 func IsChatKind(kind string) bool {
 	return kind == KindMessagePublic || kind == KindMessagePrivate
+}
+
+// IsChannelKind reports whether a kind talks about a channel rather than about
+// what happens in it.
+func IsChannelKind(kind string) bool {
+	switch kind {
+	case KindChannelJoinSuccessful, KindChannelJoinFailed,
+		KindChannelUnjoinSuccessful, KindChannelUnjoinFailed,
+		KindChannelInfo, KindMessageDeleted, KindConnectionState:
+		return true
+	default:
+		return false
+	}
 }
 
 // Message is the envelope of one protocol line.
@@ -191,4 +229,55 @@ func DecodeChat(line []byte) (ChatPayload, error) {
 	}
 	chat.Kind = message.Kind
 	return chat, nil
+}
+
+// ChannelPayload is what a join, unjoin or a change in a channel carries. The
+// three kinds differ only in the kind itself.
+type ChannelPayload struct {
+	// Channel is the value the plugin stores in the config, not the service's
+	// own id: it is what the user wrote and what we will reconnect to.
+	Channel string `json:"channel"`
+	// Reason is filled in for the failed kinds only.
+	Reason string `json:"reason,omitempty"`
+}
+
+// ChannelInfoPayload is what the service tells about a channel we are in.
+type ChannelInfoPayload struct {
+	Channel string `json:"channel"`
+	// Name is the channel title at the service.
+	Name string `json:"name,omitempty"`
+	// Streamer is who streams there, when the service says.
+	Streamer string `json:"streamer,omitempty"`
+	// Started is when the stream began, in unix seconds; 0 means it is not
+	// running.
+	Started int64 `json:"started,omitempty"`
+	// Clients and Users are how many people are in the channel and how many of
+	// them are signed in. Services send this on their own every few seconds,
+	// so a plugin can count on it arriving without asking.
+	Clients int `json:"clients,omitempty"`
+	Users   int `json:"users,omitempty"`
+	// PremiumOnly marks a channel that only its own subscribers may enter.
+	PremiumOnly bool `json:"premiumOnly,omitempty"`
+	// SmileOnly marks a channel where only smilies may be sent.
+	SmileOnly bool `json:"smileOnly,omitempty"`
+}
+
+// DeletedMessagePayload is a message a moderator took out of the chat.
+type DeletedMessagePayload struct {
+	Channel   string `json:"channel"`
+	MessageID string `json:"messageId"`
+	// By is who removed it, when the service says.
+	By string `json:"by,omitempty"`
+}
+
+// ConnectionPayload is the state of the plugin's connection to the service.
+type ConnectionPayload struct {
+	// State is one of the Connection* constants.
+	State string `json:"state"`
+	// Service is the chat the plugin talks to, for the log.
+	Service string `json:"service,omitempty"`
+	// Reason says why the connection went down or could not be made.
+	Reason string `json:"reason,omitempty"`
+	// Attempt counts the reconnects since the last good connection.
+	Attempt int `json:"attempt,omitempty"`
 }

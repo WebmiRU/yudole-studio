@@ -18,6 +18,7 @@ import (
 	"syscall"
 
 	"studio/core/protocol"
+	"studio/plugins/chat/goodgame/chat"
 )
 
 const (
@@ -28,14 +29,15 @@ const (
 type option = protocol.Option
 
 // options describes the settings page the kernel renders for us.
-// Каналы приходят выбором: значение — номер комнаты, а подпись — то, что
-// видит человек. Варианты плагин подставит, когда научится брать список
-// комнат у GoodGame, а пока поле можно заполнить руками.
+// Каналы приходят выбором: значение — то, что человек написал, а подпись —
+// название, которое GoodGame знает про этот канал.
 var options = []protocol.Option{{
-	Key:         "channels",
-	Type:        protocol.OptionSelectMultiple,
-	Label:       "Каналы",
-	Hint:        "Номера каналов GoodGame, через запятую",
+	Key:   "channels",
+	Type:  protocol.OptionSelectMultiple,
+	Label: "Каналы",
+	Hint:  "Номер канала, ник или ссылка goodgame.ru — плагин сам найдёт, что это",
+	// Что подставить в поле, пока не знаем: у GoodGame нет списка каналов в
+	// одном месте, а лазить по сайту за каждым каналом — дело не ядра.
 	Placeholder: "53029",
 	Default:     []any{},
 }}
@@ -46,12 +48,24 @@ var options = []protocol.Option{{
 var (
 	channelsMu sync.RWMutex
 	channels   []protocol.ChoiceValue
+	// connection — соединение с чатом.
+	connection *socket
+	// channelsChanged будит соединение, когда список каналов изменился. Один
+	// элемент достаточно: важно, что список посмотрели свежим, а не сколько
+	// раз он менялся.
+	channelsChanged = make(chan struct{}, 1)
 )
 
 func setChannels(next []protocol.ChoiceValue) {
 	channelsMu.Lock()
-	defer channelsMu.Unlock()
 	channels = next
+	channelsMu.Unlock()
+
+	// Список изменился: соединение должно это увидеть и пересобрать каналы.
+	select {
+	case channelsChanged <- struct{}{}:
+	default:
+	}
 }
 
 func currentChannels() []protocol.ChoiceValue {
@@ -69,21 +83,19 @@ func main() {
 	// Плагин сам объявляет себя: ядро читает это первым, без запроса.
 	send(protocol.KindPluginChat, describe())
 
-	chat := newSocket()
-	chat.watch(ctx, channelList)
+	connection = newSocket()
+	connection.watch(ctx, channelList)
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 
-		case text := <-chat.logs:
+		case text := <-connection.logs:
 			sayLog(text)
 
-		case event := <-chat.events:
-			if line, ok := parseChat(event.channel, event.raw); ok {
-				send(protocol.KindMessagePublic, line)
-			}
+		case event := <-connection.events:
+			write(event.message)
 
 		case line, ok := <-commands:
 			if !ok {
@@ -99,9 +111,9 @@ func main() {
 	}
 }
 
-// channelList — номера каналов для вебсокетов.
-func channelList() []string {
-	var ids []string
+// channelList — каналы, к которым надо быть подключены прямо сейчас.
+func channelList() []chat.ID {
+	var ids []chat.ID
 	for _, channel := range currentChannels() {
 		id, err := channelID(channel.Value)
 		if err != nil {
@@ -430,6 +442,15 @@ func commandsFrom(ctx context.Context, in *os.File) <-chan string {
 	}()
 
 	return out
+}
+
+func write(message protocol.Message) {
+	line, err := protocol.Encode(message)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "goodgame: cannot encode %s: %v\n", message.Kind, err)
+		return
+	}
+	os.Stdout.Write(line)
 }
 
 func send(kind string, payload any) {
