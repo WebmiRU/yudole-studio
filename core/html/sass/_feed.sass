@@ -192,8 +192,6 @@
       inset: 0
       z-index: 0
       pointer-events: none
-      --frame-light: #64e3ee
-      --frame-dim: rgba(76, 190, 202, .64)
 
       &::before,
       &::after
@@ -374,15 +372,7 @@
       border-right: 1px solid rgba(132, 242, 249, .82)
       transform: skewX(35deg)
 
-    &[data-severity="neutral"],
-    &[data-severity="info"]
-      .msg__frame
-        --frame-light: #64e3ee
-
     &[data-severity="success"]
-      .msg__frame
-        --frame-light: #7de7b2
-
       .msg__frame::before
         background: linear-gradient(132deg, #a5f7ce 0%, #70e2a6 35%, #368e72 72%, #9aefc2 100%)
 
@@ -390,9 +380,6 @@
         background: #a5f7ce
 
     &[data-severity="warning"]
-      .msg__frame
-        --frame-light: #f1ca75
-
       .msg__frame::before
         background: linear-gradient(132deg, #ffe5a0 0%, #e9bd61 35%, #927240 72%, #ffe09a 100%)
 
@@ -400,9 +387,6 @@
         background: #ffe5a0
 
     &[data-severity="error"]
-      .msg__frame
-        --frame-light: #ff8b8d
-
       .msg__frame::before
         background: linear-gradient(132deg, #ffc0c1 0%, #f36f78 35%, #a3434b 72%, #ffb2b4 100%)
 
