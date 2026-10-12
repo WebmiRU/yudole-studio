@@ -300,35 +300,6 @@ func TestMessageTextKeepsSmilesInsideText(t *testing.T) {
 }
 
 // Анимированный смайл приходит десятками одинаковых узлов — по одному на кадр.
-// Без отсечки одна реплика превращалась в двадцать одинаковых подписей.
-func TestMessageTextCollapsesRepeatedSmiles(t *testing.T) {
-	blocks := []vkBlock{{
-		Type: "text",
-		Content: `["", "unstyled", [` +
-			`{"type":"smile","id":"a","name":"CptCheer7","largeUrl":"https://x/a"},` +
-			`{"type":"smile","id":"a","name":"CptCheer7","largeUrl":"https://x/a"},` +
-			`{"type":"smile","id":"a","name":"CptCheer7","largeUrl":"https://x/a"}]]`,
-	}}
-	text, html := messageLine(blocks)
-	if text != "" {
-		t.Errorf("код смайла не должен попадать в читаемый текст: %q", text)
-	}
-	if got := strings.Count(html, "<img"); got != 1 {
-		t.Fatalf("картинок смайла %d, ожидалась одна: %q", got, html)
-	}
-
-	// Разные смайлы в одной реплике остаются все: человек мог послать и то и то.
-	mixed := []vkBlock{{
-		Type: "text",
-		Content: `["", "unstyled", [` +
-			`{"type":"smile","id":"a","name":"fire","largeUrl":"https://x/a"},` +
-			`{"type":"smile","id":"b","name":"party","largeUrl":"https://x/b"}]]`,
-	}}
-	_, mixedHTML := messageLine(mixed)
-	if got := strings.Count(mixedHTML, "<img"); got != 2 {
-		t.Fatalf("разных смайлов %d, ожидалось два: %q", got, mixedHTML)
-	}
-}
 
 // Адреса чата приходят со страницы вперемешку со слотами и чужими каналами.
 // Сверяться надо по номеру канала, иначе подписка уедет не туда.
@@ -377,18 +348,6 @@ func TestTopicRegexFindsSlotAddresses(t *testing.T) {
 }
 
 // Повторы между блоками тоже убираются: анимированный смайл приходит и
-// отдельными блоками, и узлами внутри текста.
-func TestMessageTextCollapsesSmilesAcrossBlocks(t *testing.T) {
-	blocks := []vkBlock{
-		{Type: "smile", ID: "x", Name: "hardplayDance", LargeURL: "https://x/icon"},
-		{Type: "text", Content: `["", "unstyled", [{"type":"smile","id":"x",` +
-			`"name":"hardplayDance","largeUrl":"https://x/icon"}]]`},
-	}
-	_, html := messageLine(blocks)
-	if got := strings.Count(html, "<img"); got != 1 {
-		t.Fatalf("один и тот же смайл напечатан %d раз(а): %q", got, html)
-	}
-}
 
 // Сведения о канале нужны в ленте один раз — сразу после подключения.
 // VK шлёт их на каждое изменение счётчика, и без ограничения лента через

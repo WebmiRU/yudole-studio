@@ -14,6 +14,10 @@ body
 
 body
   margin: 0
+  // Страница не прокручивается целиком: прокручиваются панели внутри. Иначе
+  // документ растёт вместе с содержимым и под настройками остаётся пустой хвост
+  // во весь экран — выглядит как гигантский футер, которого в разметке нет.
+  overflow: hidden
   background-color: tokens.$bg
   background-image: radial-gradient(1200px 600px at 15% -10%, #1a1830 0%, transparent 60%)
   color: tokens.$text
