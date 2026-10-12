@@ -144,6 +144,87 @@ func TestAPIRequestParsesJSONAndIncludesKey(t *testing.T) {
 	}
 }
 
+func TestResolveChannelAndFindActiveLives(t *testing.T) {
+	oldBase, oldClient := apiBase, httpClient
+	defer func() {
+		apiBase, httpClient = oldBase, oldClient
+	}()
+
+	const channelID = "UC1234567890123456789012"
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/channels":
+			if r.URL.Query().Get("forHandle") != "Paradoxlivechannel" {
+				t.Errorf("forHandle = %q", r.URL.Query().Get("forHandle"))
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"items": []any{map[string]any{
+					"id": channelID,
+					"snippet": map[string]any{"title": "Paradox Live"},
+				}},
+			})
+		case "/search":
+			if r.URL.Query().Get("channelId") != channelID ||
+				r.URL.Query().Get("type") != "video" ||
+				r.URL.Query().Get("eventType") != "live" {
+				t.Errorf("unexpected search query: %s", r.URL.RawQuery)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"items": []any{
+					map[string]any{
+						"id": map[string]any{"videoId": "video-with-chat"},
+						"snippet": map[string]any{"title": "Live now"},
+					},
+					map[string]any{
+						"id": map[string]any{"videoId": "video-without-chat"},
+						"snippet": map[string]any{"title": "Chat disabled"},
+					},
+				},
+			})
+		case "/videos":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"items": []any{
+					map[string]any{
+						"id": "video-with-chat",
+						"snippet": map[string]any{"title": "Live now"},
+						"liveStreamingDetails": map[string]any{"activeLiveChatId": "chat-123"},
+					},
+					map[string]any{
+						"id": "video-without-chat",
+						"snippet": map[string]any{"title": "Chat disabled"},
+						"liveStreamingDetails": map[string]any{},
+					},
+				},
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+	apiBase = server.URL + "/"
+	httpClient = server.Client()
+
+	id, title, err := resolveChannel(t.Context(), "test-key", "@Paradoxlivechannel")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if id != channelID || title != "Paradox Live" {
+		t.Fatalf("resolveChannel() = %q, %q", id, title)
+	}
+
+	lives, err := findActiveLives(t.Context(), "test-key", id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(lives) != 1 {
+		t.Fatalf("found %d active chats, want 1: %#v", len(lives), lives)
+	}
+	if lives[0].ID != "video-with-chat" || lives[0].Title != "Live now" || lives[0].Chat != "chat-123" {
+		t.Fatalf("unexpected active live: %#v", lives[0])
+	}
+}
+
 func TestAPIRequestReturnsStructuredError(t *testing.T) {
 	oldBase, oldClient := apiBase, httpClient
 	defer func() {

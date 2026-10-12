@@ -21,7 +21,7 @@ import (
 	"unicode/utf8"
 
 	"studio/core/protocol"
-	"studio/plugins/chat/youtube/internal/ytproto"
+	ytproto "studio/plugins/chat/youtube/internal/ytproto"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
@@ -286,6 +286,13 @@ type apiError struct {
 	Message string
 }
 
+func redactAPIKey(value, apiKey string) string {
+	if apiKey == "" {
+		return value
+	}
+	return strings.ReplaceAll(value, apiKey, "[redacted]")
+}
+
 func (e *apiError) Error() string {
 	if e.Reason != "" {
 		return fmt.Sprintf("YouTube API (%d, %s): %s", e.Status, e.Reason, e.Message)
@@ -315,7 +322,7 @@ func apiRequest(ctx context.Context, apiKey, method string, params url.Values, r
 	response, err := httpClient.Do(request)
 	if err != nil {
 		// http.Client errors often contain the full URL, including the API key.
-		return errors.New(strings.ReplaceAll(err.Error(), apiKey, "[redacted]"))
+		return errors.New(redactAPIKey(err.Error(), apiKey))
 	}
 	defer response.Body.Close()
 
@@ -338,7 +345,8 @@ func apiRequest(ctx context.Context, apiKey, method string, params url.Values, r
 		if len(payload.Error.Errors) > 0 {
 			reason = payload.Error.Errors[0].Reason
 		}
-		return &apiError{Status: response.StatusCode, Reason: reason, Message: payload.Error.Message}
+		message := redactAPIKey(payload.Error.Message, apiKey)
+		return &apiError{Status: response.StatusCode, Reason: reason, Message: message}
 	}
 	if err := json.Unmarshal(body, result); err != nil {
 		return fmt.Errorf("не удалось разобрать ответ YouTube API: %w", err)
@@ -388,7 +396,7 @@ func findActiveLives(ctx context.Context, apiKey, channelID string) ([]liveVideo
 		"channelId":  {channelID},
 		"type":       {"video"},
 		"eventType":  {"live"},
-		"maxResults": {"10"},
+		"maxResults": {"50"},
 	}
 
 	var searchResponse struct {
@@ -496,6 +504,12 @@ func supervise(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		// The configuration update may race with a completed search/stream
+		// and be consumed by the cancellation watcher. Compare the snapshot
+		// as well, so we never sleep waiting for an already-consumed signal.
+		if getSettings() != config {
+			continue
+		}
 		if errors.Is(err, errSettingsChanged) {
 			continue
 		}
@@ -505,9 +519,6 @@ func supervise(ctx context.Context) {
 		}
 		if errors.Is(err, errChatEnded) {
 			emitConnection(protocol.ConnectionReconnecting, "Эфир или чат завершились; ищу следующий активный эфир", 0)
-			if !waitInterval(ctx, searchInterval) {
-				continue
-			}
 			continue
 		}
 		if err != nil {
@@ -567,9 +578,13 @@ func runConfiguration(ctx context.Context, config settings) error {
 	}
 	logInfo(fmt.Sprintf("Канал YouTube разрешён: %s (%s)", channelTitle, channelID))
 
+	searchStarted := time.Now()
 	for attempt := 1; attempt <= maxSearchAttempts; attempt++ {
 		if ctx.Err() != nil {
 			return errSettingsChanged
+		}
+		if attempt > 1 && time.Since(searchStarted) >= time.Hour {
+			break
 		}
 
 		lives, err := findActiveLives(ctx, config.APIKey, channelID)
@@ -583,28 +598,32 @@ func runConfiguration(ctx context.Context, config settings) error {
 			}
 			logInfo(fmt.Sprintf("Проверка эфира %d/%d не удалась: %v", attempt, maxSearchAttempts, err))
 		} else if len(lives) > 0 {
-			send(protocol.KindChannelJoinSuccess, protocol.ChannelPayload{
-				Channel: config.Channel,
-				Name:    channelTitle,
-			})
 			logInfo(fmt.Sprintf("Найдено активных чатов YouTube: %d", len(lives)))
-			return watchLiveChats(ctx, config.APIKey, config.Channel, lives)
+			return watchLiveChats(ctx, config.APIKey, config.Channel, channelTitle, lives)
 		} else {
 			logInfo(fmt.Sprintf("Активный эфир не найден: проверка %d/%d", attempt, maxSearchAttempts))
 		}
 
-		if attempt == maxSearchAttempts {
-			emitConnection(protocol.ConnectionOffline, "Эфир не найден за 60 проверок (около часа). Поиск остановлен до изменения настроек.", attempt)
+		if attempt == maxSearchAttempts || time.Since(searchStarted) >= time.Hour {
+			emitConnection(protocol.ConnectionOffline, "Эфир не найден за час поиска. Поиск остановлен до изменения настроек.", attempt)
 			return errSearchExhausted
 		}
-		if !waitInterval(ctx, searchInterval) {
+		// Start subsequent searches on minute boundaries, rather than one full
+		// minute after each HTTP response, so the search window stays near an hour.
+		nextSearchAt := searchStarted.Add(time.Duration(attempt) * searchInterval)
+		delay := time.Until(nextSearchAt)
+		if delay < 0 {
+			delay = 0
+		}
+		if !waitInterval(ctx, delay) {
 			return errSettingsChanged
 		}
 	}
+	emitConnection(protocol.ConnectionOffline, "Эфир не найден за час поиска. Поиск остановлен до изменения настроек.", maxSearchAttempts)
 	return errSearchExhausted
 }
 
-func watchLiveChats(ctx context.Context, apiKey, channel string, lives []liveVideo) error {
+func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, lives []liveVideo) error {
 	emitConnection(protocol.ConnectionConnecting, "Подключаю поток liveChatMessages.streamList", 0)
 
 	var conn *grpc.ClientConn
@@ -641,7 +660,7 @@ func watchLiveChats(ctx context.Context, apiKey, channel string, lives []liveVid
 	}
 	results := make(chan result, len(lives))
 	var wg sync.WaitGroup
-	var onlineOnce sync.Once
+	var joinedOnce sync.Once
 
 	for _, video := range lives {
 		video := video
@@ -649,9 +668,13 @@ func watchLiveChats(ctx context.Context, apiKey, channel string, lives []liveVid
 		go func() {
 			defer wg.Done()
 			err := readOneChat(childCtx, client, apiKey, channel, video, func() {
-				onlineOnce.Do(func() {
-					emitConnection(protocol.ConnectionOnline, "Читаю live chat YouTube", 0)
+				joinedOnce.Do(func() {
+					send(protocol.KindChannelJoinSuccess, protocol.ChannelPayload{
+						Channel: channel,
+						Name:    channelTitle,
+					})
 				})
+				emitConnection(protocol.ConnectionOnline, "Читаю live chat YouTube", 0)
 			})
 			results <- result{video: video, err: err}
 		}()
@@ -729,10 +752,14 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			if ctx.Err() != nil {
 				return errSettingsChanged
 			}
+			if status.Code(err) == codes.NotFound || status.Code(err) == codes.FailedPrecondition {
+				return errChatEnded
+			}
 			if permanentGRPCError(err) {
 				return fmt.Errorf("YouTube live chat %q: %w", video.Title, err)
 			}
 			logInfo("Поток чата прерван, переподключаюсь: " + err.Error())
+			emitConnection(protocol.ConnectionReconnecting, "Восстанавливаю поток YouTube live chat", attempt+1)
 			if !waitInterval(ctx, retryDelay(attempt)) {
 				return errSettingsChanged
 			}
@@ -740,8 +767,8 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			continue
 		}
 
-		onConnected()
 		received := false
+		connectedReported := false
 		for {
 			response, recvErr := stream.Recv()
 			if recvErr != nil {
@@ -758,12 +785,15 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 					return fmt.Errorf("YouTube live chat %q: %w", video.Title, recvErr)
 				}
 				logInfo("Соединение с чатом потеряно, восстанавливаю поток: " + recvErr.Error())
+				emitConnection(protocol.ConnectionReconnecting, "Восстанавливаю поток YouTube live chat", attempt+1)
 				break
 			}
 			received = true
-			if response.GetOfflineAt() != "" {
-				return errChatEnded
+			if !connectedReported {
+				onConnected()
+				connectedReported = true
 			}
+			offline := response.GetOfflineAt() != ""
 			// Save the continuation token so the stream can resume after a break.
 			// The official client reconnects when the server has no nextPageToken.
 			pageToken = response.GetNextPageToken()
@@ -779,7 +809,11 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 					return errChatEnded
 				}
 			}
+			if offline {
+				return errChatEnded
+			}
 			if pageToken == "" {
+				emitConnection(protocol.ConnectionReconnecting, "Возобновляю поток YouTube live chat", attempt+1)
 				break
 			}
 		}
