@@ -426,8 +426,8 @@ func TestMessageLinePutsSmilesIntoHTML(t *testing.T) {
 		t.Fatalf("читаемый текст = %q, ожидалось без кода смайла", text)
 	}
 	if !strings.Contains(html, `<img class="smile"`) ||
-		!strings.Contains(html, "images.live.vkvideo.ru/smile/abc-123") {
-		t.Fatalf("в разметке нет картинки смайла: %q", html)
+		!strings.Contains(html, `src="/api/vkvideo-smile/abc-123/icon/size/large"`) {
+		t.Fatalf("в разметке нет локального адреса картинки смайла: %q", html)
 	}
 	if !strings.Contains(html, `referrerpolicy="no-referrer"`) {
 		t.Errorf("запрос за смайлом не должен передавать Referer: %q", html)
@@ -441,6 +441,37 @@ func TestMessageLinePutsSmilesIntoHTML(t *testing.T) {
 
 // Анимированный смайл приходит десятками одинаковых узлов — по одному на кадр.
 // Без отсечки одна реплика превращалась бы в двадцать одинаковых картинок.
+func TestLocalSmileURL(t *testing.T) {
+	tests := []struct {
+		name string
+		input string
+		want string
+	}{
+		{
+			name: "VK CDN with cache-busting query",
+			input: "https://images.live.vkvideo.ru/smile/571549fe-4a8c-42ae-b1c2-42a3381c1134/icon/size/large?change_time=1785417130",
+			want: "/api/vkvideo-smile/571549fe-4a8c-42ae-b1c2-42a3381c1134/icon/size/large?change_time=1785417130",
+		},
+		{
+			name: "unknown host stays untouched",
+			input: "https://example.org/smile/abc-123/icon/size/large",
+			want: "https://example.org/smile/abc-123/icon/size/large",
+		},
+		{
+			name: "unknown path stays untouched",
+			input: "https://images.live.vkvideo.ru/arbitrary/path",
+			want: "https://images.live.vkvideo.ru/arbitrary/path",
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := localSmileURL(test.input); got != test.want {
+				t.Errorf("localSmileURL(%q) = %q, want %q", test.input, got, test.want)
+			}
+		})
+	}
+}
+
 func TestMessageLineCollapsesRepeatedSmiles(t *testing.T) {
 	node := `{"type":"smile","id":"abc","name":"Cat",` +
 		`"largeUrl":"https://images.live.vkvideo.ru/smile/abc/icon/size/large"}`
