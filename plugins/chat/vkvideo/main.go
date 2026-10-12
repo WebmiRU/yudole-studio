@@ -1051,7 +1051,10 @@ func (l *vkLine) addSmile(node map[string]any) {
 	// вне видимой области остаётся пустым местом с его alt-текстом, и в ленте
 	// вместо смайла видно «legionaveGgigiggg» — то есть ровно то, от чего мы
 	// отступали. Реплик в ленте немного, лениться тут не к чему.
-	fmt.Fprintf(&l.html, `<img class="smile" src="%s" alt="%s">`,
+	// Не передаём адрес страницы чата в CDN запросе за смайлом. Помимо
+	// приватности это помогает CDN, который проверяет Referer, не ломать
+	// встраивание картинки в сторонний чат.
+	fmt.Fprintf(&l.html, `<img class="smile" src="%s" alt="%s" referrerpolicy="no-referrer">`,
 		htmlEscape(image), htmlEscape(asString(node["name"])))
 }
 
