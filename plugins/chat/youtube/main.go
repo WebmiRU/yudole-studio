@@ -43,6 +43,7 @@ var (
 	errSettingsChanged = errors.New("настройки YouTube изменились")
 	errSearchExhausted = errors.New("активный эфир не найден за час")
 	errChatEnded = errors.New("live chat завершён или недоступен")
+	errChannelNotFound = errors.New("YouTube не нашёл канал по указанному @handle/ID")
 	channelIDPattern = regexp.MustCompile("^UC[A-Za-z0-9_-]{20,}$")
 	httpClient = &http.Client{Timeout: requestTimeout}
 )
@@ -313,7 +314,8 @@ func apiRequest(ctx context.Context, apiKey, method string, params url.Values, r
 	request.Header.Set("Accept", "application/json")
 	response, err := httpClient.Do(request)
 	if err != nil {
-		return err
+		// http.Client errors often contain the full URL, including the API key.
+		return errors.New(strings.ReplaceAll(err.Error(), apiKey, "[redacted]"))
 	}
 	defer response.Body.Close()
 
@@ -369,7 +371,7 @@ func resolveChannel(ctx context.Context, apiKey, configured string) (channelID, 
 		return "", "", err
 	}
 	if len(response.Items) == 0 {
-		return "", "", errors.New("YouTube не нашёл канал по указанному @handle/ID")
+		return "", "", errChannelNotFound
 	}
 	return response.Items[0].ID, response.Items[0].Snippet.Title, nil
 }
@@ -502,8 +504,10 @@ func supervise(ctx context.Context) {
 			continue
 		}
 		if errors.Is(err, errChatEnded) {
-			emitConnection(protocol.ConnectionOffline, "Трансляция или live chat завершились; измените настройки, чтобы начать новый поиск", 0)
-			waitForChange(ctx)
+			emitConnection(protocol.ConnectionReconnecting, "Эфир или чат завершились; ищу следующий активный эфир", 0)
+			if !waitInterval(ctx, searchInterval) {
+				continue
+			}
 			continue
 		}
 		if err != nil {
