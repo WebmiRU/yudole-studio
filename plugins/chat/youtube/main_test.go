@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -374,5 +375,31 @@ func TestStreamRetryDelayDoesNotGrowAfterAValidResponse(t *testing.T) {
 	delay, nextAttempt = streamRetryDelay(2, false)
 	if delay != 20*time.Second || nextAttempt != 3 {
 		t.Errorf("third failed attempt = (%s, %d); want (20s, 3)", delay, nextAttempt)
+	}
+}
+
+
+func TestGRPCChatDefinitelyEndedRequiresExplicitSignal(t *testing.T) {
+	for _, message := range []string{
+		"chat ended",
+		"chat has ended",
+		"chat is disabled",
+		"broadcast has ended",
+		"stream is offline",
+		"live chat is no longer live",
+	} {
+		if !grpcChatDefinitelyEnded(errors.New(message)) {
+			t.Errorf("grpcChatDefinitelyEnded(%q) = false; want true", message)
+		}
+	}
+
+	for _, message := range []string{
+		"rpc error: code = FailedPrecondition desc = unsupported request",
+		"rpc error: code = NotFound desc = endpoint unavailable",
+		"connection reset by peer",
+	} {
+		if grpcChatDefinitelyEnded(errors.New(message)) {
+			t.Errorf("grpcChatDefinitelyEnded(%q) = true; want false", message)
+		}
 	}
 }
