@@ -352,12 +352,15 @@ func (w *watcher) searchLoop(ctx context.Context) ([]liveVideo, error) {
 		}
 
 		// Попытки официального поиска кончились — дальше только фид.
+		// Не возвращаем errNoLive здесь: runConfiguration воспримет его как
+		// завершённый поиск и уснёт до смены настроек. Вместо этого немедленно
+		// выполняем следующую итерацию уже через keylessFindLives.
 		if !w.keyless && attempt >= maxOfficialChecks {
 			logInfo(fmt.Sprintf(
 				"Официальный поиск израсходовал %d попыток, перехожу на фид канала — он без квоты",
 				maxOfficialChecks))
 			if w.useKeyless("исчерпан лимит официального поиска") {
-				return nil, errNoLive // вернёмся к ожидаению и найдём эфир фидом
+				continue
 			}
 		}
 
