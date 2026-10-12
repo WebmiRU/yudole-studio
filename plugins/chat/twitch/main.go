@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"math/rand/v2"
 	"net"
 	"net/textproto"
 	"os"
@@ -21,15 +22,18 @@ import (
 
 const ircAddress = "irc.chat.twitch.tv:6697"
 
+// readSilence — сколько молчания считаем обрывом. Twitch спрашивает PING
+// каждые пять минут, поэтому шесть минут тишины — это точно не «чат молчит».
+const readSilence = 6 * time.Minute
+
 var options = []protocol.Option{
 	{
 		Key:         "nick",
 		Type:        protocol.OptionText,
 		Label:       "Логин Twitch",
 		Section:     "Подключение",
-		Placeholder: "your_twitch_login",
-		Hint:        "Логин аккаунта Twitch, к которому выпущен токен",
-		Required:    true,
+		Placeholder: "justinfan1234",
+		Hint:        "Необязательно. Без него подключаемся анонимно, как гость",
 	},
 	{
 		Key:         "token",
@@ -37,8 +41,7 @@ var options = []protocol.Option{
 		Label:       "OAuth-токен",
 		Section:     "Подключение",
 		Placeholder: "oauth:...",
-		Hint:        "User access token со scope chat:read",
-		Required:    true,
+		Hint:        "Необязательно. Нужен для отправки сообщений, а не для чтения",
 	},
 	{
 		Key:         "channels",
@@ -236,15 +239,6 @@ func supervise(ctx context.Context) {
 		}
 
 		current := getSettings()
-		if current.Nick == "" || current.Token == "" {
-			emitConnection(protocol.ConnectionOffline, "Укажите логин и OAuth-токен Twitch", attempt)
-			select {
-			case <-ctx.Done():
-				return
-			case <-changed:
-				continue
-			}
-		}
 		if len(current.Channels) == 0 {
 			emitConnection(protocol.ConnectionOffline, "Добавьте хотя бы один канал Twitch", attempt)
 			select {
@@ -296,6 +290,16 @@ func supervise(ctx context.Context) {
 }
 
 var errSettingsChanged = errors.New("настройки Twitch изменились")
+
+// guestName — под каким логином мы входим, если человек ничего не вписал.
+// Имена вида justinfanNNNN сервер принимает без пароля и без токена, ровно так
+// же, как принимает браузер гостя: читать можно, писать нельзя.
+func guestName(configured string) string {
+	if configured != "" {
+		return configured
+	}
+	return fmt.Sprintf("justinfan%d", rand.IntN(9000)+1000)
+}
 
 func runSession(parent context.Context, current settings) error {
 	ctx, cancel := context.WithCancel(parent)
@@ -353,15 +357,34 @@ func runSession(parent context.Context, current settings) error {
 	if err := write("CAP", "REQ", "twitch.tv/tags twitch.tv/commands twitch.tv/membership"); err != nil {
 		return err
 	}
-	if err := write("PASS", "oauth:"+current.Token); err != nil {
-		return err
+	// Токен необязателен: чтение чата Twitch отдаёт и гостю, достаточно
+	// придумать логин. Пустой PASS — это ошибка авторизации, поэтому не
+	// отправляем его вовсе.
+	if current.Token != "" {
+		if err := write("PASS", "oauth:"+current.Token); err != nil {
+			return err
+		}
 	}
-	if err := write("NICK", current.Nick); err != nil {
+	// Имя, под которым нас на самом деле приняли: вписать его могли и не
+	// могли, но сравнивать JOIN и PART надо с тем, что сервер знает.
+	nick := guestName(current.Nick)
+	if err := write("NICK", nick); err != nil {
 		return err
 	}
 
 	joined := false
 	for {
+		// Молчание — тоже ответ. Если TCP не порвался, а пакеты перестали
+		// приходить, ReadLine() будет ждать вечно: соединение снаружи выглядит
+		// живым, плагин перестаёт читать чат и никто об этом не узнаёт. Так
+		// молча завис GoodGame, пока его поток событий не начали закрывать.
+		//
+		// Twitch шлёт PING каждые пять минут, поэтому шестиминутного молчания
+		// не бывает: значит, дошло до дедлайна — связь действительно пропала.
+		if err := conn.SetReadDeadline(time.Now().Add(readSilence)); err != nil {
+			return err
+		}
+
 		line, err := reader.ReadLine()
 		if err != nil {
 			if ctx.Err() != nil && parent.Err() == nil {
@@ -500,6 +523,9 @@ func runSession(parent context.Context, current settings) error {
 					Text: text,
 					Html: rendered,
 				},
+				// Подписка или рейд — это писал Twitch, а не человек. В ленте
+				// оно стоит среди реплик, как у самой Twitch, но помечено.
+				Notice: true,
 			})
 
 		case "CLEARMSG":
@@ -526,7 +552,7 @@ func runSession(parent context.Context, current settings) error {
 			}
 
 		case "JOIN":
-			if len(message.Params) > 0 && userLogin(message.Prefix) == current.Nick {
+			if len(message.Params) > 0 && userLogin(message.Prefix) == nick {
 				channel := channelName(message.Params[0])
 				send(protocol.KindChannelJoinSuccess, protocol.ChannelPayload{
 					Channel: channel,
@@ -535,7 +561,7 @@ func runSession(parent context.Context, current settings) error {
 			}
 
 		case "PART":
-			if len(message.Params) > 0 && userLogin(message.Prefix) == current.Nick {
+			if len(message.Params) > 0 && userLogin(message.Prefix) == nick {
 				channel := channelName(message.Params[0])
 				send(protocol.KindChannelUnjoinSuccess, protocol.ChannelPayload{
 					Channel: channel,

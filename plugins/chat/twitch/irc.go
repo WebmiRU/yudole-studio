@@ -210,8 +210,8 @@ func renderEmotes(text, emotesTag string) string {
 		url := "https://static-cdn.jtvnw.net/emoticons/v2/" + emote.ID + "/default/dark/3.0"
 		markup := "<img class=\"chat-emote\" alt=\"" + alt + "\" src=\"" + url + "\" loading=\"lazy\">"
 		replacements = append(replacements, replacement{
-			start: start,
-			end: end,
+			start:  start,
+			end:    end,
 			markup: markup,
 		})
 	}

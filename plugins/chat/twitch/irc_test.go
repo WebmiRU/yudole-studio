@@ -77,9 +77,54 @@ func TestRenderEmotesWithoutRanges(t *testing.T) {
 	}
 }
 
-func TestRenderEmotesRejectsInvalidIDs(t *testing.T) {
-	if got := renderEmotes("Kappa", "x:0-4"); got != "" {
-		t.Fatalf("invalid emote ID should be ignored, got %q", got)
+// Идентификатор смайла попадает прямо в адрес картинки, поэтому главное —
+// чтобы оттуда нельзя было выйти за пределы каталога.
+//
+// Тег режется по «/» на группы смайлов, так что «../evil» не отбрасывается
+// целиком: первая часть отбрасывается как группа без позиций, а «evil»
+// остаётся и проверку проходит. Само по себе это безобидно — в адрес попадает
+// только то, что проверку прошло, а она оставляет буквы, цифры, дефис и
+// подчёркивание. Проверяем именно это свойство, а не выдуманное «буквы нельзя».
+func TestEmoteURLNeverEscapesItsDirectory(t *testing.T) {
+	const prefix = "https://static-cdn.jtvnw.net/emoticons/v2/"
+
+	for _, tag := range []string{
+		"../evil:0-4",
+		"a/../../etc:0-4",
+		"25:0-4/../../../root:0-4",
+		"evil?x=1:0-4",
+		"evil#fragment:0-4",
+		"evil name:0-4",
+		"%2e%2e%2fevil:0-4",
+		"javascript:0-4",
+	} {
+		got := renderEmotes("Kappa", tag)
+		if got == "" {
+			// Отброшено целиком — тоже правильно.
+			continue
+		}
+
+		// Всё, что стоит между префиксом и «/default», — идентификатор смайла.
+		// Он обязан быть годным: иначе адрес собрали бы из мусора.
+		rest := got[strings.Index(got, prefix)+len(prefix):]
+		id := rest[:strings.Index(rest, "/default")]
+
+		if !validEmoteID(id) {
+			t.Errorf("в адрес попал негодный идентификатор %q (тег %q): %s", id, tag, got)
+		}
+		if strings.Contains(got, "..") {
+			t.Errorf("адрес вышел за каталог при теге %q: %s", tag, got)
+		}
+	}
+}
+
+// Обычный идентификатор — буквы, цифры, дефис и подчёркивание — проходит:
+// новые смайлы Twitch приходят именно такими.
+func TestRenderEmotesAcceptsNormalIDs(t *testing.T) {
+	for _, id := range []string{"25", "emotesv2_4c3b4ed516de493bbcd2df2f5d450f49", "Some-NaMe_9"} {
+		if got := renderEmotes("Kappa", id+":0-4"); !strings.Contains(got, "/"+id+"/") {
+			t.Errorf("идентификатор %q должен был пройти, получили %q", id, got)
+		}
 	}
 }
 
@@ -98,8 +143,8 @@ func TestValidLogin(t *testing.T) {
 
 func TestParseSettingsNormalizesChannels(t *testing.T) {
 	got, fields := parseSettings(map[string]any{
-		"nick": "@MyLogin",
-		"token": "oauth:abc123",
+		"nick":     "@MyLogin",
+		"token":    "oauth:abc123",
 		"channels": []any{"#OneChannel", map[string]any{"value": "SecondChannel", "label": "Second"}},
 	})
 	if len(fields) != 0 {
@@ -115,8 +160,8 @@ func TestParseSettingsNormalizesChannels(t *testing.T) {
 
 func TestParseSettingsRejectsChannelURLs(t *testing.T) {
 	_, fields := parseSettings(map[string]any{
-		"nick": "valid_login",
-		"token": "token",
+		"nick":     "valid_login",
+		"token":    "token",
 		"channels": []any{"https://www.twitch.tv/someone"},
 	})
 	if fields["channels"] == "" {

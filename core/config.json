@@ -22,8 +22,14 @@
         "options": {}
       },
       "twitch": {
-        "enabled": false,
-        "options": {}
+        "enabled": true,
+        "options": {
+          "channels": [
+            "forsen"
+          ],
+          "nick": "",
+          "token": ""
+        }
       },
       "youtube": {
         "enabled": false,
