@@ -909,14 +909,17 @@ func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, l
 				label = channel
 			}
 			err := readOneChat(childCtx, client, apiKey, label, video, func() {
+				// Сначала сообщаем, что соединение с YouTube установлено,
+				// и только затем — что конкретный канал подключён. Иначе в ленте
+				// получается, будто канал подключился раньше самой площадки.
+				onlineOnce.Do(func() {
+					emitConnection(protocol.ConnectionOnline, "Читаю live chat YouTube", 0)
+				})
 				joinedOnce.Do(func() {
 					send(protocol.KindChannelJoinSuccess, protocol.ChannelPayload{
 						Channel: label,
 						Name:    label,
 					})
-				})
-				onlineOnce.Do(func() {
-					emitConnection(protocol.ConnectionOnline, "Читаю live chat YouTube", 0)
 				})
 			})
 			results <- result{video: video, err: err}
