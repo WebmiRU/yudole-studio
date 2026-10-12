@@ -350,6 +350,12 @@ func (w *watcher) searchLoop(ctx context.Context) ([]liveVideo, error) {
 		if err != nil && !errors.Is(err, errNoLive) && ctx.Err() != nil {
 			return nil, errSettingsChanged
 		}
+		if err != nil && keyUnusable(err) {
+			if w.useKeyless(err.Error()) {
+				continue
+			}
+			return nil, err
+		}
 
 		// Попытки официального поиска кончились — дальше только фид.
 		// Не возвращаем errNoLive здесь: runConfiguration воспримет его как
