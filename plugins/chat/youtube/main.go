@@ -578,9 +578,13 @@ func runConfiguration(ctx context.Context, config settings) error {
 	}
 	logInfo(fmt.Sprintf("Канал YouTube разрешён: %s (%s)", channelTitle, channelID))
 
+	searchStarted := time.Now()
 	for attempt := 1; attempt <= maxSearchAttempts; attempt++ {
 		if ctx.Err() != nil {
 			return errSettingsChanged
+		}
+		if attempt > 1 && time.Since(searchStarted) >= time.Hour {
+			break
 		}
 
 		lives, err := findActiveLives(ctx, config.APIKey, channelID)
@@ -604,14 +608,22 @@ func runConfiguration(ctx context.Context, config settings) error {
 			logInfo(fmt.Sprintf("Активный эфир не найден: проверка %d/%d", attempt, maxSearchAttempts))
 		}
 
-		if attempt == maxSearchAttempts {
-			emitConnection(protocol.ConnectionOffline, "Эфир не найден за 60 проверок (около часа). Поиск остановлен до изменения настроек.", attempt)
+		if attempt == maxSearchAttempts || time.Since(searchStarted) >= time.Hour {
+			emitConnection(protocol.ConnectionOffline, "Эфир не найден за час поиска. Поиск остановлен до изменения настроек.", attempt)
 			return errSearchExhausted
 		}
-		if !waitInterval(ctx, searchInterval) {
+		// Start subsequent searches on minute boundaries, rather than one full
+		// minute after each HTTP response, so the search window stays near an hour.
+		nextSearchAt := searchStarted.Add(time.Duration(attempt) * searchInterval)
+		delay := time.Until(nextSearchAt)
+		if delay < 0 {
+			delay = 0
+		}
+		if !waitInterval(ctx, delay) {
 			return errSettingsChanged
 		}
 	}
+	emitConnection(protocol.ConnectionOffline, "Эфир не найден за час поиска. Поиск остановлен до изменения настроек.", maxSearchAttempts)
 	return errSearchExhausted
 }
 
