@@ -497,6 +497,12 @@ func supervise(ctx context.Context) {
 		if ctx.Err() != nil {
 			return
 		}
+		// The configuration update may race with a completed search/stream
+		// and be consumed by the cancellation watcher. Compare the snapshot
+		// as well, so we never sleep waiting for an already-consumed signal.
+		if getSettings() != config {
+			continue
+		}
 		if errors.Is(err, errSettingsChanged) {
 			continue
 		}
