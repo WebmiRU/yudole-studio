@@ -741,7 +741,11 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			if response.GetOfflineAt() != "" {
 				return errChatEnded
 			}
-			pageToken = response.GetNextPageToken()
+			// Keep the latest non-empty token for recovery after a network break.
+			// An empty token is not a reason to close the live stream.
+			if next := response.GetNextPageToken(); next != "" {
+				pageToken = next
+			}
 			for _, item := range response.GetItems() {
 				if item == nil || !remember(item.GetId()) {
 					continue
@@ -753,11 +757,6 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 					item.GetSnippet().GetType() == ytproto.LiveChatMessageSnippet_TypeWrapper_CHAT_ENDED_EVENT {
 					return errChatEnded
 				}
-			}
-			// The streaming API may end a response stream at a page boundary.
-			// Keep the last non-empty token to resume without replaying old messages.
-			if pageToken == "" {
-				break
 			}
 		}
 
