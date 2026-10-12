@@ -630,6 +630,8 @@ func keylessReadOne(ctx context.Context, channelTitle string, video liveVideo, o
 	// ни о чём не говорит, но бесконечное молчание стоит перепроверить: вдруг
 	// эфир всё-таки закончился, а плагин об этом не узнал.
 	lastMessage := time.Now()
+	consecutiveFailures := 0
+	reportedDegraded := false
 
 	for {
 		if ctx.Err() != nil {
@@ -640,7 +642,48 @@ func keylessReadOne(ctx context.Context, channelTitle string, video liveVideo, o
 			if ctx.Err() != nil {
 				return errSettingsChanged
 			}
-			return err
+
+			// Единичный сбой опроса не должен завершать всю сессию: тогда
+			// supervisor заново искал эфир, а каждый повтор печатал в чате
+			// «Подключились к YouTube». Остаёмся на месте и повторяем тот же
+			// continuation; иначе сообщения между двумя сессиями теряются.
+			consecutiveFailures++
+			if consecutiveFailures == 1 {
+				logInfo("Временная ошибка чтения чата YouTube; повторяю запрос")
+			}
+			if consecutiveFailures >= 2 && !reportedDegraded {
+				emitConnection(protocol.ConnectionReconnecting,
+					"Опрос чата YouTube временно не отвечает", consecutiveFailures)
+				reportedDegraded = true
+			}
+
+			// Если токен протух или формат ответа изменился, периодически
+			// обновляем страницу трансляции и continuation. Ошибка обновления
+			// не завершает чтение: следующая попытка повторится с backoff.
+			if consecutiveFailures == 3 || consecutiveFailures%5 == 0 {
+				if fresh, refreshErr := keylessWatchPage(ctx, video.ID); refreshErr == nil {
+					if fresh.token == "" && !fresh.isLive {
+						return errNoLive
+					}
+					if fresh.token != "" && fresh.apiKey != "" {
+						page = fresh
+						token = fresh.token
+					}
+				}
+			}
+
+			if !waitInterval(ctx, keylessRetryDelay(consecutiveFailures)) {
+				return errSettingsChanged
+			}
+			continue
+		}
+		if consecutiveFailures > 0 {
+			logInfo("Чтение чата YouTube восстановлено")
+			if reportedDegraded {
+				emitConnection(protocol.ConnectionOnline, "Читаю чат YouTube без ключа", 0)
+			}
+			consecutiveFailures = 0
+			reportedDegraded = false
 		}
 
 		for _, msg := range batch.messages {
@@ -680,6 +723,26 @@ func keylessReadOne(ctx context.Context, channelTitle string, video liveVideo, o
 		if !waitInterval(ctx, time.Duration(batch.waitMS)*time.Millisecond) {
 			return errSettingsChanged
 		}
+	}
+}
+
+// keylessRetryDelay bounds retries for the public chat endpoint. Keep these
+// delays short enough not to lose many messages but long enough to avoid hammering
+// YouTube when its chat endpoint temporarily rejects requests.
+func keylessRetryDelay(failures int) time.Duration {
+	switch {
+	case failures <= 1:
+		return time.Second
+	case failures == 2:
+		return 2 * time.Second
+	case failures == 3:
+		return 5 * time.Second
+	case failures == 4:
+		return 10 * time.Second
+	case failures < 8:
+		return 15 * time.Second
+	default:
+		return 30 * time.Second
 	}
 }
 
