@@ -664,7 +664,6 @@ func watchLiveChats(ctx context.Context, apiKey, channel string, lives []liveVid
 	}
 	results := make(chan result, len(lives))
 	var wg sync.WaitGroup
-	var onlineOnce sync.Once
 
 	for _, video := range lives {
 		video := video
@@ -672,9 +671,7 @@ func watchLiveChats(ctx context.Context, apiKey, channel string, lives []liveVid
 		go func() {
 			defer wg.Done()
 			err := readOneChat(childCtx, client, apiKey, channel, video, func() {
-				onlineOnce.Do(func() {
-					emitConnection(protocol.ConnectionOnline, "Читаю live chat YouTube", 0)
-				})
+				emitConnection(protocol.ConnectionOnline, "Читаю live chat YouTube", 0)
 			})
 			results <- result{video: video, err: err}
 		}()
@@ -759,6 +756,7 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 				return fmt.Errorf("YouTube live chat %q: %w", video.Title, err)
 			}
 			logInfo("Поток чата прерван, переподключаюсь: " + err.Error())
+			emitConnection(protocol.ConnectionReconnecting, "Восстанавливаю поток YouTube live chat", attempt+1)
 			if !waitInterval(ctx, retryDelay(attempt)) {
 				return errSettingsChanged
 			}
@@ -766,8 +764,8 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			continue
 		}
 
-		onConnected()
 		received := false
+		connectedReported := false
 		for {
 			response, recvErr := stream.Recv()
 			if recvErr != nil {
@@ -784,12 +782,15 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 					return fmt.Errorf("YouTube live chat %q: %w", video.Title, recvErr)
 				}
 				logInfo("Соединение с чатом потеряно, восстанавливаю поток: " + recvErr.Error())
+				emitConnection(protocol.ConnectionReconnecting, "Восстанавливаю поток YouTube live chat", attempt+1)
 				break
 			}
 			received = true
-			if response.GetOfflineAt() != "" {
-				return errChatEnded
+			if !connectedReported {
+				onConnected()
+				connectedReported = true
 			}
+			offline := response.GetOfflineAt() != ""
 			// Save the continuation token so the stream can resume after a break.
 			// The official client reconnects when the server has no nextPageToken.
 			pageToken = response.GetNextPageToken()
@@ -805,7 +806,11 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 					return errChatEnded
 				}
 			}
+			if offline {
+				return errChatEnded
+			}
 			if pageToken == "" {
+				emitConnection(protocol.ConnectionReconnecting, "Возобновляю поток YouTube live chat", attempt+1)
 				break
 			}
 		}
