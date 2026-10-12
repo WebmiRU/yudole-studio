@@ -158,7 +158,21 @@
     padding: 0
     border: 0
     background: transparent
-    perspective: 1400px
+    transform-origin: center center
+    transform-style: preserve-3d
+    // Perspective follows X-COM's angled HUD, while the slight negative roll
+    // is kept below one degree so adjacent chat panels never collide.
+    &[data-panel-view="1"]
+      transform: perspective(1500px) rotateY(-10deg) rotateX(.45deg) rotateZ(-.48deg)
+
+    &[data-panel-view="2"]
+      transform: perspective(1500px) rotateY(-12deg) rotateX(.3deg) rotateZ(-.34deg)
+
+    &[data-panel-view="3"]
+      transform: perspective(1500px) rotateY(-9deg) rotateX(.55deg) rotateZ(-.62deg)
+
+    &[data-panel-view="4"]
+      transform: perspective(1500px) rotateY(-11deg) rotateX(.25deg) rotateZ(-.4deg)
 
     &:last-child
       margin-bottom: 0
@@ -178,8 +192,6 @@
       inset: 0
       z-index: 0
       pointer-events: none
-      transform: perspective(1400px) rotateY(-.12deg) rotateX(.05deg)
-      transform-origin: center
       --frame-light: #64e3ee
       --frame-dim: rgba(76, 190, 202, .64)
 
@@ -188,7 +200,7 @@
         content: ""
         position: absolute
         pointer-events: none
-        clip-path: polygon(0 15px, 17px 15px, 17px 3px, 22px 3px, 22px 0, calc(100% - 62px) 0, calc(100% - 48px) 14px, calc(100% - 18px) 14px, 100% 32px, 100% calc(100% - 18px), calc(100% - 21px) calc(100% - 18px), calc(100% - 21px) 100%, 43px 100%, 27px calc(100% - 15px), 14px calc(100% - 15px), 14px calc(100% - 1px), 0 calc(100% - 1px))
+        clip-path: polygon(0 22px, 19px 22px, 19px 8px, 31px 8px, 31px 0, calc(100% - 74px) 0, calc(100% - 60px) 13px, calc(100% - 36px) 13px, calc(100% - 25px) 24px, 100% 24px, 100% calc(100% - 24px), calc(100% - 21px) calc(100% - 24px), calc(100% - 21px) calc(100% - 5px), calc(100% - 46px) calc(100% - 5px), calc(100% - 52px) 100%, 51px 100%, 31px calc(100% - 17px), 16px calc(100% - 17px), 16px calc(100% - 1px), 0 calc(100% - 1px))
 
       // Layer one is only the illuminated contour, with a small depth shadow.
       &::before
@@ -202,7 +214,7 @@
       &::after
         inset: 1px
         z-index: 1
-        clip-path: polygon(0 14px, 16px 14px, 16px 3px, 21px 3px, 21px 0, calc(100% - 62px) 0, calc(100% - 48px) 13px, calc(100% - 18px) 13px, 100% 31px, 100% calc(100% - 18px), calc(100% - 20px) calc(100% - 18px), calc(100% - 20px) 100%, 43px 100%, 27px calc(100% - 15px), 14px calc(100% - 15px), 14px calc(100% - 1px), 0 calc(100% - 1px))
+        clip-path: polygon(0 21px, 18px 21px, 18px 7px, 30px 7px, 30px 0, calc(100% - 74px) 0, calc(100% - 60px) 12px, calc(100% - 36px) 12px, calc(100% - 25px) 23px, 100% 23px, 100% calc(100% - 24px), calc(100% - 22px) calc(100% - 24px), calc(100% - 22px) calc(100% - 5px), calc(100% - 46px) calc(100% - 5px), calc(100% - 52px) 100%, 51px 100%, 31px calc(100% - 16px), 16px calc(100% - 16px), 16px calc(100% - 1px), 0 calc(100% - 1px))
         background: linear-gradient(180deg, rgba(10, 27, 33, .97) 0%, rgba(5, 15, 20, .98) 62%, rgba(3, 10, 14, .98) 100%)
 
       .msg__frame-rail
@@ -246,10 +258,10 @@
       .msg__frame-light
         position: absolute
         z-index: 2
-        top: 47px
+        top: clamp(29px, 38%, 47px)
         right: 5px
         width: 1px
-        height: 25px
+        height: 23px
         background: linear-gradient(180deg, transparent, rgba(128, 240, 248, .8), transparent)
         box-shadow: 0 0 5px rgba(83, 227, 243, .25)
 
