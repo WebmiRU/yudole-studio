@@ -604,7 +604,8 @@ select.input--invalid
 // Отрицательные поля выносят её в самый низ, вплотную к краю: внутри отступов
 // она читалась бы как украшение под текстом, а не как шкала времени.
 .toast__life
-  height: 4px
+  // Два пикселя — как полоска под ником в реплике: та же высота, тот же цвет.
+  height: 2px
   margin: 0 -16px -14px
   background: tokens.$rule
   transform-origin: left center
