@@ -1043,7 +1043,6 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 		}
 
 		received := false
-		streamHadItems := false
 		for {
 			response, recvErr := stream.Recv()
 			if recvErr != nil {
@@ -1060,7 +1059,11 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 					return fmt.Errorf("YouTube live chat %q: %w", video.Title, recvErr)
 				}
 				logInfo("Соединение с чатом потеряно, восстанавливаю поток: " + recvErr.Error())
-				restarts++
+				if !received {
+					restarts++
+				} else {
+					restarts = 0
+				}
 				if brokeTooOften() {
 					return fmt.Errorf("%w: обрыв %v", errOfficialReadBroken, recvErr)
 				}
@@ -1076,15 +1079,12 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 				break
 			}
 			received = true
+			gotAny = true
 			// Успешный ответ означает, что канал до сервера живой: сбрасываем
-			// exponential backoff. Он нужен для серии ошибок, но не должен расти
-			// от каждого нормального завершения server-streaming RPC.
+			// exponential backoff и счётчик неудачных открытий. В тихом чате
+			// ответ может быть пустым — это не повод считать его ошибкой.
 			attempt = 0
-			if len(response.GetItems()) > 0 {
-				gotAny = true
-				streamHadItems = true
-				restarts = 0
-			}
+			restarts = 0
 			if !connectedReported {
 				onConnected()
 				connectedReported = true
