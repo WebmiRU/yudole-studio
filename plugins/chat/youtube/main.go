@@ -527,6 +527,9 @@ type liveVideo struct {
 	// надо на него, а не на id видео: человек в ленте видит названия каналов, и
 	// одиннадцать символов вместо названия там неуместны.
 	Channel string
+	// Page кеширует уже загруженную страницу в резервном режиме. Она нужна
+	// для чтения чата, поэтому повторный GET даёт только задержку старта.
+	Page *watchPage
 }
 
 func findActiveLives(ctx context.Context, apiKey, channelID string) ([]liveVideo, error) {
