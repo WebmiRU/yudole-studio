@@ -347,7 +347,6 @@ func TestRetryDelayIsBounded(t *testing.T) {
 	}
 }
 
-
 func TestUpdateContinuationTokenPreservesCursorWhenMissing(t *testing.T) {
 	const cursor = "cursor-123"
 
@@ -381,7 +380,6 @@ func TestStreamRetryDelayDoesNotGrowAfterAValidResponse(t *testing.T) {
 	}
 }
 
-
 func TestGRPCChatDefinitelyEndedRequiresExplicitSignal(t *testing.T) {
 	for _, message := range []string{
 		"chat ended",
@@ -406,7 +404,6 @@ func TestGRPCChatDefinitelyEndedRequiresExplicitSignal(t *testing.T) {
 		}
 	}
 }
-
 
 func TestPermanentGRPCErrorIncludesQuotaAndUnsupported(t *testing.T) {
 	for _, code := range []codes.Code{

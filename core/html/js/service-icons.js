@@ -1,49 +1,99 @@
 // Значки сервисов.
 //
+// Один набор на обе страницы: список настроек и живой чат. Раньше рисунки были
+// разведены по файлам, и один и тот же YouTube в двух местах страницы выглядел
+// по-разному — крупным треугольником в настройках и мелкой плашкой в ленте.
+//
 // Рисуем сами, а не берём чужие логотипы: логотип — чужой товарный знак, и
 // встраивать его на чужую страницу без разрешения нельзя. Это узнаваемые по
-// цвету и форме значки, а не копии.
-//
-// Значок ставится слева от ника в ленте: в одной ленте сидят сразу несколько
-// сервисов, и без него не видно, кто именно написал.
+// цвету и форме знаки, а не копии.
 
-const SIZES = {
-    // Каждому значку свой цвет и своя форма — чтобы различались и на глаз, и
-    // для того, кто цвета не различает.
-    twitch: `
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
-            <rect x="1" y="2" width="22" height="20" rx="5" fill="#9146FF"/>
-            <path d="M6 6h13v9l-3.6 3.6h-3L10 16H7.4V13H6V6zm2.2 2.2v5.2h2v1.6l1.5 1.5h1.6l1.7-1.7V8.2H8.2z"
-                  fill="#fff"/>
-        </svg>`,
-    youtube: `
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
-            <rect x="1" y="4" width="22" height="16" rx="5" fill="#FF0000"/>
-            <path d="M10 8.6v6.8l5.6-3.4L10 8.6z" fill="#fff"/>
-        </svg>`,
-    vkvideo: `
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
-            <rect x="1" y="2" width="22" height="20" rx="6" fill="#0077FF"/>
-            <path d="M6.6 7.2h2.9c1.5 0 2.3.8 2.3 2.1 0 .9-.4 1.5-1.2 1.8.9.2 1.5.9 1.5 1.9 0 1.4-.9 2.2-2.5 2.2H6.6V7.2zm2.6 3.2c.6 0 .9-.3.9-.8s-.3-.7-.9-.7H8.7v1.5h.5zm.1 3.2c.7 0 1-.3 1-.9 0-.5-.4-.8-1-.8H8.7v1.7h.6z"
-                  fill="#fff"/>
-            <circle cx="17.6" cy="12" r="2.1" fill="#fff"/>
-        </svg>`,
-    goodgame: `
-        <svg viewBox="0 0 24 24" width="16" height="16" aria-hidden="true" focusable="false">
-            <rect x="1" y="1" width="22" height="22" rx="6" fill="#F5A623"/>
-            <rect x="5" y="9" width="4" height="6" rx="1" fill="#fff"/>
-            <rect x="9.5" y="6" width="4" height="9" rx="1" fill="#fff"/>
-            <rect x="14" y="10" width="5" height="5" rx="1" fill="#fff"/>
-        </svg>`,
-};
+const NS = 'http://www.w3.org/2000/svg';
 
-// Значок сервиса по его id. Неизвестный сервис остаётся без значка: лучше пусто,
-// чем выдуманная картинка, которую человек прочитает как «отсюда писали».
-export function serviceIcon(pluginId) {
-    return SIZES[pluginId] ?? null;
+function node(tag, attrs = {}, children = []) {
+    const svg = document.createElementNS(NS, tag);
+    for (const [name, value] of Object.entries(attrs)) {
+        if (value === undefined || value === null) {
+            continue;
+        }
+        svg.setAttribute(name, String(value));
+    }
+    svg.append(...children);
+    return svg;
 }
 
-// Есть ли у сервиса свой значок: нужно, чтобы не плодить пустые элементы.
-export function hasServiceIcon(pluginId) {
-    return Boolean(SIZES[pluginId]);
+// Каждому сервису — свой цвет и своя форма, чтобы значки различались и на глаз,
+// и для того, кто цвета не различает.
+const LOGOS = {
+    youtube: (size) => [
+        node('rect', {x: 2.5, y: 6.5, width: 27, height: 19, rx: 5.5, fill: '#FF0033'}),
+        node('path', {d: 'M13 11.2 21.2 16 13 20.8Z', fill: '#FFFFFF'}),
+    ],
+    twitch: () => [
+        node('path', {d: 'M5 3H29V20L22 27H17L12 31V27H5Z', fill: '#9146FF'}),
+        node('path', {d: 'M9 7H25V19L20 24H16L12 27V24H9Z', fill: '#FFFFFF'}),
+        node('rect', {x: 13, y: 10, width: 2.5, height: 6, fill: '#9146FF'}),
+        node('rect', {x: 19, y: 10, width: 2.5, height: 6, fill: '#9146FF'}),
+    ],
+    goodgame: () => [
+        node('rect', {x: 1.5, y: 1.5, width: 29, height: 29, rx: 8, fill: '#3478D4'}),
+        node('text', {
+            x: 16, y: 22.5, 'text-anchor': 'middle',
+            'font-family': 'Arial, Helvetica, sans-serif',
+            'font-size': 17, 'font-weight': 800, 'letter-spacing': -2.2,
+            fill: '#FFFFFF',
+        }, ['GG']),
+    ],
+    vkvideo: () => [
+        node('rect', {x: 1, y: 1, width: 30, height: 30, rx: 8, fill: '#0077FF'}),
+        node('rect', {x: 7, y: 1, width: 24, height: 30, rx: 9, fill: '#FF2448'}),
+        node('text', {
+            x: 19, y: 19.2, 'text-anchor': 'middle',
+            'font-family': 'Arial, Helvetica, sans-serif',
+            'font-size': 7.8, 'font-weight': 800, 'letter-spacing': 0.15,
+            fill: '#FFFFFF',
+        }, ['LIVE']),
+    ],
+};
+
+// serviceKey угадывает сервис по названию или id.
+//
+// Сверяемся и по тому, и по другому: в настройках у плагина есть заголовок
+// («VK Видео Live»), а в ленте приходит только id («vkvideo»), и без обоих
+// признаков один и тот же плагин угадывался бы на одной странице и не
+// угадывался на другой.
+export function serviceKey(plugin) {
+    const parts = typeof plugin === 'string'
+        ? [plugin]
+        : [plugin?.id, plugin?.title];
+    const identity = parts
+        .filter(Boolean)
+        .join(' ')
+        .toLocaleLowerCase('ru')
+        .replace(/[._-]+/g, ' ');
+
+    if (identity.includes('youtube')) return 'youtube';
+    if (identity.includes('twitch')) return 'twitch';
+    if (/good\s*game/.test(identity)) return 'goodgame';
+    if (/(vk\s*video|вк\s*видео)/.test(identity)) return 'vkvideo';
+    return null;
+}
+
+// serviceLogo is the service's mark at the given size. Возвращает null, если
+// сервис не знаком: подставлять выдуманную картинку нельзя — человек прочтёт её
+// как «отсюда писали».
+export function serviceLogo(plugin, size = 28) {
+    const key = serviceKey(plugin);
+    if (!key) {
+        return null;
+    }
+
+    return node('svg', {
+        class: `service-logo service-logo--${key}`,
+        viewBox: '0 0 32 32',
+        width: size,
+        height: size,
+        'aria-hidden': 'true',
+        focusable: 'false',
+    }, LOGOS[key](size));
 }

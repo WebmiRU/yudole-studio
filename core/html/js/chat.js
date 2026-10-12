@@ -5,7 +5,7 @@
 // знает, какие плагины вообще есть — что пришло, то и показали.
 
 import '../sass/chat.sass';
-import {serviceIcon} from './service-icons.js';
+import {serviceLogo} from './service-icons.js';
 
 const API_CHAT = '/api/chat';
 
@@ -182,17 +182,13 @@ function line(entry) {
 // YouTube, а разные ники читаются одинаково.
 function authorHead(entry) {
     const name = entry.user ?? '—';
-    const mark = serviceIcon(entry.plugin);
-    if (!mark) {
+    const logo = serviceLogo(entry.plugin, 16);
+    if (!logo) {
         return el('span', {class: 'msg__author'}, [name]);
     }
 
-    // Разметку ставим целиком: значок свой, постоянный, из данных чата в него
-    // ничего не попадает.
-    const icon = document.createElement('span');
-    icon.className = 'msg__service';
-    icon.title = serviceTitle(entry);
-    icon.innerHTML = mark;
+    const icon = el('span', {class: 'msg__service', title: serviceTitle(entry)});
+    icon.append(logo);
 
     return el('span', {class: 'msg__author'}, [icon, name]);
 }
@@ -260,14 +256,12 @@ function author(entry) {
     // Значок тут — тем же, что и у реплик. В ленте вперемешку идут сообщения
     // Twitch, YouTube и VK Видео, и служебная строка «YouTube: в сети» должна
     // выглядеть так же, как и реплика оттуда же.
-    const mark = serviceIcon(entry.plugin);
-    if (!mark) {
+    const logo = serviceLogo(entry.plugin, 16);
+    if (!logo) {
         return el('span', {class: 'msg__author msg__author--plugin'}, [`[${name}]`]);
     }
-    const icon = document.createElement('span');
-    icon.className = 'msg__service';
-    icon.title = name;
-    icon.innerHTML = mark;
+    const icon = el('span', {class: 'msg__service', title: name});
+    icon.append(logo);
     return el('span', {class: 'msg__author msg__author--plugin'}, [icon, `[${name}]`]);
 }
 

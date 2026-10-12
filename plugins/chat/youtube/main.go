@@ -31,12 +31,12 @@ import (
 )
 
 const (
-	grpcTarget     = "dns:///youtube.googleapis.com:443"
-	searchInterval = time.Minute
-	requestTimeout = 20 * time.Second
-	maxChatBackoff        = time.Minute
-	grpcDialTimeout       = 5 * time.Second
-	streamRestartDelay    = 1 * time.Second
+	grpcTarget         = "dns:///youtube.googleapis.com:443"
+	searchInterval     = time.Minute
+	requestTimeout     = 20 * time.Second
+	maxChatBackoff     = time.Minute
+	grpcDialTimeout    = 5 * time.Second
+	streamRestartDelay = 1 * time.Second
 )
 
 var (
@@ -131,7 +131,7 @@ var (
 
 	// Не допускаем дублирующихся событий «Подключились к YouTube», если
 	// несколько потоков одновременно подтверждают одно и то же состояние.
-	connectionStateMu sync.Mutex
+	connectionStateMu   sync.Mutex
 	lastConnectionState string
 )
 

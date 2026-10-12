@@ -152,7 +152,6 @@ func TestQuotaExhaustedText(t *testing.T) {
 	}
 }
 
-
 func TestSelectChatContinuationPrefersInvalidationRegardlessOfOrder(t *testing.T) {
 	live := map[string]any{
 		"continuations": []any{
