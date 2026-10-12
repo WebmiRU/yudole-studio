@@ -1025,12 +1025,8 @@ func newVKLine() *vkLine {
 // addSmile кладёт смайл в разметку картинкой.
 //
 // В читаемый текст код смайла не идёт: «legionaveGgigiggg» — это не то, что
-// человек написал, а внутреннее имя картинки. В ленте такое читать невозможно.
-// Анимированные приходят десятками одинаковых узлов, по одному на кадр, и без
-// отсечки одна реплика превращалась в двадцать одинаковых картинок подряд.
-// localSmileURL serves known VK CDN smiles through the studio origin.
-// The browser otherwise requests images.live.vkvideo.ru directly, where image
-// hotlinking/security policies can behave differently from opening the URL.
+// человек написал, а внутреннее имя картинки. Каждую картинку выводим отдельно:
+// одинаковые смайлы могут идти подряд, и исходный порядок нужно сохранить.
 func (l *vkLine) addSmile(node map[string]any) {
 	image := firstNonEmpty(
 		asString(node["largeUrl"]),
