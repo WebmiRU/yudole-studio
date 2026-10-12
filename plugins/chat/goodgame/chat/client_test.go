@@ -472,6 +472,62 @@ func TestUnjoinAcceptsReplyWithoutChannel(t *testing.T) {
 	}
 }
 
+// Когда соединение рвётся, поток событий обязан закрыться. Иначе тот, кто
+// читает его в select, никогда не узнает об обрыве: сидит на мёртвом сокете
+// и ждёт реплик, которых не будет уже никогда.
+func TestEventsCloseWhenConnectionDies(t *testing.T) {
+	fake := newFakeChat(t)
+	client := openFake(t, fake)
+
+	// Рвём соединение так, как это делает сервер, — изнутри.
+	_ = client.Close()
+
+	select {
+	case _, ok := <-client.Events():
+		if ok {
+			t.Fatal("после обрыва в потоке ещё лежит сообщение")
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("поток событий не закрылся после обрыва соединения")
+	}
+}
+
+// Обрыв со стороны сервера — то же самое, что и наш Close, но поймать его
+// обязан тот, кто ждёт событий, а не вызывающий Close.
+func TestEventsCloseWhenServerDropsUs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := websocket.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+
+		line, _ := mustMessage(t, TypeWelcome, Welcome{ProtocolVersion: 2}).Encode()
+		conn.Write(r.Context(), websocket.MessageText, line)
+
+		// Обрываем сразу после приветствия, как это делает сервер по таймауту.
+		<-time.After(100 * time.Millisecond)
+	}))
+	defer server.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	client, err := Open(ctx, "ws"+strings.TrimPrefix(server.URL, "http"))
+	if err != nil {
+		t.Fatalf("Open: %v", err)
+	}
+
+	select {
+	case _, ok := <-client.Events():
+		if ok {
+			t.Fatal("после обрыва в потоке ещё лежит сообщение")
+		}
+	case <-time.After(3 * time.Second):
+		t.Fatal("сервер оборвал соединение, а поток событий не закрылся")
+	}
+}
+
 // До приветствия не отправляем в сокет ничего: сервер ещё не сказал, что он
 // готов и какой версии протокол, а мы бы уже лезли со своими командами.
 //

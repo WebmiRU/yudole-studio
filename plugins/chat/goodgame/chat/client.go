@@ -129,9 +129,14 @@ func (c *Client) Events() <-chan *Message { return c.events }
 // client: answers to our requests are picked out here too, otherwise a reply
 // would sit in the queue until somebody happened to read it.
 func (c *Client) read(ctx context.Context, stop context.CancelFunc) {
+	// Поток закрывает поток: читающий — единственный, кто кладёт в events, и
+	// он же последний из выходящих. Закрывать events надо именно здесь, а не в
+	// close(): того, кто ждёт обрыва, разбудит только закрытый канал, а
+	// close() его не трогает.
 	defer func() {
 		stop()
 		c.close()
+		close(c.events)
 	}()
 
 	for {
