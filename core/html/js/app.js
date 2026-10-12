@@ -391,8 +391,78 @@ function renderClients() {
 }
 
 function markOf(plugin) {
-    const title = plugin.title || plugin.id;
+    const title = plugin.title || plugin.id || '?';
+    const identity = `${plugin.id ?? ''} ${plugin.title ?? ''}`
+        .toLocaleLowerCase('ru')
+        .replace(/[._-]+/g, ' ');
+
+    // Узнаваемые знаки рисуем прямо в SVG: без растровых картинок и зависимости
+    // от внешнего сайта. Для ещё не известных плагинов остаются инициалы.
+    if (identity.includes('youtube')) {
+        return serviceIcon('youtube', [
+            svgNode('rect', {x: 2.5, y: 6.5, width: 27, height: 19, rx: 5.5, fill: '#FF0033'}),
+            svgNode('path', {d: 'M13 11.2 21.2 16 13 20.8Z', fill: '#FFFFFF'}),
+        ]);
+    }
+
+    if (identity.includes('twitch')) {
+        return serviceIcon('twitch', [
+            svgNode('path', {d: 'M5 3H29V20L22 27H17L12 31V27H5Z', fill: '#9146FF'}),
+            svgNode('path', {d: 'M9 7H25V19L20 24H16L12 27V24H9Z', fill: '#FFFFFF'}),
+            svgNode('rect', {x: 13, y: 10, width: 2.5, height: 6, fill: '#9146FF'}),
+            svgNode('rect', {x: 19, y: 10, width: 2.5, height: 6, fill: '#9146FF'}),
+        ]);
+    }
+
+    if (/good\s*game/.test(identity)) {
+        return serviceIcon('goodgame', [
+            svgNode('rect', {x: 1.5, y: 1.5, width: 29, height: 29, rx: 8, fill: '#3478D4'}),
+            svgNode('text', {
+                x: 16, y: 22.5, 'text-anchor': 'middle',
+                'font-family': 'Arial, Helvetica, sans-serif',
+                'font-size': 17, 'font-weight': 800, 'letter-spacing': -2.2,
+                fill: '#FFFFFF',
+            }, ['GG']),
+        ]);
+    }
+
+    if (/(vk\s*video|вк\s*видео|vkvideo)/.test(identity)) {
+        return serviceIcon('vkvideo-live', [
+            svgNode('rect', {x: 1, y: 1, width: 30, height: 30, rx: 8, fill: '#0077FF'}),
+            svgNode('rect', {x: 7, y: 1, width: 24, height: 30, rx: 9, fill: '#FF2448'}),
+            svgNode('text', {
+                x: 19, y: 19.2, 'text-anchor': 'middle',
+                'font-family': 'Arial, Helvetica, sans-serif',
+                'font-size': 7.8, 'font-weight': 800, 'letter-spacing': 0.15,
+                fill: '#FFFFFF',
+            }, ['LIVE']),
+        ]);
+    }
+
     return title.slice(0, 2).toUpperCase();
+}
+
+function serviceIcon(name, children) {
+    return svgNode('svg', {
+        class: `service-logo service-logo--${name}`,
+        viewBox: '0 0 32 32',
+        width: 28,
+        height: 28,
+        'aria-hidden': 'true',
+        focusable: 'false',
+    }, children);
+}
+
+function svgNode(tag, attrs = {}, children = []) {
+    const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [name, value] of Object.entries(attrs)) {
+        if (value === undefined || value === null) {
+            continue;
+        }
+        node.setAttribute(name, String(value));
+    }
+    node.append(...children);
+    return node;
 }
 
 function enabledToggle(plugin) {
