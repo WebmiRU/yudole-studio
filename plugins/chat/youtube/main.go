@@ -794,6 +794,11 @@ func runConfiguration(ctx context.Context, config settings) error {
 		if errors.Is(err, errChannelNotFound) {
 			return err
 		}
+		// Неверный ключ/квота не исправятся ожиданием. Если резерв выключен,
+		// пусть supervisor остановится и дождётся новых настроек вместо повтора.
+		if keyUnusable(err) {
+			return err
+		}
 		logInfo("Поиск эфира не удался: " + err.Error())
 		if !waitInterval(ctx, searchInterval) {
 			return errSettingsChanged
