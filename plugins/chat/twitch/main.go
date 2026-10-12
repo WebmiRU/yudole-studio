@@ -7,11 +7,13 @@ import (
 	"errors"
 	"fmt"
 	"html"
+	"maps"
 	"math/rand/v2"
 	"net"
 	"net/textproto"
 	"os"
 	"os/signal"
+	"slices"
 	"strings"
 	"sync"
 	"syscall"
@@ -239,16 +241,10 @@ func supervise(ctx context.Context) {
 		}
 
 		current := getSettings()
-		if len(current.Channels) == 0 {
-			emitConnection(protocol.ConnectionOffline, "Добавьте хотя бы один канал Twitch", attempt)
-			select {
-			case <-ctx.Done():
-				return
-			case <-changed:
-				continue
-			}
-		}
 
+		// Каналов может не быть, и это не беда: подключаемся всё равно и висим,
+		// отвечая на пинги. Канал, добавленный позже, встанет на этом же
+		// соединении, и страница сразу станет «в сети» — а не «ждёт каналы».
 		state := protocol.ConnectionConnecting
 		if attempt > 0 {
 			state = protocol.ConnectionReconnecting
@@ -306,11 +302,31 @@ func runSession(parent context.Context, current settings) error {
 	defer cancel()
 
 	// Settings updates interrupt both the dial/handshake and a blocked IRC read.
+	// Смена настроек обычно означает другое: человек добавил или убрал канал.
+	// Переподключаться ради этого незачем — IRC умеет входить и выходить из
+	// канала на живом соединении. Рвём сессию только когда сменился логин или
+	// токен: это наше имя на сервере, и сменить его можно лишь заново.
+	//
+	// resync несёт новый список каналов. Буфер на один: важно, что список
+	// посмотрели свежим, а не сколько раз он менялся.
+	resync := make(chan []string, 1)
 	go func() {
-		select {
-		case <-ctx.Done():
-		case <-changed:
-			cancel()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-changed:
+				next := getSettings()
+				if next.Nick != current.Nick || next.Token != current.Token {
+					cancel()
+					return
+				}
+				current.Channels = next.Channels
+				select {
+				case resync <- next.Channels:
+				default:
+				}
+			}
 		}
 	}()
 
@@ -372,25 +388,64 @@ func runSession(parent context.Context, current settings) error {
 		return err
 	}
 
-	joined := false
-	for {
-		// Молчание — тоже ответ. Если TCP не порвался, а пакеты перестали
-		// приходить, ReadLine() будет ждать вечно: соединение снаружи выглядит
-		// живым, плагин перестаёт читать чат и никто об этом не узнаёт. Так
-		// молча завис GoodGame, пока его поток событий не начали закрывать.
-		//
-		// Twitch шлёт PING каждые пять минут, поэтому шестиминутного молчания
-		// не бывает: значит, дошло до дедлайна — связь действительно пропала.
-		if err := conn.SetReadDeadline(time.Now().Add(readSilence)); err != nil {
-			return err
+	// Чтение живёт своей горутиной: пока она висит в ReadLine, настройки могут
+	// поменяться, а ждать следующей строки от Twitch ради этого нельзя.
+	//
+	// Дедлайн на чтение обновляется в этой горутине: пока строки идут, молчание
+	// не накапливается, а перестало идти — сработает и мы узнаем об обрыве.
+	// Без него ReadLine ждал бы вечно: соединение снаружи выглядело бы живым,
+	// плагин перестал бы читать чат, и никто об этом не узнал бы. Так молча
+	// завис GoodGame, пока его поток событий не начали закрывать при обрыве.
+	lines := make(chan string, 256)
+	readErr := make(chan error, 1)
+	go func() {
+		defer close(lines)
+		for {
+			if err := conn.SetReadDeadline(time.Now().Add(readSilence)); err != nil {
+				readErr <- err
+				return
+			}
+			line, err := reader.ReadLine()
+			if err != nil {
+				if ctx.Err() == nil {
+					readErr <- err
+				}
+				return
+			}
+			select {
+			case lines <- line:
+			case <-ctx.Done():
+				return
+			}
 		}
+	}()
 
-		line, err := reader.ReadLine()
-		if err != nil {
+	// joined — где мы сейчас состоим в каналах. Списка настроек для этого мало:
+	// он меняется, а состояние приходит от самого сервера, и по нему видно,
+	// в каком канале нас на самом деле приняли.
+	joined := map[string]bool{}
+	var resyncErr error
+
+	for {
+		var line string
+
+		select {
+		case <-ctx.Done():
+			return errSettingsChanged
+		case next, ok := <-resync:
+			if !ok {
+				continue
+			}
+			if resyncErr = joinDiff(write, joined, next); resyncErr != nil {
+				return resyncErr
+			}
+			continue
+		case err := <-readErr:
 			if ctx.Err() != nil && parent.Err() == nil {
 				return errSettingsChanged
 			}
 			return err
+		case line = <-lines:
 		}
 
 		message, err := parseIRC(line)
@@ -411,13 +466,8 @@ func runSession(parent context.Context, current settings) error {
 			}
 
 		case "001":
-			if !joined {
-				for _, channel := range current.Channels {
-					if err := write("JOIN", "#"+channel); err != nil {
-						return err
-					}
-				}
-				joined = true
+			if err := joinDiff(write, joined, current.Channels); err != nil {
+				return err
 			}
 			emitConnection(protocol.ConnectionOnline, "", 0)
 
@@ -554,6 +604,7 @@ func runSession(parent context.Context, current settings) error {
 		case "JOIN":
 			if len(message.Params) > 0 && userLogin(message.Prefix) == nick {
 				channel := channelName(message.Params[0])
+				joined[channel] = true
 				send(protocol.KindChannelJoinSuccess, protocol.ChannelPayload{
 					Channel: channel,
 					Name:    channel,
@@ -563,6 +614,7 @@ func runSession(parent context.Context, current settings) error {
 		case "PART":
 			if len(message.Params) > 0 && userLogin(message.Prefix) == nick {
 				channel := channelName(message.Params[0])
+				delete(joined, channel)
 				send(protocol.KindChannelUnjoinSuccess, protocol.ChannelPayload{
 					Channel: channel,
 					Name:    channel,
@@ -570,6 +622,47 @@ func runSession(parent context.Context, current settings) error {
 			}
 		}
 	}
+}
+
+// joinDiff brings the channels in line with the settings: JOIN the new ones,
+// PART the ones that are no longer there, keep the rest.
+//
+// Соединение при этом остаётся прежним.
+//
+// Карта здесь означает «мы послали JOIN или PART», а не «сервер подтвердил».
+// Разница видна на старте: настройки меняются ещё до подключения, и первый же
+// joinDiff успевает отправить JOIN, а подтверждение придёт через мгновение —
+// второй joinDiff, случившийся в промежутке, не отправил бы ничего зря. Если
+// сервер канал не принял, придёт NOTICE, и канала в карте не будет: следующая
+// правка настроек попробует снова.
+func joinDiff(write func(command string, args ...string) error, joined map[string]bool, wanted []string) error {
+	want := make(map[string]bool, len(wanted))
+	for _, channel := range wanted {
+		want[channel] = true
+	}
+
+	// Сначала выходим: так список каналов придёт в порядке настроек, а не в
+	// порядке истории подключений.
+	for _, channel := range slices.Sorted(maps.Keys(joined)) {
+		if want[channel] {
+			continue
+		}
+		if err := write("PART", "#"+channel); err != nil {
+			return err
+		}
+		delete(joined, channel)
+	}
+
+	for _, channel := range wanted {
+		if joined[channel] {
+			continue
+		}
+		if err := write("JOIN", "#"+channel); err != nil {
+			return err
+		}
+		joined[channel] = true
+	}
+	return nil
 }
 
 func writeIRC(writer *textproto.Writer, command string, args ...string) error {

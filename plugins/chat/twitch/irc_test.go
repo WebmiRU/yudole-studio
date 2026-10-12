@@ -1,6 +1,7 @@
 package main
 
 import (
+	"errors"
 	"strings"
 	"testing"
 )
@@ -115,6 +116,104 @@ func TestEmoteURLNeverEscapesItsDirectory(t *testing.T) {
 		if strings.Contains(got, "..") {
 			t.Errorf("адрес вышел за каталог при теге %q: %s", tag, got)
 		}
+	}
+}
+
+// Смена списка канаков не должна рвать соединение: IRC умеет входить и
+// выходить из канала на живом сокете. Проверяем, что уходят только те команды,
+// которые реально нужны.
+func TestJoinDiffEntersAndLeavesOnlyWhatChanged(t *testing.T) {
+	var sent []string
+	write := func(command string, args ...string) error {
+		sent = append(sent, command+" "+strings.Join(args, " "))
+		return nil
+	}
+
+	// Мы в двух каналах, в списке теперь три — один новый.
+	joined := map[string]bool{"donchiko": true, "arcus": true}
+	if err := joinDiff(write, joined, []string{"donchiko", "arcus", "newchan"}); err != nil {
+		t.Fatalf("joinDiff: %v", err)
+	}
+	if len(sent) != 1 || sent[0] != "JOIN #newchan" {
+		t.Fatalf("команды = %v, want [JOIN #newchan]", sent)
+	}
+
+	// Канал встает в карту сразу, как только JOIN отправлен: подтверждение от
+	// сервера приходит через мгновение, и второй joinDiff в промежутке не
+	// должен слать JOIN заново — на старте так и выходит.
+	if !joined["newchan"] {
+		t.Error("после JOIN канал не отмечен как запрошенный")
+	}
+	sent = nil
+	if err := joinDiff(write, joined, []string{"donchiko", "arcus", "newchan"}); err != nil {
+		t.Fatalf("joinDiff: %v", err)
+	}
+	if len(sent) != 0 {
+		t.Errorf("повторно отправлены команды без изменений: %v", sent)
+	}
+
+	// Убрали один канал: уйти надо только из него.
+	sent = nil
+	if err := joinDiff(write, joined, []string{"donchiko", "newchan"}); err != nil {
+		t.Fatalf("joinDiff: %v", err)
+	}
+	if len(sent) != 1 || sent[0] != "PART #arcus" {
+		t.Errorf("команды = %v, want [PART #arcus]", sent)
+	}
+	if joined["arcus"] {
+		t.Error("после выхода канал остался в карте")
+	}
+
+	// Ничего не поменялось — команд быть не должно вовсе.
+	sent = nil
+	if err := joinDiff(write, joined, []string{"donchiko", "newchan"}); err != nil {
+		t.Fatalf("joinDiff: %v", err)
+	}
+	if len(sent) != 0 {
+		t.Errorf("без изменений отправлены команды: %v", sent)
+	}
+}
+
+// Выходим раньше, чем входим: иначе список каналов приходил бы в порядке
+// истории подключений, а не в том, в каком человек его задал.
+func TestJoinDiffLeavesBeforeItEnters(t *testing.T) {
+	var sent []string
+	write := func(command string, args ...string) error {
+		sent = append(sent, command+" "+strings.Join(args, " "))
+		return nil
+	}
+
+	joined := map[string]bool{"old": true}
+	if err := joinDiff(write, joined, []string{"new"}); err != nil {
+		t.Fatalf("joinDiff: %v", err)
+	}
+
+	want := []string{"PART #old", "JOIN #new"}
+	if len(sent) != len(want) {
+		t.Fatalf("команды = %v, want %v", sent, want)
+	}
+	for i := range want {
+		if sent[i] != want[i] {
+			t.Errorf("команда %d = %q, want %q", i, sent[i], want[i])
+		}
+	}
+}
+
+// Ошибка при отправке — повод не продолжать: молча уйти дальше означало бы
+// считать каналы в порядке, в котором они на самом деле не встали.
+func TestJoinDiffStopsOnFailure(t *testing.T) {
+	joined := map[string]bool{"donchiko": true}
+	sent := 0
+	write := func(string, ...string) error {
+		sent++
+		return errors.New("сокет молчит")
+	}
+
+	if err := joinDiff(write, joined, []string{"donchiko", "arcus"}); err == nil {
+		t.Fatal("ожидалась ошибка отправки")
+	}
+	if sent != 1 {
+		t.Errorf("после ошибки отправлено команд: %d, want 1", sent)
 	}
 }
 
