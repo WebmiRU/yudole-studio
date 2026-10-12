@@ -136,33 +136,70 @@ function passes(entry) {
     return true;
 }
 
-// line is one row: a chat line, or a note about a channel.
+// Виды сообщений: рамка слева. Всё, что не реплика, — служебное, и у служебного
+// есть важность: об одном человек стоит знать, другое он и сам увидит.
+const SEVERITIES = ['neutral', 'info', 'success', 'warning', 'error'];
+
+// line is one block: a chat line, or a note about a channel.
 function line(entry) {
-    if (!isLine(entry)) {
-        return note(entry);
+    if (isLine(entry)) {
+        const text = entry.text ?? entry.payload?.message?.text ?? '';
+        return block(entry, 'neutral', el('span', {class: 'msg__author'}, [entry.user ?? '—']), text);
     }
 
-    const row = el('div', {class: `line${entry.kind === PRIVATE ? ' line--private' : ''}`});
-    if (entry.user) {
-        row.append(el('span', {class: 'line__user', title: entry.user}, [entry.user]));
-    }
-    row.append(el('span', {class: 'line__text'}, [entry.text ?? entry.payload?.message?.text ?? '']));
-
-    // Название канала — только когда в ленте больше одного канала, иначе оно
-    // повторяется на каждой строке.
-    if (state.channels.size > 1 || state.filter) {
-        row.prepend(el('span', {class: 'line__where', title: channelTitle(entry.channel)}, [
-            entry.channel || '—',
-        ]));
-    }
-    return row;
+    return block(entry, severityOf(entry), author(entry), describe(entry));
 }
 
-// note is a service event: a channel joined or left, the connection went up.
-function note(entry) {
-    const text = describe(entry);
-    const row = el('div', {class: `note note--${entry.kind.split('.').pop()}`}, [text]);
-    return row;
+// block is the shape of every message: who wrote it, a rule under the name, and
+// then the text itself.
+function block(entry, severity, head, text) {
+    return el('article', {class: 'msg', 'data-severity': severity}, [
+        // Полоска стоит между автором и текстом, а не рядом с автором: шапка
+        // выстроена в строку, и внутри неё полоска легла бы вбок.
+        el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
+        el('div', {class: 'msg__rule'}),
+        el('div', {class: 'msg__text'}, [text]),
+    ]);
+}
+
+// author is who the service message is from: the plugin that sent it, in
+// brackets, so it never gets confused with a person in the chat.
+function author(entry) {
+    const plugin = state.plugins.get(entry.plugin);
+    const name = plugin?.title || entry.plugin || 'чат';
+    return el('span', {class: 'msg__author msg__author--plugin'}, [`[${name}]`]);
+}
+
+// severityOf says how much a service event matters.
+//
+// Разбивка не «на глаз»: важность выводится из того, что произошло, чтобы одна
+// и та же строка всегда выглядела одинаково — и на странице, и в тестах.
+function severityOf(entry) {
+    switch (entry.kind) {
+        case 'chat.connection.state': {
+            const state = entry.payload?.state;
+            if (state === 'online') {
+                return 'success';
+            }
+            // Пока переподключаемся — это ещё не беда; когда связи нет совсем,
+            // человек должен это заметить.
+            return state === 'offline' ? 'error' : 'info';
+        }
+        case 'chat.channel.join.successful':
+            return 'success';
+        case 'chat.channel.join.failed':
+            return 'error';
+        case 'chat.channel.unjoin.successful':
+            // Мы вышли сами, по настройкам: это было задумано, а не поломка.
+            return 'info';
+        case 'chat.channel.unjoin.failed':
+            return 'warning';
+        case 'chat.message.deleted':
+            // Кто-то удалил чужую реплику: чат живёт, но человек это заметит.
+            return 'warning';
+        default:
+            return 'info';
+    }
 }
 
 function describe(entry) {
