@@ -426,11 +426,8 @@ func TestMessageLinePutsSmilesIntoHTML(t *testing.T) {
 		t.Fatalf("читаемый текст = %q, ожидалось без кода смайла", text)
 	}
 	if !strings.Contains(html, `<img class="smile"`) ||
-		!strings.Contains(html, `src="/api/vkvideo-smile/abc-123/icon/size/large"`) {
-		t.Fatalf("в разметке нет локального адреса картинки смайла: %q", html)
-	}
-	if !strings.Contains(html, `referrerpolicy="no-referrer"`) {
-		t.Errorf("запрос за смайлом не должен передавать Referer: %q", html)
+		!strings.Contains(html, `src="https://images.live.vkvideo.ru/smile/abc-123/icon/size/large"`) {
+		t.Fatalf("в разметке нет исходного адреса картинки смайла: %q", html)
 	}
 	// Код смайла в разметку попадать не должен: человек его не писал.
 	if strings.Contains(html, "legionaveGgigiggg") &&
@@ -441,48 +438,24 @@ func TestMessageLinePutsSmilesIntoHTML(t *testing.T) {
 
 // Анимированный смайл приходит десятками одинаковых узлов — по одному на кадр.
 // Без отсечки одна реплика превращалась бы в двадцать одинаковых картинок.
-func TestLocalSmileURL(t *testing.T) {
-	tests := []struct {
-		name string
-		input string
-		want string
-	}{
-		{
-			name: "VK CDN with cache-busting query",
-			input: "https://images.live.vkvideo.ru/smile/571549fe-4a8c-42ae-b1c2-42a3381c1134/icon/size/large?change_time=1785417130",
-			want: "/api/vkvideo-smile/571549fe-4a8c-42ae-b1c2-42a3381c1134/icon/size/large?change_time=1785417130",
-		},
-		{
-			name: "unknown host stays untouched",
-			input: "https://example.org/smile/abc-123/icon/size/large",
-			want: "https://example.org/smile/abc-123/icon/size/large",
-		},
-		{
-			name: "unknown path stays untouched",
-			input: "https://images.live.vkvideo.ru/arbitrary/path",
-			want: "https://images.live.vkvideo.ru/arbitrary/path",
-		},
-	}
-	for _, test := range tests {
-		t.Run(test.name, func(t *testing.T) {
-			if got := localSmileURL(test.input); got != test.want {
-				t.Errorf("localSmileURL(%q) = %q, want %q", test.input, got, test.want)
-			}
-		})
-	}
-}
-
-func TestMessageLineCollapsesRepeatedSmiles(t *testing.T) {
-	node := `{"type":"smile","id":"abc","name":"Cat",` +
-		`"largeUrl":"https://images.live.vkvideo.ru/smile/abc/icon/size/large"}`
+func TestMessageLinePreservesRepeatedSmilesInOrder(t *testing.T) {
+	cat := `{"type":"smile","id":"a","name":"Cat","largeUrl":"https://images.live.vkvideo.ru/smile/a/icon/size/large"}`
+	party := `{"type":"smile","id":"b","name":"Party","largeUrl":"https://images.live.vkvideo.ru/smile/b/icon/size/large"}`
 	blocks := []vkBlock{{
 		Type:    "text",
-		Content: `["", "unstyled", [` + node + `,` + node + `,` + node + `]]`,
+		Content: `["", "unstyled", [` + cat + `,` + party + `,` + cat + `]]`,
 	}}
 
 	_, html := messageLine(blocks)
-	if got := strings.Count(html, "<img"); got != 1 {
-		t.Fatalf("картинок смайла %d, ожидалась одна: %q", got, html)
+	if got := strings.Count(html, "<img"); got != 3 {
+		t.Fatalf("картинок смайла %d, ожидались все три, включая повтор: %q", got, html)
+	}
+
+	firstCat := strings.Index(html, `src="https://images.live.vkvideo.ru/smile/a/icon/size/large"`)
+	partyIndex := strings.Index(html, `src="https://images.live.vkvideo.ru/smile/b/icon/size/large"`)
+	lastCat := strings.LastIndex(html, `src="https://images.live.vkvideo.ru/smile/a/icon/size/large"`)
+	if firstCat < 0 || partyIndex < 0 || lastCat < 0 || !(firstCat < partyIndex && partyIndex < lastCat) {
+		t.Fatalf("порядок смайлов изменился или повтор потерян: %q", html)
 	}
 }
 
