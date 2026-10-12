@@ -205,13 +205,54 @@ function serviceTitle(entry) {
 // экранировал всё, что не разметка.
 function richBlock(entry, severity, head, html, notice = false) {
     const text = el('div', {class: 'msg__text'});
-    text.innerHTML = html;
+
+    // Parse rich markup while it is still inert, then rewrite VK smile URLs
+    // before the images enter the document. Besides newly received messages,
+    // this also fixes messages already buffered in the hub's chat history.
+    const template = document.createElement('template');
+    template.innerHTML = html;
+    for (const image of template.content.querySelectorAll('img[src]')) {
+        const localURL = localVKVideoSmileURL(image.getAttribute('src'));
+        if (localURL) {
+            image.setAttribute('src', localURL);
+            image.setAttribute('referrerpolicy', 'no-referrer');
+        }
+    }
+    text.append(template.content);
 
     return el('article', noticeAttrs(notice), [
         el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
         el('div', {class: 'msg__rule'}),
         text,
     ]);
+}
+
+// localVKVideoSmileURL migrates old chat entries that still have an absolute
+// VK CDN URL to the same-origin proxy. Validate the exact host and path: this
+// must never turn arbitrary URLs from plugin markup into proxied requests.
+function localVKVideoSmileURL(raw) {
+    let url;
+    try {
+        url = new URL(raw, location.href);
+    } catch {
+        return null;
+    }
+    if (url.protocol !== 'https:' || url.hostname !== 'images.live.vkvideo.ru'
+        || url.port || url.username || url.password) {
+        return null;
+    }
+
+    const match = url.pathname.match(/^\\/smile\\/([A-Za-z0-9-]{1,80})\\/icon\\/size\\/(small|medium|large)$/);
+    if (!match) {
+        return null;
+    }
+
+    const local = new URL(`/api/vkvideo-smile/${match[1]}/icon/size/${match[2]}`, location.origin);
+    const changeTime = url.searchParams.get('change_time');
+    if (changeTime && /^\\d{1,20}$/.test(changeTime)) {
+        local.searchParams.set('change_time', changeTime);
+    }
+    return local.pathname + local.search;
 }
 
 // block is the shape of every message: who wrote it, a rule under the name, and
