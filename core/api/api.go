@@ -24,11 +24,19 @@ type Manager interface {
 	Disable(id string) (plugin.PluginView, error)
 	SaveOptions(id string, values map[string]any) (plugin.PluginView, error)
 	Run(ctx context.Context, id, kind string) (string, error)
+	// WatchPlugins hands out the live plugin states: the options page takes
+	// them instead of asking on a timer.
+	WatchPlugins(buffer int) (<-chan plugin.PluginView, func())
 }
 
 // Handler builds the routes of the options page.
 func Handler(manager Manager) http.Handler {
 	mux := http.NewServeMux()
+
+	// Живое состояние плагинов. Страница настроек подписывается на него вместо
+	// опроса: спрашивать каждые две секунды значило затирать наполовину
+	// набранное в форме.
+	mux.HandleFunc("GET /api/plugins/events", watchHandler(manager))
 
 	mux.HandleFunc("GET /api/plugins/chat", func(w http.ResponseWriter, r *http.Request) {
 		write(w, map[string]any{"plugins": manager.List()})

@@ -54,6 +54,18 @@ type Plugin struct {
 	waiting     bool
 	waitingText string
 
+	// connection — что с подключением к чату: один из Connection* из
+	// протокола. Живёт здесь, а не только в событиях, потому что странице
+	// настроек нужно показать его рядом с названием плагина, а не искать
+	// по ленте чата.
+	connection     string
+	connectionText string
+
+	// onChange зовётся, когда изменилось что-то в жизни плагина: он занялся,
+	// освободился, подключился или потерял связь. Ядро вешает его при запуске,
+	// чтобы страница узнавала сразу, а не опросом.
+	onChange func()
+
 	writeMu sync.Mutex
 	done    chan struct{}
 	waitErr chan error
@@ -149,6 +161,23 @@ func (p *Plugin) Done() <-chan struct{} {
 	return p.done
 }
 
+// WaitErr is why the process exited, if it exited badly. Ждёт завершения, так
+// что звать его надо только после Done.
+func (p *Plugin) WaitErr() error {
+	select {
+	case <-p.done:
+	default:
+		return nil
+	}
+
+	// В канале одно значение, и reap() положил его перед закрытием done.
+	err, ok := <-p.waitErr
+	if !ok {
+		return nil
+	}
+	return err
+}
+
 // Events is the stream of chat events from this plugin.
 func (p *Plugin) Events() <-chan Event {
 	return p.events
@@ -192,6 +221,15 @@ func (p *Plugin) forward(line []byte) bool {
 	}
 	if !protocol.IsChatKind(message.Kind) && !protocol.IsChannelKind(message.Kind) {
 		return false
+	}
+
+	// Состояние связи запоминаем наравне с отправкой дальше: по нему страница
+	// настроек показывает «онлайн» или «офлайн» рядом с плагином.
+	if message.Kind == protocol.KindConnectionState {
+		var payload protocol.ConnectionPayload
+		if err := message.PayloadInto(&payload); err == nil {
+			p.setConnection(payload.State, payload.Reason)
+		}
 	}
 
 	event := Event{Plugin: p.Name, Message: message}
@@ -255,9 +293,24 @@ func (p *Plugin) Waiting() (bool, string) {
 	return p.waiting, p.waitingText
 }
 
-func (p *Plugin) setWaiting(waiting bool, text string) {
+// OnChange sets the hook that hears anything in the plugin's life change: it
+// got busy, went quiet, connected or lost the service. Kernel only: the hook
+// runs on the goroutine that read the message, so it must not block.
+func (p *Plugin) OnChange(fn func()) {
 	p.stateMu.Lock()
 	defer p.stateMu.Unlock()
+	p.onChange = fn
+}
+
+// Connection tells how the plugin is doing with the chat service.
+func (p *Plugin) Connection() (state, text string) {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	return p.connection, p.connectionText
+}
+
+func (p *Plugin) setWaiting(waiting bool, text string) {
+	p.stateMu.Lock()
 
 	if p.waiting != waiting {
 		if waiting {
@@ -266,8 +319,34 @@ func (p *Plugin) setWaiting(waiting bool, text string) {
 			p.logger.Info("idle")
 		}
 	}
+	changed := p.waiting != waiting || p.waitingText != text
 	p.waiting = waiting
 	p.waitingText = text
+	notify := p.onChange
+	p.stateMu.Unlock()
+
+	// Молчание — тоже ответ: занятость могла не поменяться, а текст мог, и
+	// странице есть что показать.
+	if changed && notify != nil {
+		notify()
+	}
+}
+
+// setConnection remembers what the service connection is doing. Само событие
+// уходит дальше по ленте чата, но странице настроек оно нужно и здесь: она
+// показывает связь рядом с названием плагина.
+func (p *Plugin) setConnection(state, text string) {
+	p.stateMu.Lock()
+
+	changed := p.connection != state || p.connectionText != text
+	p.connection = state
+	p.connectionText = text
+	notify := p.onChange
+	p.stateMu.Unlock()
+
+	if changed && notify != nil {
+		notify()
+	}
 }
 
 // reply hands an answer to whoever is waiting for it.

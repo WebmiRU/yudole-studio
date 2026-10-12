@@ -1,18 +1,27 @@
 // Страница настроек: список чат-клиентов и форма их опций.
 //
-// Плагины приходят с ядра: GET /api/plugins/chat. Каждый приносит свою форму
-// в поле options и сохранённые значения в values, так что здесь нет ни одного
-// захардкоженного плагина.
+// Плагины приходят с ядра по websocket: GET /api/plugins/events. Сначала ядро
+// отдаёт все плагины разом, а потом само сообщает, что с каждым из них
+// происходит — запустился, умер, занят. Опроса нет намеренно: он ходил каждые
+// две секунды и затирал наполовину набранное в форме, а человек думал, что у
+// него не работает ввод.
 
 import '../sass/app.sass';
 
 const API = '/api/plugins/chat';
+const EVENTS = '/api/plugins/events';
 
 const state = {
     plugins: [],
+    // Соединение с состояниями плагинов: единственный источник, откуда мы
+    // узнаём, что с ними происходит.
+    socket: null,
     selectedId: pluginIdFromHash(),
     // Черновик значений выбранного плагина, до нажатия «Сохранить».
     values: {},
+    // Правлено ли что-то в черновике: нужно, чтобы переподключение не
+    // подменило напечатанное свежим от ядра.
+    dirty: false,
     // Плагины, для которых сейчас идёт enable/disable: переключатель нельзя
     // дёргать второй раз, пока процесс поднимается.
     busy: new Set(),
@@ -58,14 +67,107 @@ async function api(path, options = {}) {
     return data;
 }
 
-async function loadPlugins() {
-    const data = await api(API);
-    state.plugins = data.plugins ?? [];
+// listenStates держит открытым канал состояний плагинов.
+//
+// Ядро отдаёт при подключении все плагины разом, а потом шлёт то, что изменилось.
+// Разрывы случаются: ядро перезапустилось, прокси разорвал соединение. Тогда
+// подключаемся заново — список плагинов с каждым разом придёт и сам по себе
+// обновит страницу.
+function listenStates() {
+    const url = new URL(EVENTS, location.href);
+    url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
 
-    if (!state.plugins.some((plugin) => plugin.id === state.selectedId)) {
-        state.selectedId = state.plugins[0]?.id ?? null;
+    const socket = new WebSocket(url);
+    state.socket = socket;
+
+    socket.addEventListener('open', () => {
+        // Ядро ответило: списываем «недоступно», если оно было показано.
+        shownOffline = false;
+    });
+
+    socket.addEventListener('message', (event) => {
+        let message;
+        try {
+            message = JSON.parse(event.data);
+        } catch {
+            return;
+        }
+
+        if (message.hello) {
+            for (const view of message.hello.plugins ?? []) {
+                applyView(view);
+            }
+
+            const gone = !state.plugins.some((plugin) => plugin.id === state.selectedId);
+            if (gone) {
+                state.selectedId = state.plugins[0]?.id ?? null;
+            }
+
+            // Значения формы берутся из черновика, и на пустом черновике списки
+            // каналов выходят пустыми: ядро их прислало, а взять неоткуда.
+            // Наполняем — но только если человек ничего не вбивал:
+            // переподключение не должно съедать напечатанное.
+            if (gone || !state.dirty) {
+                resetValues();
+            }
+            render();
+            return;
+        }
+
+        if (message.plugin && applyView(message.plugin)) {
+            render();
+        }
+    });
+
+    socket.addEventListener('close', () => {
+        showOffline();
+        // Ядро может перезапускаться: пробуем сами, но не сразу.
+        setTimeout(listenStates, 2000);
+    });
+    socket.addEventListener('error', () => socket.close());
+}
+
+// applyView переносит из ответа ядра состояние плагина: запущен, занят, чем
+// именно.
+//
+// Значения формы сюда НЕ переносятся. Это черновик, который человек набирает
+// прямо сейчас, а ответ ядра — про то, чем занят плагин. Сливать их в одну кучу
+// нельзя: события приходят в любой момент, и человек не успевает вписать канал —
+// написанное стиралось бы на полуслове, а курсор уезжал в начало поля.
+//
+// Возвращает, изменилось ли что-нибудь: перерисовывать без причины незачем.
+function applyView(view) {
+    const index = state.plugins.findIndex((plugin) => plugin.id === view.id);
+    const previous = index === -1 ? null : state.plugins[index];
+
+    const next = previous ? {...previous} : {...view};
+    // Список полей, которые приходят событием. Значения формы (values) здесь
+    // быть не должны: это черновик человека, а не то, чем занят плагин.
+    //
+    // Всё, что ядро присылает в PluginView, обязано быть в этом списке. Забытое
+    // поле молча замирает на первом значении: страница загрузилась, увидела
+    // «подключается» — и больше не двигалась, хотя связь давно онлайн.
+    const fromView = [
+        'state',
+        'problem',
+        'waiting',
+        'waitingText',
+        'connection',
+        'connectionText',
+        'version',
+        'title',
+    ];
+    for (const key of fromView) {
+        next[key] = view[key];
     }
-    resetValues();
+
+    if (index === -1) {
+        state.plugins.push(next);
+        return true;
+    }
+
+    state.plugins[index] = next;
+    return JSON.stringify(next) !== JSON.stringify(previous);
 }
 
 function replacePlugin(view) {
@@ -77,6 +179,9 @@ function replacePlugin(view) {
     }
     if (view.id === state.selectedId) {
         state.values = cloneValues(view.values);
+        // Ядро только что сохранило то, что человек нажал «Сохранить»: черновик
+        // совпадает с сохранённым, и помечать его как правленый незачем.
+        state.dirty = false;
     }
 }
 
@@ -88,6 +193,7 @@ function selected() {
 
 function resetValues() {
     state.values = cloneValues(selected()?.values);
+    state.dirty = false;
 }
 
 // cloneValues копирует настройки для формы. Копия должна быть настоящей: если
@@ -108,6 +214,35 @@ function isEmpty(value) {
 }
 
 // --- Статус плагина --------------------------------------------------------
+
+// linkOf — это про связь с чатом, а statusOf ниже — про то, в порядке ли
+// плагин. Разные вещи: плагин может быть включён и настроен, а в чат при
+// этом не входить.
+const LINKS = {
+    connecting: {kind: 'busy', text: 'Подключается'},
+    online: {kind: 'ok', text: 'Онлайн'},
+    reconnecting: {kind: 'warn', text: 'Переподключается'},
+    offline: {kind: 'error', text: 'Офлайн'},
+};
+
+// linkOf отвечает, что с подключением к чату. Плагин говорит об этом сам и
+// меняет состояние без всякого опроса, так что здесь всё уже известно.
+function linkOf(plugin) {
+    if (!plugin.enabled || plugin.state === 'off') {
+        return {kind: 'off', text: 'Выключен'};
+    }
+    if (plugin.state === 'failed') {
+        return {kind: 'error', text: 'Не запущен', title: plugin.problem ?? ''};
+    }
+
+    const link = LINKS[plugin.connection];
+    if (link) {
+        return {kind: link.kind, text: link.text, title: plugin.connectionText ?? ''};
+    }
+    // Молчит: включён, но ещё ничего не сказал. Так бывает между запуском
+    // процесса и первой попыткой встать в чат.
+    return {kind: 'off', text: 'Не в сети'};
+}
 
 function statusOf(plugin) {
     if (state.busy.has(plugin.id)) {
@@ -131,24 +266,64 @@ function stateValue(plugin, key) {
     return key in state.values ? state.values[key] : plugin.values?.[key];
 }
 
-function summaryOf(plugin) {
-    const tags = (plugin.options ?? []).filter((option) => option.type === 'text/multiple');
-    const filled = tags
-        .map((option) => stateValue(plugin, option.key))
-        .flatMap((value) => (Array.isArray(value) ? value : []));
-
-    if (filled.length) {
-        return filled.join(', ');
-    }
-    return plugin.enabled ? 'настроен' : 'не настроен';
-}
-
 // --- Рендер ----------------------------------------------------------------
 
 function render() {
+    // Форма пересобирается целиком, и если человек в этот момент печатает, узел
+    // под курсором просто исчезает. Запоминаем, где был курсор, и возвращаем
+    // после сборки — иначе перерисовка выглядит как зависание страницы.
+    const mark = rememberFocus();
+
     countEl.textContent = String(state.plugins.length);
     renderClients();
     renderOptions();
+
+    restoreFocus(mark);
+}
+
+// rememberFocus is where the caret is: имя поля, позиция и выделение. Без
+// выделения не обойтись — иначе выделенное пропадёт при первом же рендере.
+function rememberFocus() {
+    const active = document.activeElement;
+    if (!active || !active.name || !optionsEl.contains(active)) {
+        return null;
+    }
+
+    const start = typeof active.selectionStart === 'number' ? active.selectionStart : null;
+    const end = typeof active.selectionEnd === 'number' ? active.selectionEnd : null;
+
+    return {
+        name: active.name,
+        start,
+        end,
+        // Прокрутка страницы: если человек внизу длинного списка каналов,
+        // перерисовка не должна выбрасывать его наверх.
+        top: window.scrollY,
+    };
+}
+
+function restoreFocus(mark) {
+    if (!mark) {
+        return;
+    }
+
+    window.scrollTo({top: mark.top});
+
+    // Ищем по имени, а не по порядковому номеру: нумерация съехала бы, если
+    // бы плагин тем временем прислал другой список вариантов.
+    const field = optionsEl.querySelector(`[name="${CSS.escape(mark.name)}"]`);
+    if (!field) {
+        return;
+    }
+
+    field.focus({preventScroll: true});
+    if (mark.start !== null && typeof field.setSelectionRange === 'function') {
+        try {
+            field.setSelectionRange(mark.start, mark.end);
+        } catch {
+            // Не текстовое поле — ставить выделение некуда.
+        }
+    }
 }
 
 function renderClients() {
@@ -160,7 +335,6 @@ function renderClients() {
 
     clientsEl.replaceChildren(...state.plugins.map((plugin) => {
         const selectedNow = plugin.id === state.selectedId;
-        const status = statusOf(plugin);
 
         const button = el('button', {
             type: 'button',
@@ -171,7 +345,10 @@ function renderClients() {
             el('span', {class: 'client__logo', 'aria-hidden': 'true'}, [markOf(plugin)]),
             el('span', {class: 'client__info'}, [
                 el('span', {class: 'client__name'}, [plugin.title || plugin.id]),
-                el('span', {class: 'client__meta'}, [summaryOf(plugin)]),
+                // Под названием — связь с чатом, а не «настроен»: настроен ли
+                // плагин, и так видно по форме справа, а вот в сети ли он —
+                // не видно нигде.
+                statusBadge(linkOf(plugin)),
             ]),
         ]);
         button.addEventListener('click', () => select(plugin.id));
@@ -367,18 +544,14 @@ async function runAction(plugin, button) {
     state.running = button.kind;
     render();
 
-    // Плагин сам говорит, пока занят, но страница должна его спрашивать: вне
-    // сохранения она этого не делает, и без опроса кнопка погасла бы только
-    // по нашему клику.
-    const poll = setInterval(refreshWaiting, 700);
-
     try {
         const answer = await api(`${API}/${plugin.id}/actions`, {
             method: 'POST',
             body: JSON.stringify({kind: button.kind}),
         });
         // Кнопка может изменить то, что плагин показывает, поэтому забираем
-        // его свежий вид.
+        // его свежий вид. Занятость придёт сама по событию: плагин сообщает
+        // её, как только уйдёт в сеть.
         const view = await api(`${API}/${plugin.id}`);
         replacePlugin(view);
         // Что именно вышло, сказал сам плагин: «готово» после кнопки про
@@ -387,7 +560,6 @@ async function runAction(plugin, button) {
     } catch (error) {
         toast(error.message, 'error');
     } finally {
-        clearInterval(poll);
         state.running = '';
         render();
     }
@@ -433,6 +605,7 @@ function renderRow(plugin, option) {
 function renderInput(plugin, option, id) {
     const input = el('input', {
         class: 'input',
+        name: option.key,
         id,
         type: option.type === 'password' ? 'password' : option.type === 'number' ? 'number' : 'text',
         placeholder: option.placeholder ?? '',
@@ -448,7 +621,7 @@ function renderInput(plugin, option, id) {
 }
 
 function renderSelect(plugin, option, id) {
-    const select = el('select', {class: 'select', id},
+    const select = el('select', {class: 'select', id, name: option.key},
         (option.choices ?? []).map((choice) => el('option', {value: choice.value}, [choice.label ?? choice.value])));
 
     select.value = stateValue(plugin, option.key) ?? (option.choices?.[0]?.value ?? '');
@@ -497,6 +670,7 @@ function renderList(plugin, option) {
 		list.replaceChildren(...items.map((item, index) => {
 			const input = el('input', {
 				class: 'input',
+				name: `${option.key}.${index}`,
 				value: item,
 				placeholder: option.placeholder ?? '',
 				autocomplete: 'off',
@@ -591,7 +765,11 @@ function renderChoices(plugin, option) {
         draw();
     };
 
-    const manual = el('input', {class: 'input', placeholder: option.placeholder ?? 'значение'});
+    const manual = el('input', {
+        class: 'input',
+        name: `${option.key}.new`,
+        placeholder: option.placeholder ?? 'значение',
+    });
     const manualAdd = el('button', {type: 'button', class: 'btn btn--ghost btn--small'}, ['Добавить']);
     manualAdd.addEventListener('click', () => {
         const value = manual.value.trim();
@@ -702,10 +880,9 @@ function save(plugin) {
     state.waitingText = '';
     render();
 
-    // Плагин может уйти в сеть, поэтому спрашиваем у ядра, чем он занят: так
-    // видно, что он не завис.
-    const poll = setInterval(refreshWaiting, 700);
-
+    // Плагин может уйти в сеть на раздолгое время. Спрашивать нечего: он сам
+    // сообщает через событие, что занят и чем именно — так кнопка гаснет и
+    // оживает без всякого опроса.
     api(`${API}/${plugin.id}/options`, {
         method: 'PUT',
         body: JSON.stringify({values: state.values}),
@@ -724,46 +901,10 @@ function save(plugin) {
         }
         toast(error.message, 'error');
     }).finally(() => {
-        clearInterval(poll);
         state.saving = false;
         state.waitingText = '';
         render();
     });
-}
-
-async function refreshWaiting() {
-    const plugin = selected();
-    if (!plugin) {
-        return;
-    }
-    // Два опроса не должны наезжать друг на друга: второй всё равно увидит
-    // устаревшее.
-    if (state.polling) {
-        return;
-    }
-    state.polling = true;
-
-    try {
-        const view = await api(`${API}/${plugin.id}`);
-        replacePlugin(view);
-        state.waitingText = view.waitingText ?? '';
-        render();
-    } catch {
-        // Ядро не ответило: молча продолжаем ждать.
-    } finally {
-        state.polling = false;
-    }
-}
-
-// keepWatching asks the kernel how the plugin is, so the page sees it get busy
-// even when the work was started elsewhere: второй страницей или из консоли.
-// Тихо и нечасто — чаще незачем.
-function keepWatching() {
-    setInterval(() => {
-        if (selected()) {
-            refreshWaiting();
-        }
-    }, 2000);
 }
 
 // showFieldErrors помечает поля, которые плагин не принял. Если плагин сказал,
@@ -839,6 +980,9 @@ function clearFieldErrors(plugin) {
 function changed(plugin, source) {
     if (source) {
         state.fieldError = null;
+        // Что-то поправили: теперь черновик нельзя молча подменять на
+        // сохранённое, даже если придёт событие или переподключение.
+        state.dirty = true;
 
         const row = source.closest('[data-field]');
         row?.querySelector('.field__error')?.replaceChildren();
@@ -965,12 +1109,23 @@ function el(tag, attrs = {}, children = []) {
     return node;
 }
 
-keepWatching();
+// Плагины приходят по websocket, а не ответом на запрос, поэтому недоступность
+// ядра видна иначе: соединение не открылось и ничего не пришло. Показать это
+// нужно один раз — дальше listenStates переподключается сам, и страница
+// оживёт, как только ядро поднимется.
+let shownOffline = false;
 
-loadPlugins().then(render).catch((error) => {
+function showOffline() {
+    if (shownOffline || state.plugins.length) {
+        return;
+    }
+    shownOffline = true;
+
     countEl.textContent = '0';
     clientsEl.replaceChildren(el('li', {}, [
-        el('p', {class: 'empty'}, [`Ядро недоступно: ${error.message}`]),
+        el('p', {class: 'empty'}, ['Ядро недоступно']),
     ]));
     optionsEl.replaceChildren(el('p', {class: 'empty'}, ['Запусти ядро: go run .']));
-});
+}
+
+listenStates();

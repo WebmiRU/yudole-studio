@@ -34,9 +34,14 @@ type PluginView struct {
 	Items       map[string]map[string]string `json:"items,omitempty"`
 	Waiting     bool                         `json:"waiting,omitempty"`
 	WaitingText string                       `json:"waitingText,omitempty"`
-	Options     []protocol.Option            `json:"options,omitempty"`
-	Buttons     []protocol.Button            `json:"buttons,omitempty"`
-	Values      map[string]any               `json:"values,omitempty"`
+	// Connection is what the plugin does with the chat service, one of the
+	// Connection* constants. Пусто, когда плагин ещё не сказал.
+	Connection string `json:"connection,omitempty"`
+	// ConnectionText says why the connection is up or down.
+	ConnectionText string            `json:"connectionText,omitempty"`
+	Options        []protocol.Option `json:"options,omitempty"`
+	Buttons        []protocol.Button `json:"buttons,omitempty"`
+	Values         map[string]any    `json:"values,omitempty"`
 }
 
 // Manager owns the plugin processes and the settings that belong to them.
@@ -60,6 +65,12 @@ type Manager struct {
 	// the plugins at the same time.
 	subscribers map[int]chan Event
 	nextSub     int
+
+	// watchers of the settings page read the plugins themselves, not the chat:
+	// кто запустился, кто умер, чем занят. Живут отдельно от subscribers,
+	// потому что страница настроек не хочет видеть реплики, а чат — состояния.
+	watchers    map[int]chan PluginView
+	nextWatcher int
 
 	// lifetime is the context the plugin processes hang on. It is the kernel
 	// context, never a request context: a request that ends must not take the
@@ -91,6 +102,7 @@ func NewManager(configPath, pluginsDir string) (*Manager, error) {
 		fields:      map[string]map[string]string{},
 
 		subscribers: map[int]chan Event{},
+		watchers:    map[int]chan PluginView{},
 	}
 	for _, d := range descriptors {
 		m.descriptors[d.Name] = d
@@ -210,6 +222,7 @@ func (m *Manager) view(name string) PluginView {
 
 	if process, running := m.running[name]; running {
 		view.Waiting, view.WaitingText = process.Waiting()
+		view.Connection, view.ConnectionText = process.Connection()
 	}
 
 	if info, ok := m.infos[name]; ok {
@@ -219,7 +232,11 @@ func (m *Manager) view(name string) PluginView {
 		view.Options = info.Options
 		view.Buttons = info.Buttons
 		view.Values = ValuesFor(info, stored)
-		if view.State != StateFailed {
+		// Форму плагин оставляет и после выключения — по ней видно, какие у
+		// него настройки. Но «работает» — это про процесс: объявленного
+		// описания мало, процесса может уже не быть, и тогда страница
+		// показывала бы живой плагин у того, кто его выключил.
+		if _, alive := m.running[name]; alive && view.State != StateFailed {
 			view.State = StateRunning
 		}
 	}
@@ -262,6 +279,7 @@ func (m *Manager) enable(id string) error {
 	process, err := Start(m.processContext(), id, descriptor.Path)
 	if err != nil {
 		m.setProblem(id, err)
+		m.publish(id)
 		return err
 	}
 
@@ -269,6 +287,7 @@ func (m *Manager) enable(id string) error {
 	if err != nil {
 		m.setProblem(id, err)
 		_ = process.Stop()
+		m.publish(id)
 		return err
 	}
 
@@ -291,6 +310,7 @@ func (m *Manager) enable(id string) error {
 		} else {
 			m.setProblem(id, err)
 			_ = process.Stop()
+			m.publish(id)
 			return err
 		}
 	} else if accepted != nil {
@@ -308,13 +328,24 @@ func (m *Manager) enable(id string) error {
 	delete(m.problems, id)
 	m.mu.Unlock()
 
+	// Жизнь плагина — тоже события: он сам говорит, что ушёл в сеть или что
+	// потерял связь, а страница раньше узнавала об этом опросом.
+	process.OnChange(func() {
+		m.publish(id)
+	})
+
 	// События плагина кто-то должен читать, иначе очередь переполнится и
 	// реплики начнут теряться. Читаем их всегда, даже когда никто не смотрит:
 	// подписчики придут и увидят то, что после них.
 	events, stopWatching := process.Watch()
 	go m.pump(id, events, stopWatching)
 
+	// Процесс могут убить и без спроса: segfault, OOM, kill. Ловим это здесь,
+	// а не по опросу страницы.
+	go m.watchProcess(id, process)
+
 	slog.Info("plugin ready", "plugin", id, "title", info.Title, "options", len(info.Options))
+	m.publish(id)
 	return nil
 }
 
@@ -378,6 +409,92 @@ func (m *Manager) broadcast(event Event) {
 	}
 }
 
+// --- Состояния плагинов ----------------------------------------------------
+//
+// Страница настроек не спрашивает, что с плагином: ядро само говорит ей про
+// каждое изменение. Опрос был нужен только потому, что события о состоянии
+// некуда было деваться — плагин о своей занятости уже сообщает, а о своей
+// смерти сообщить не может, некому.
+
+// WatchPlugins hands out a stream of plugin views: the current ones on connect,
+// and whatever changes afterwards. Страница настроек берёт состояние отсюда и
+// больше ничего не спрашивает.
+func (m *Manager) WatchPlugins(buffer int) (<-chan PluginView, func()) {
+	if buffer <= 0 {
+		buffer = 16
+	}
+
+	m.mu.Lock()
+	id := m.nextWatcher
+	m.nextWatcher++
+	views := make(chan PluginView, buffer)
+	m.watchers[id] = views
+	m.mu.Unlock()
+
+	var once sync.Once
+	return views, func() {
+		once.Do(func() {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+
+			if _, ok := m.watchers[id]; !ok {
+				return
+			}
+			delete(m.watchers, id)
+			close(views)
+		})
+	}
+}
+
+// publish tells every watcher that a plugin's view has changed. Медленная
+// страница теряет сообщение, а не тормозит ядро: следующее придёт целиком,
+// и состояние от неё не зависит.
+func (m *Manager) publish(id string) {
+	m.mu.Lock()
+	if _, ok := m.descriptors[id]; !ok {
+		m.mu.Unlock()
+		return
+	}
+	view := m.view(id)
+	watchers := make([]chan PluginView, 0, len(m.watchers))
+	for _, views := range m.watchers {
+		watchers = append(watchers, views)
+	}
+	m.mu.Unlock()
+
+	for _, views := range watchers {
+		select {
+		case views <- view:
+		default:
+			slog.Warn("options page is behind, skipping a state", "plugin", id)
+		}
+	}
+}
+
+// watchProcess notices that a plugin's process is gone. Плагин о своей смерти
+// сообщить не может, а страница должна узнать сразу: иначе она до следующего
+// клика считает, что всё в порядке.
+func (m *Manager) watchProcess(id string, process *Plugin) {
+	<-process.Done()
+
+	m.mu.Lock()
+	// Процесс могли перезапустить или выключить намеренно: тогда это не смерть.
+	if m.running[id] != process {
+		m.mu.Unlock()
+		return
+	}
+	delete(m.running, id)
+	problem := "плагин неожиданно завершился"
+	if err := process.WaitErr(); err != nil {
+		problem = err.Error()
+	}
+	m.problems[id] = problem
+	m.mu.Unlock()
+
+	slog.Warn("plugin process is gone", "plugin", id, "err", problem)
+	m.publish(id)
+}
+
 // Disable switches a plugin off and stops its process. The settings stay in the
 // config file, and the form keeps the last known shape.
 func (m *Manager) Disable(id string) (PluginView, error) {
@@ -404,6 +521,7 @@ func (m *Manager) Disable(id string) (PluginView, error) {
 	}
 	slog.Info("plugin switched off", "plugin", id)
 	view, _ := m.Get(id)
+	m.publish(id)
 	return view, nil
 }
 
@@ -432,19 +550,25 @@ func (m *Manager) SaveOptions(id string, values map[string]any) (PluginView, err
 	if process != nil {
 		result, err := process.Configure(values)
 		if err != nil {
-			view, _ := m.Get(id)
 			// Отказ с указанием на поля: показываем их, но в файл ничего не
 			// пишем — иначе сломанные значения останутся в конфиге.
 			// Отказ с указанием на поля — это не поломка плагина: процесс
 			// жив и работает, просто значения не годятся.
 			var invalid *ValidationError
 			if errors.As(err, &invalid) {
+				// Запоминаем и ядру: вторая вкладка должна увидеть то же
+				// самое, а не натыкаться на тот же отказ сама.
+				m.setFields(id, invalid.Fields)
+				view, _ := m.Get(id)
 				view.Fields = invalid.Fields
 				view.Problem = invalid.Message
 				view.Items = invalid.Items
+				m.publish(id)
 				return view, err
 			}
 			m.setProblem(id, err)
+			m.publish(id)
+			view, _ := m.Get(id)
 			return view, err
 		}
 		// Плагин мог привести значения к своему виду: ссылка или ник вместо
@@ -455,9 +579,11 @@ func (m *Manager) SaveOptions(id string, values map[string]any) (PluginView, err
 	m.remember(id, accepted)
 
 	if err := m.save(); err != nil {
-		return PluginView{}, err
+		view, _ := m.Get(id)
+		return view, err
 	}
 	view, _ := m.Get(id)
+	m.publish(id)
 	return view, nil
 }
 

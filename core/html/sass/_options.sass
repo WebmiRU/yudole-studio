@@ -75,6 +75,16 @@
   text-overflow: ellipsis
   white-space: nowrap
 
+// Под названием плагина живёт бейдж связи с чатом. Он сам по себе и не должен
+// занимать всю строку: в колонке flex по умолчанию элементы растягиваются по
+// ширине, и без этого бейдж был бы полосой во всю панель.
+.client__info > .status
+  align-self: flex-start
+  max-width: 100%
+  margin-top: 5px
+  padding: 2px 8px
+  font-size: 10px
+
 // Статусы.
 .status
   display: inline-flex
@@ -497,6 +507,13 @@ select.input--invalid
   gap: 8px
 
 .btn
+  // Кнопка бывает с крутилкой слева от надписи, и без зазора она прилипает к
+  // буквам: блочный элемент зазор между детьми не задаёт, а круглый спиннер
+  // без отступа стоит вплотную.
+  display: inline-flex
+  align-items: center
+  justify-content: center
+  gap: 8px
   padding: 8px 16px
   border: 1px solid tokens.$border-hi
   border-radius: tokens.$radius-sm
