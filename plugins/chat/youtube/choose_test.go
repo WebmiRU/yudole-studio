@@ -150,3 +150,85 @@ func TestQuotaExhaustedText(t *testing.T) {
 		t.Error("«channel not found» — не про квоту")
 	}
 }
+
+
+func TestSelectChatContinuationPrefersInvalidationRegardlessOfOrder(t *testing.T) {
+	live := map[string]any{
+		"continuations": []any{
+			map[string]any{
+				"timedContinuationData": map[string]any{
+					"continuation": "timed-cursor",
+					"timeoutMs":    float64(12000),
+				},
+			},
+			map[string]any{
+				"invalidationContinuationData": map[string]any{
+					"continuation": "invalidation-cursor",
+					"timeoutMs":    float64(15000),
+				},
+			},
+		},
+	}
+
+	got, wait := selectChatContinuation(live)
+	if got != "invalidation-cursor" || wait != 15000 {
+		t.Fatalf("selected continuation = %q / %d ms; want invalidation-cursor / 15000 ms", got, wait)
+	}
+}
+
+func TestSelectChatContinuationFallsBackToTimed(t *testing.T) {
+	live := map[string]any{
+		"continuations": []any{
+			map[string]any{
+				"timedContinuationData": map[string]any{
+					"continuation": "timed-cursor",
+					"timeoutMs":    float64(8000),
+				},
+			},
+		},
+	}
+
+	got, wait := selectChatContinuation(live)
+	if got != "timed-cursor" || wait != 8000 {
+		t.Fatalf("selected continuation = %q / %d ms; want timed-cursor / 8000 ms", got, wait)
+	}
+}
+
+func TestSelectChatContinuationIgnoresUnknownKinds(t *testing.T) {
+	live := map[string]any{
+		"continuations": []any{
+			map[string]any{
+				"unknownContinuationData": map[string]any{
+					"continuation": "wrong-cursor",
+					"timeoutMs":    float64(10000),
+				},
+			},
+		},
+	}
+
+	got, wait := selectChatContinuation(live)
+	if got != "" || wait != 5000 {
+		t.Fatalf("selected continuation = %q / %d ms; want empty / 5000 ms", got, wait)
+	}
+}
+
+func TestKeylessRetryDelayIsBounded(t *testing.T) {
+	tests := []struct {
+		failures int
+		want     time.Duration
+	}{
+		{failures: 0, want: time.Second},
+		{failures: 1, want: time.Second},
+		{failures: 2, want: 2 * time.Second},
+		{failures: 3, want: 5 * time.Second},
+		{failures: 4, want: 10 * time.Second},
+		{failures: 6, want: 15 * time.Second},
+		{failures: 8, want: 30 * time.Second},
+		{failures: 100, want: 30 * time.Second},
+	}
+	for _, test := range tests {
+		if got := keylessRetryDelay(test.failures); got != test.want {
+			t.Errorf("keylessRetryDelay(%d) = %s; want %s", test.failures, got, test.want)
+		}
+	}
+}
