@@ -338,7 +338,8 @@ func apiRequest(ctx context.Context, apiKey, method string, params url.Values, r
 		if len(payload.Error.Errors) > 0 {
 			reason = payload.Error.Errors[0].Reason
 		}
-		return &apiError{Status: response.StatusCode, Reason: reason, Message: payload.Error.Message}
+		message := strings.ReplaceAll(payload.Error.Message, apiKey, "[redacted]")
+		return &apiError{Status: response.StatusCode, Reason: reason, Message: message}
 	}
 	if err := json.Unmarshal(body, result); err != nil {
 		return fmt.Errorf("не удалось разобрать ответ YouTube API: %w", err)
@@ -505,9 +506,6 @@ func supervise(ctx context.Context) {
 		}
 		if errors.Is(err, errChatEnded) {
 			emitConnection(protocol.ConnectionReconnecting, "Эфир или чат завершились; ищу следующий активный эфир", 0)
-			if !waitInterval(ctx, searchInterval) {
-				continue
-			}
 			continue
 		}
 		if err != nil {
@@ -728,6 +726,9 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 		if err != nil {
 			if ctx.Err() != nil {
 				return errSettingsChanged
+			}
+			if status.Code(err) == codes.NotFound || status.Code(err) == codes.FailedPrecondition {
+				return errChatEnded
 			}
 			if permanentGRPCError(err) {
 				return fmt.Errorf("YouTube live chat %q: %w", video.Title, err)
