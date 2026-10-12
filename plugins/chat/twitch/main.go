@@ -31,6 +31,7 @@ var (
 	cfgMu sync.RWMutex
 	cfg settings
 	changed = make(chan struct{}, 1)
+	sendMu sync.Mutex
 )
 
 func setSettings(s settings) {
@@ -166,6 +167,8 @@ func supervise(ctx context.Context) {
 	}
 }
 
+var errSettingsChanged = errors.New("настройки Twitch изменились")
+
 func runSession(parent context.Context, s settings) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
@@ -178,7 +181,9 @@ func runSession(parent context.Context, s settings) error {
 	go func() {
 		select {
 		case <-ctx.Done(): _ = conn.Close()
-		case <-changed: cancel()
+		case <-changed:
+			cancel()
+			_ = conn.Close()
 		}
 	}()
 	reader := textproto.NewReader(bufio.NewReader(conn))
@@ -188,14 +193,14 @@ func runSession(parent context.Context, s settings) error {
 		if err := writeIRC(writer, command, args...); err != nil { return err }
 		return bw.Flush()
 	}
-	if err = write("CAP", "REQ", ":twitch.tv/tags twitch.tv/commands twitch.tv/membership"); err != nil { return err }
+	if err = write("CAP", "REQ", "twitch.tv/tags twitch.tv/commands twitch.tv/membership"); err != nil { return err }
 	if err = write("PASS", "oauth:"+s.Token); err != nil { return err }
 	if err = write("NICK", s.Nick); err != nil { return err }
 	joined := false
 	for {
 		line, err := reader.ReadLine()
 		if err != nil {
-			if ctx.Err() != nil { return errors.New("настройки Twitch изменились") }
+			if ctx.Err() != nil { return errSettingsChanged }
 			return err
 		}
 		m, err := parseIRC(line)
@@ -213,7 +218,7 @@ func runSession(parent context.Context, s settings) error {
 			emitConnection(protocol.ConnectionOnline, "", 0)
 		case "NOTICE":
 			lower := strings.ToLower(m.Trailing)
-			if strings.Contains(lower, "authentication failed") || strings.Contains(lower, "improperly formatted auth") {
+			if m.Tags["msg-id"] == "login_authentication_failed" || strings.Contains(lower, "authentication failed") || strings.Contains(lower, "improperly formatted auth") {
 				return errors.New("Twitch отклонил токен или логин; проверьте OAuth-токен со scope chat:read")
 			}
 			logInfo("Twitch: " + m.Trailing)
@@ -226,11 +231,32 @@ func runSession(parent context.Context, s settings) error {
 			name := m.Tags["display-name"]
 			if name == "" { name = login }
 			text := m.Trailing
-			html := renderEmotes(text, m.Tags["emotes"], m.Tags["emote-sets"])
+			src := text
+			if strings.HasPrefix(text, "ACTION ") && strings.HasSuffix(text, "") {
+				text = strings.TrimSuffix(strings.TrimPrefix(text, "ACTION "), "")
+			}
+			html := renderEmotes(text, m.Tags["emotes"])
 			send(protocol.KindMessagePublic, protocol.ChatPayload{
 				Channel:channel, User:protocol.ChatUser{Name:name, ID:m.Tags["user-id"], Login:login},
-				Message:protocol.ChatLine{Src:text, Text:text, Html:html},
+				Message:protocol.ChatLine{Src:src, Text:text, Html:html},
 			})
+		case "USERNOTICE":
+			if len(m.Params) > 0 {
+				channel := channelName(m.Params[0])
+				login := strings.ToLower(m.Tags["login"])
+				name := m.Tags["display-name"]
+				if name == "" { name = login }
+				text := m.Trailing
+				if notice := m.Tags["system-msg"]; notice != "" {
+					if text != "" { text = notice + " — " + text } else { text = notice }
+				}
+				if text != "" {
+					send(protocol.KindMessagePublic, protocol.ChatPayload{
+						Channel:channel, User:protocol.ChatUser{Name:name, ID:m.Tags["user-id"], Login:login},
+						Message:protocol.ChatLine{Src:text, Text:text, Html:renderEmotes(text, m.Tags["emotes"])},
+					})
+				}
+			}
 		case "CLEARMSG":
 			if len(m.Params) > 0 && m.Tags["target-msg-id"] != "" {
 				send(protocol.KindMessageDeleted, protocol.DeletedMessagePayload{Channel:channelName(m.Params[0]), MessageID:m.Tags["target-msg-id"], By:userLogin(m.Prefix)})
@@ -263,6 +289,8 @@ func emitConnection(state, reason string, attempt int) {
 }
 func logInfo(s string) { send(protocol.KindLog, protocol.LogPayload{Level:"info", Message:s}) }
 func send(kind string, payload any) {
+	sendMu.Lock()
+	defer sendMu.Unlock()
 	line, err := protocol.Encode(protocol.MustNew(kind, payload))
 	if err != nil { fmt.Fprintln(os.Stderr, "twitch:", err); return }
 	_, _ = os.Stdout.Write(line)
