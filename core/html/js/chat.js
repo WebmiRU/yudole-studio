@@ -163,10 +163,13 @@ function line(entry) {
         // Html приходит только если плагин нашёл в строке смайлы и подставил
         // картинки; иначе это тот же самый текст без единой разметки, и
         // разбирать его как html незачем.
+        // Подписка или рейд — это писал сервис, а не человек. Отмечаем: в ленте
+        // оно стоит среди реплик, как у самой Twitch, но спутать нельзя.
+        const notice = Boolean(entry.payload?.notice);
         if (message.html) {
-            return richBlock(entry, 'neutral', head, message.html);
+            return richBlock(entry, 'neutral', head, message.html, notice);
         }
-        return block(entry, 'neutral', head, message.text ?? '');
+        return block(entry, 'neutral', head, message.text ?? '', notice);
     }
 
     return block(entry, severityOf(entry), author(entry), describe(entry));
@@ -175,11 +178,11 @@ function line(entry) {
 // richBlock is a block whose text the plugin already turned into markup —
 // смайлы вместо их кодов. Разметку ставим целиком: плагин её собрал сам и
 // экранировал всё, что не разметка.
-function richBlock(entry, severity, head, html) {
+function richBlock(entry, severity, head, html, notice = false) {
     const text = el('div', {class: 'msg__text'});
     text.innerHTML = html;
 
-    return el('article', {class: 'msg', 'data-severity': severity}, [
+    return el('article', noticeAttrs(notice), [
         el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
         el('div', {class: 'msg__rule'}),
         text,
@@ -188,7 +191,7 @@ function richBlock(entry, severity, head, html) {
 
 // block is the shape of every message: who wrote it, a rule under the name, and
 // then the text itself.
-function block(entry, severity, head, text) {
+function block(entry, severity, head, text, notice = false) {
     // Текст собирается из кусков, а куски лежат в массивах: расплющиваем
     // насколько угодно глубоко, иначе в блок попадёт сам массив.
     const body = [...[text].flat(Infinity)].filter(
@@ -198,7 +201,7 @@ function block(entry, severity, head, text) {
         return null;
     }
 
-    return el('article', {class: 'msg', 'data-severity': severity}, [
+    return el('article', noticeAttrs(notice), [
         // Полоска стоит между автором и текстом, а не рядом с автором: шапка
         // выстроена в строку, и внутри неё полоска легла бы вбок.
         el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
@@ -207,6 +210,16 @@ function block(entry, severity, head, text) {
             typeof piece === 'string' ? document.createTextNode(piece) : piece
         ))),
     ]);
+}
+
+// noticeAttrs — как выглядит служебное сообщение. Отметка нужна и на блоке,
+// и в атрибутах: по одному цвету полоски не отличить, а тег показывает, что
+// реплику писал сервис, а не человек.
+function noticeAttrs(notice) {
+    if (notice) {
+        return {class: 'msg is-notice', 'data-severity': 'info'};
+    }
+    return {class: 'msg', 'data-severity': 'neutral'};
 }
 
 // author is who the service message is from: the plugin that sent it, in

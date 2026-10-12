@@ -218,6 +218,12 @@ type ChatPayload struct {
 	Channel string   `json:"channel"`
 	User    ChatUser `json:"user"`
 	Message ChatLine `json:"message"`
+	// Notice marks a message the service posted itself rather than a person:
+	// Twitch writes into the chat «X subscribed» and «X raided the channel».
+	// Само по себе это реплика, и в ленте она стоит наравне с остальными —
+	// так же, как у самой Twitch. Но по написанному это не отличить, а
+	// странице полезно знать: человек смотрит на чат, а это писал сервис.
+	Notice bool `json:"notice,omitempty"`
 }
 
 // ChatUser is who wrote the line.
