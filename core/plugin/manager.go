@@ -409,6 +409,18 @@ func (m *Manager) broadcast(event Event) {
 	}
 }
 
+// WithoutValues is the view as it goes into the live stream: состояние без
+// сохранённых настроек.
+//
+// Настройки — это в том числе пароли. В поток состояний они не нужны: страница
+// их всё равно не применяет, а держать значит тащить секрет по сети при каждом
+// чихе — плагин переключили, он занят, кто-то вошёл в канал. Значения отдаются
+// один раз и по делу, в ответе на чтение плагина.
+func (v PluginView) WithoutValues() PluginView {
+	v.Values = nil
+	return v
+}
+
 // --- Состояния плагинов ----------------------------------------------------
 //
 // Страница настроек не спрашивает, что с плагином: ядро само говорит ей про
@@ -455,7 +467,7 @@ func (m *Manager) publish(id string) {
 		m.mu.Unlock()
 		return
 	}
-	view := m.view(id)
+	view := m.view(id).WithoutValues()
 	watchers := make([]chan PluginView, 0, len(m.watchers))
 	for _, views := range m.watchers {
 		watchers = append(watchers, views)

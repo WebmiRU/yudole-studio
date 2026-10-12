@@ -143,6 +143,51 @@ func TestStatesPageGetsChangesAsTheyHappen(t *testing.T) {
 	}
 }
 
+// Настроек, а с ними и паролей, в потоке быть не должно: он живёт весь день и
+// уходит в браузер десятки раз, а значения нужны один раз и по делу.
+func TestStatesStreamCarriesNoValues(t *testing.T) {
+	fake := newFakeManager()
+	fake.views = []plugin.PluginView{{
+		ID:     "twitch",
+		State:  "running",
+		Values: map[string]any{"nick": "vasya", "token": "oauth:secret"},
+	}}
+
+	server := httptest.NewServer(watchHandler(fake))
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.CloseNow() })
+
+	hello := readState(t, conn)
+	if hello.Hello == nil || len(hello.Hello.Plugins) != 1 {
+		t.Fatalf("приветствие = %+v", hello.Hello)
+	}
+
+	line, err := marshal(hello)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(line, "secret") || strings.Contains(line, "oauth:") {
+		t.Errorf("пароль попал в поток состояний: %s", line)
+	}
+	if strings.Contains(line, "values") {
+		t.Errorf("настройки попали в поток состояний: %s", line)
+	}
+}
+
+// marshal is how the page would see one message.
+func marshal(message stateMessage) (string, error) {
+	data, err := json.Marshal(message, json.Deterministic(true))
+	return string(data), err
+}
+
 // Закрывшаяся страница не должна оставлять подписку: её очередь перестанет
 // читать, и ядро начнёт терять состояния.
 func TestStatesPageLeavesNoSubscription(t *testing.T) {

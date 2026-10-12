@@ -102,15 +102,12 @@ function listenStates() {
             if (gone) {
                 state.selectedId = state.plugins[0]?.id ?? null;
             }
-
-            // Значения формы берутся из черновика, и на пустом черновике списки
-            // каналов выходят пустыми: ядро их прислало, а взять неоткуда.
-            // Наполняем — но только если человек ничего не вбивал:
-            // переподключение не должно съедать напечатанное.
-            if (gone || !state.dirty) {
-                resetValues();
-            }
             render();
+
+            // Настроек в потоке нет: там пароли, а состояния приходят десятки
+            // раз в час. Значит, спрашиваем их отдельно — один раз, и только
+            // для открытого плагина.
+            loadValues();
             return;
         }
 
@@ -194,6 +191,39 @@ function selected() {
 function resetValues() {
     state.values = cloneValues(selected()?.values);
     state.dirty = false;
+}
+
+// loadValues спрашивает настройки открытого плагина. Значения не едут в потоке
+// состояний: там среди них пароли, а состояния приходят десятки раз в час.
+// Забрать их надо один раз — и только для того плагина, чья форма открыта.
+async function loadValues() {
+    const id = state.selectedId;
+    if (!id) {
+        return;
+    }
+
+    let view;
+    try {
+        view = await api(`${API}/${id}`);
+    } catch {
+        // Ядро не ответило: покажем то, что есть, форма разъедется сама.
+        return;
+    }
+
+    if (state.selectedId !== id) {
+        return;
+    }
+
+    const index = state.plugins.findIndex((plugin) => plugin.id === id);
+    if (index !== -1) {
+        state.plugins[index] = {...state.plugins[index], values: view.values ?? {}};
+    }
+
+    // Набранное не трогаем: человек мог уже править.
+    if (!state.dirty) {
+        resetValues();
+    }
+    render();
 }
 
 // cloneValues копирует настройки для формы. Копия должна быть настоящей: если
@@ -1013,6 +1043,8 @@ function select(id) {
     location.hash = id;
     resetValues();
     render();
+    // Настройки этого плагина мы ещё не видели: в потоке их нет.
+    loadValues();
 }
 
 window.addEventListener('hashchange', () => {
@@ -1021,6 +1053,7 @@ window.addEventListener('hashchange', () => {
         state.selectedId = state.plugins.some((plugin) => plugin.id === id) ? id : state.selectedId;
         resetValues();
         render();
+        loadValues();
     }
 });
 

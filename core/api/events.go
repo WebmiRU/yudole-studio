@@ -63,7 +63,14 @@ func watchHandler(manager Manager) http.HandlerFunc {
 		views, unwatch := manager.WatchPlugins(stateQueue)
 		defer unwatch()
 
-		hello := stateMessage{Hello: &stateHello{Plugins: manager.List()}}
+		// Настройки, а с ними и пароли, в поток не идут: они приезжают отдельно,
+		// когда страница спрашивает конкретный плагин.
+		known := manager.List()
+		for i := range known {
+			known[i] = known[i].WithoutValues()
+		}
+
+		hello := stateMessage{Hello: &stateHello{Plugins: known}}
 		if err := writeState(ctx, conn, hello); err != nil {
 			return
 		}

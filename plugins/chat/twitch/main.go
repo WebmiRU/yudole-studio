@@ -32,7 +32,7 @@ var options = []protocol.Option{
 		Type:        protocol.OptionText,
 		Label:       "Логин Twitch",
 		Section:     "Подключение",
-		Placeholder: "justinfan1234",
+		Placeholder: "оставьте пустым",
 		Hint:        "Необязательно. Без него подключаемся анонимно, как гость",
 	},
 	{
@@ -40,7 +40,7 @@ var options = []protocol.Option{
 		Type:        protocol.OptionPassword,
 		Label:       "OAuth-токен",
 		Section:     "Подключение",
-		Placeholder: "oauth:...",
+		Placeholder: "оставьте пустым",
 		Hint:        "Необязательно. Нужен для отправки сообщений, а не для чтения",
 	},
 	{
