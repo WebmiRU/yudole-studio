@@ -158,11 +158,6 @@
     padding: 0
     border: 0
     background: transparent
-    // Keep the panel almost flat: strong rotateY made long messages taper.
-    // A tiny counter-clockwise roll adds depth without bending the whole frame.
-    transform: rotateZ(-.04deg)
-    transform-origin: center center
-
     &:last-child
       margin-bottom: 0
 
@@ -216,14 +211,6 @@
       stroke-linecap: round
       vector-effect: non-scaling-stroke
 
-    .msg__frame-detail
-      fill: none
-      stroke: var(--hud-accent)
-      stroke-width: 1
-      stroke-opacity: .55
-      stroke-linecap: butt
-      vector-effect: non-scaling-stroke
-
     .msg__head
       display: flex
       align-items: center
@@ -253,17 +240,6 @@
       margin: 6px 0 9px
       background: linear-gradient(90deg, rgba(107, 231, 241, .62), rgba(56, 155, 166, .36) 61%, rgba(48, 128, 139, .07))
 
-      &::after
-        content: ""
-        position: absolute
-        top: -2px
-        right: 14%
-        width: 9px
-        height: 4px
-        border-top: 1px solid rgba(119, 237, 246, .65)
-        border-right: 1px solid rgba(119, 237, 246, .65)
-        transform: skewX(-35deg)
-
     .msg__rule-signal
       position: absolute
       top: -1px
@@ -278,16 +254,6 @@
       min-width: 0
       padding: 0 0 1px
 
-      &::before
-        content: ""
-        position: absolute
-        top: 3px
-        bottom: 4px
-        left: -9px
-        width: 1px
-        background: linear-gradient(180deg, rgba(103, 231, 241, .42), transparent)
-        pointer-events: none
-
     .msg__text
       min-width: 0
       color: #d8e9ec
@@ -295,43 +261,6 @@
       line-height: 1.5
       white-space: pre-wrap
       word-break: break-word
-
-    .msg__foot
-      display: flex
-      align-items: center
-      justify-content: flex-end
-      gap: 5px
-      height: 7px
-      margin-top: 8px
-      opacity: .8
-
-    .msg__foot-mark
-      position: relative
-      width: 13px
-      height: 5px
-      border-right: 1px solid rgba(110, 229, 239, .72)
-      border-left: 1px solid rgba(110, 229, 239, .72)
-
-      &::after
-        content: ""
-        position: absolute
-        top: 1px
-        right: 3px
-        left: 3px
-        height: 1px
-        background: rgba(110, 229, 239, .62)
-
-    .msg__foot-line
-      width: clamp(32px, 8%, 96px)
-      height: 1px
-      background: linear-gradient(90deg, rgba(76, 190, 202, .08), rgba(111, 233, 242, .65))
-
-    .msg__foot-tick
-      width: 8px
-      height: 5px
-      border-top: 1px solid rgba(132, 242, 249, .82)
-      border-right: 1px solid rgba(132, 242, 249, .82)
-      transform: skewX(35deg)
 
     --hud-accent: #54d8e5
     --hud-glint: #b9fbff
