@@ -19,3 +19,6 @@ Thumbs.db
 
 # go.work.sum — локальные суммы зависимостей воркспейса
 go.work.sum
+# бинарники чат-плагина YouTube
+/plugins/chat/youtube/youtube
+/plugins/chat/youtube/youtube.exe
