@@ -21,7 +21,7 @@ import (
 	"unicode/utf8"
 
 	"studio/core/protocol"
-	"studio/plugins/chat/youtube/internal/ytproto"
+	ytproto "studio/plugins/chat/youtube/internal/ytproto"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/codes"
