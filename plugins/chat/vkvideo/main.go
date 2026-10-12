@@ -372,6 +372,7 @@ func runSession(parent context.Context, current settings) error {
 	}()
 
 	channels := make([]vkChannel, 0, len(current.Channels))
+	seenChannelIDs := make(map[string]bool)
 	retryableFailures := 0
 	for _, input := range current.Channels {
 		if ctx.Err() != nil {
@@ -386,6 +387,10 @@ func runSession(parent context.Context, current settings) error {
 			}
 			continue
 		}
+		if seenChannelIDs[channel.ID] {
+			continue
+		}
+		seenChannelIDs[channel.ID] = true
 		channels = append(channels, channel)
 	}
 	if ctx.Err() != nil {
@@ -429,6 +434,9 @@ func runSession(parent context.Context, current settings) error {
 	if err := invoke(ctx, conn, nextID, map[string]any{
 		"connect": map[string]any{"token": token, "name": "js"},
 	}, &pending); err != nil {
+		if ctx.Err() != nil && parent.Err() == nil {
+			return errSettingsChanged
+		}
 		return fmt.Errorf("handshake VK Видео Live: %w", err)
 	}
 
