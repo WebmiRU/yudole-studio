@@ -13,9 +13,9 @@ import (
 	"time"
 )
 
-// web serves the built front-end from disk: index.html for "/", every other
-// path straight from the directory. Nothing is cached in memory or in the
-// browser, so a rebuilt page is visible on the next reload.
+// web serves the built front-end from disk: index.html for "/", chat.html for
+// "/chat", every other path straight from the directory. Nothing is cached in
+// memory or in the browser, so a rebuilt page is visible on the next reload.
 type web struct {
 	dir   string
 	index string
@@ -49,31 +49,53 @@ func newWeb(dir string) (*web, error) {
 func (w *web) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	rw.Header().Set("Cache-Control", "no-store")
 
-	if isIndexPath(r.URL.Path) {
-		w.serveIndex(rw, r)
+	if page, ok := pagePath(r.URL.Path); ok {
+		w.servePage(rw, r, page)
 		return
 	}
 	w.files.ServeHTTP(rw, r)
 }
 
-// serveIndex writes index.html directly: http.ServeFile would redirect
-// /index.html to /, and we do not want that.
-func (w *web) serveIndex(rw http.ResponseWriter, r *http.Request) {
-	f, err := os.Open(w.index)
+// pagePath maps a short address to the file behind it: "/" to index.html and
+// "/chat" to chat.html. Serving them by name keeps the addresses readable —
+// /chat instead of /chat.html.
+func pagePath(urlPath string) (string, bool) {
+	switch isIndexPath(urlPath) {
+	case true:
+		return "index.html", true
+	default:
+		clean := path.Clean("/" + strings.TrimPrefix(urlPath, "/"))
+		if clean == "/chat" {
+			return "chat.html", true
+		}
+		return "", false
+	}
+}
+
+// servePage writes a page directly: http.ServeFile would redirect /index.html
+// to /, and we do not want that.
+func (w *web) servePage(rw http.ResponseWriter, r *http.Request, name string) {
+	file := filepath.Join(w.dir, name)
+	if _, err := os.Stat(file); err != nil {
+		http.Error(rw, name+" is unavailable", http.StatusNotFound)
+		return
+	}
+
+	f, err := os.Open(file)
 	if err != nil {
-		slog.Error("web: open index", "path", w.index, "err", err)
-		http.Error(rw, "index.html is unavailable", http.StatusInternalServerError)
+		slog.Error("web: open page", "path", file, "err", err)
+		http.Error(rw, name+" is unavailable", http.StatusInternalServerError)
 		return
 	}
 	defer f.Close()
 
 	info, err := f.Stat()
 	if err != nil {
-		slog.Error("web: stat index", "path", w.index, "err", err)
-		http.Error(rw, "index.html is unavailable", http.StatusInternalServerError)
+		slog.Error("web: stat page", "path", file, "err", err)
+		http.Error(rw, name+" is unavailable", http.StatusInternalServerError)
 		return
 	}
-	http.ServeContent(rw, r, "index.html", info.ModTime(), f)
+	http.ServeContent(rw, r, name, info.ModTime(), f)
 }
 
 // isIndexPath reports whether p is the entry point of the front-end.

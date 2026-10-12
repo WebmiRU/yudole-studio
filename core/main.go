@@ -20,6 +20,7 @@ import (
 	"time"
 
 	"studio/core/api"
+	"studio/core/chat"
 	"studio/core/plugin"
 	"studio/core/settings"
 )
@@ -153,9 +154,13 @@ func run() error {
 			"hint", "run `npm run build`")
 	}
 
+	// Живой чат: одна подписка на все плагины, из неё кормятся все страницы.
+	hub := chat.New(manager)
+
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", healthHandler(page))
 	mux.Handle("/api/", api.Handler(manager))
+	mux.Handle("GET /api/chat", hub.Handler())
 	mux.Handle("/", page)
 
 	srv := &http.Server{
@@ -193,6 +198,7 @@ func run() error {
 		// HMR живёт только в дев-сервере: собранная страница обновляется
 		// лишь после npm run build. Напоминаем, где включается разработка.
 		slog.Info("studio: для разработки с HMR — npm run dev", "url", defaultDevTarget)
+		slog.Info("studio: живой чат", "url", "http://"+displayAddr(srv.Addr)+"/chat")
 		if err := srv.Serve(listener); err != nil && !errors.Is(err, http.ErrServerClosed) {
 			listenErr <- err
 		}

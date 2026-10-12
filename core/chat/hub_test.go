@@ -1,0 +1,220 @@
+package chat
+
+import (
+	"context"
+	"encoding/json/v2"
+	"net/http/httptest"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/coder/websocket"
+
+	"studio/core/plugin"
+	"studio/core/protocol"
+)
+
+// fakeSource plays the part of the plugin manager: hands out subscriptions and
+// lets a test push events into them.
+type fakeSource struct {
+	events   chan plugin.Event
+	subbed   int
+	views    []plugin.PluginView
+	subsDone bool
+}
+
+func newFakeSource() *fakeSource {
+	// Канал один на всё время: подписка отдаёт тот же самый, иначе события,
+	// отправленные до неё, ушли бы в пустоту.
+	return &fakeSource{events: make(chan plugin.Event, 64)}
+}
+
+func (f *fakeSource) Subscribe(int) (<-chan plugin.Event, func()) {
+	f.subbed++
+
+	var closed bool
+	return f.events, func() {
+		if !closed {
+			closed = true
+			f.subsDone = true
+		}
+	}
+}
+
+func (f *fakeSource) List() []plugin.PluginView { return f.views }
+
+func (f *fakeSource) push(t *testing.T, pluginName, kind string, payload any) {
+	t.Helper()
+
+	message, err := protocol.New(kind, payload)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.events <- plugin.Event{Plugin: pluginName, Message: message}
+}
+
+func line(kind, channel, user, text string) plugin.Event {
+	message := protocol.MustNew(kind, protocol.ChatPayload{
+		Channel: channel,
+		User:    protocol.ChatUser{Name: user},
+		Message: protocol.ChatLine{Text: text},
+	})
+	return plugin.Event{Plugin: "goodgame", Message: message}
+}
+
+// dial opens a page against the hub and returns the connection.
+func dial(t *testing.T, hub *Hub) *websocket.Conn {
+	t.Helper()
+
+	server := httptest.NewServer(hub.Handler())
+	t.Cleanup(server.Close)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	t.Cleanup(cancel)
+
+	conn, _, err := websocket.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	if err != nil {
+		t.Fatalf("dial: %v", err)
+	}
+	t.Cleanup(func() { _ = conn.CloseNow() })
+
+	conn.SetReadLimit(1 << 20)
+	return conn
+}
+
+// read waits for one message of the page's protocol and returns it.
+func read(t *testing.T, conn *websocket.Conn) envelope {
+	t.Helper()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, data, err := conn.Read(ctx)
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
+	var message envelope
+	if err := json.Unmarshal(data, &message); err != nil {
+		t.Fatalf("not a message of the page: %v", err)
+	}
+	return message
+}
+
+// Страница, открытая позже, должна увидеть то, что было до неё: иначе чат на
+// второй вкладке начинался бы с пустоты.
+func TestPageGetsTheHistoryOnOpen(t *testing.T) {
+	source := newFakeSource()
+	source.views = []plugin.PluginView{{ID: "goodgame", Title: "GoodGame", State: "running"}}
+	hub := New(source)
+	t.Cleanup(func() { waitFor(2*time.Second, func() bool { return source.subbed == 1 }) })
+
+	source.push(t, "goodgame", protocol.KindConnectionState, protocol.ConnectionPayload{State: protocol.ConnectionOnline})
+	source.push(t, "goodgame", protocol.KindChannelJoinSuccessful, protocol.ChannelPayload{Channel: "53029"})
+	source.push(t, "goodgame", protocol.KindMessagePublic, protocol.ChatPayload{
+		Channel: "53029",
+		User:    protocol.ChatUser{Name: "E.Wolf"},
+		Message: protocol.ChatLine{Text: "привет"},
+	})
+
+	// Ждём, пока хаб всё это примет: подписка начинается в отдельной горутине.
+	if !waitFor(2*time.Second, func() bool {
+		hub.mu.Lock()
+		defer hub.mu.Unlock()
+		return len(hub.history) == 3
+	}) {
+		t.Fatal("хаб не запомнил события")
+	}
+
+	conn := dial(t, hub)
+	hello := read(t, conn)
+	if hello.Hello == nil {
+		t.Fatal("первым пришло не приветствие")
+	}
+	if len(hello.Hello.History) != 3 {
+		t.Fatalf("в истории %d событий, want 3", len(hello.Hello.History))
+	}
+	if len(hello.Hello.Plugins) != 1 || hello.Hello.Plugins[0].Title != "GoodGame" {
+		t.Errorf("плагины = %+v", hello.Hello.Plugins)
+	}
+
+	last := hello.Hello.History[2]
+	if last.Text != "привет" || last.User != "E.Wolf" || last.Channel != "53029" {
+		t.Errorf("реплика в истории = %+v", last)
+	}
+}
+
+// Что пришло после подключения — приходит сразу.
+func TestPageGetsNewEvents(t *testing.T) {
+	source := newFakeSource()
+	hub := New(source)
+	t.Cleanup(func() { waitFor(2*time.Second, func() bool { return source.subbed == 1 }) })
+
+	conn := dial(t, hub)
+	read(t, conn) // приветствие
+
+	source.events <- line(protocol.KindMessagePublic, "53029", "E.Wolf", "строка")
+
+	live := read(t, conn)
+	if live.Event == nil {
+		t.Fatal("пришло не событие")
+	}
+	if live.Event.Text != "строка" || live.Event.Channel != "53029" {
+		t.Errorf("событие = %+v", live.Event)
+	}
+	if live.Event.Plugin != "goodgame" {
+		t.Errorf("плагин = %q, want goodgame", live.Event.Plugin)
+	}
+}
+
+// Закрывшаяся страница не должна оставлять после себя подписку: иначе её
+// очередь переполнится и ядро начнёт терять события для всех.
+func TestUnsubscribeIsEnoughOnce(t *testing.T) {
+	source := newFakeSource()
+	hub := New(source)
+	t.Cleanup(func() { waitFor(2*time.Second, func() bool { return source.subbed == 1 }) })
+
+	conn := dial(t, hub)
+	read(t, conn)
+	_ = conn.CloseNow()
+
+	if !waitFor(3*time.Second, func() bool {
+		hub.mu.Lock()
+		defer hub.mu.Unlock()
+		return len(hub.subscribers) == 0
+	}) {
+		t.Fatal("страница осталась в списке подписчиков")
+	}
+}
+
+// История не растёт бесконечно.
+func TestHistoryIsCapped(t *testing.T) {
+	source := newFakeSource()
+	hub := New(source)
+	t.Cleanup(func() { waitFor(2*time.Second, func() bool { return source.subbed == 1 }) })
+
+	for i := range HistoryLimit + 50 {
+		source.events <- line(protocol.KindMessagePublic, "53029", "vasya", strings.Repeat("x", i%7+1))
+	}
+
+	if !waitFor(5*time.Second, func() bool {
+		hub.mu.Lock()
+		defer hub.mu.Unlock()
+		return len(hub.history) == HistoryLimit
+	}) {
+		hub.mu.Lock()
+		got := len(hub.history)
+		hub.mu.Unlock()
+		t.Fatalf("в истории %d событий, want %d", got, HistoryLimit)
+	}
+}
+
+func waitFor(timeout time.Duration, condition func() bool) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
+}

@@ -21,18 +21,25 @@ import (
 type goodgame struct {
 	url string
 
-	mu       sync.Mutex
-	conn     *websocket.Conn
-	joined   []string
-	refused  map[string]string
-	notices  []func(*chat.Message)
-	accepted chan struct{}
+	mu      sync.Mutex
+	conn    *websocket.Conn
+	joined  []string
+	refused map[string]string
+	// refuseTimes turns the service down only this many times, then lets it
+	// through: так проверяется, что плагин возвращается к каналу сам.
+	refuseTimes map[string]int
+	notices     []func(*chat.Message)
+	accepted    chan struct{}
 }
 
 func newGoodgame(t *testing.T) *goodgame {
 	t.Helper()
 
-	fake := &goodgame{refused: map[string]string{}, accepted: make(chan struct{}, 32)}
+	fake := &goodgame{
+		refused:     map[string]string{},
+		refuseTimes: map[string]int{},
+		accepted:    make(chan struct{}, 32),
+	}
 	t.Setenv("GOODGAME_CHAT_URL", "")
 
 	server := httptest.NewServer(http.HandlerFunc(fake.serve))
@@ -83,6 +90,12 @@ func (f *goodgame) serve(w http.ResponseWriter, r *http.Request) {
 		f.mu.Lock()
 		f.joined = append(f.joined, message.Type)
 		reason := f.refused[message.Type]
+		if left := f.refuseTimes[message.Type]; left > 0 {
+			f.refuseTimes[message.Type] = left - 1
+			if reason == "" {
+				reason = "пока не пускаем"
+			}
+		}
 		notices := slices.Clone(f.notices)
 		f.mu.Unlock()
 
@@ -117,6 +130,14 @@ func (f *goodgame) Say(send func(*chat.Message)) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
 	f.notices = append(f.notices, send)
+}
+
+// RefuseTimes makes the service turn the first n requests of that kind down and
+// then answer normally.
+func (f *goodgame) RefuseTimes(kind string, n int) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	f.refuseTimes[kind] = n
 }
 
 // Refuse makes the service turn every request of that kind down.
@@ -353,4 +374,71 @@ func waitFor(timeout time.Duration, condition func() bool) bool {
 		time.Sleep(20 * time.Millisecond)
 	}
 	return false
+}
+
+// Канал, в который сначала не пустили, плагин должен попробовать снова сам —
+// без всякой смены настроек. Раньше он молчал до переподключения.
+func TestSocketRetriesAChannelItCouldNotJoin(t *testing.T) {
+	shortenRetry(t)
+
+	fake := newGoodgame(t)
+	fake.RefuseTimes("join", 1)
+
+	restore := currentChannels()
+	t.Cleanup(func() { setChannels(restore) })
+	setChannels([]protocol.ChoiceValue{{Value: "53029", Label: "E.Wolf"}})
+
+	socket, _ := watchSocket(t)
+
+	// Первая попытка провалится.
+	failed := waitKind(t, socket, protocol.KindChannelJoinFailed)
+	var payload protocol.ChannelPayload
+	if err := failed.PayloadInto(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Channel != "53029" {
+		t.Fatalf("не вошли в %q, want 53029", payload.Channel)
+	}
+
+	// А вторая, по таймеру, должна удаться — без вмешательства человека.
+	started := time.Now()
+	waitKind(t, socket, protocol.KindChannelJoinSuccessful)
+	if elapsed := time.Since(started); elapsed < retryMin/2 {
+		t.Errorf("повтор через %v — таймер ждёт не меньше %v", elapsed, retryMin)
+	}
+
+	joins := 0
+	fake.mu.Lock()
+	for _, kind := range fake.joined {
+		if kind == "join" {
+			joins++
+		}
+	}
+	fake.mu.Unlock()
+
+	if joins < 2 {
+		t.Errorf("сервис получил %d join, а ждали минимум 2", joins)
+	}
+}
+
+// Отсрочка растёт, иначе канал, в который не пускают, ловил бы отказ каждые
+// полминуты до скончания века.
+func TestRetryBackoffGrowsAndStops(t *testing.T) {
+	delay := retryMin
+	for _, want := range []time.Duration{time.Minute, 2 * time.Minute, 4 * time.Minute, retryMax, retryMax} {
+		got := nextBackoff(delay)
+		if got != want {
+			t.Errorf("отсрочка выросла до %v, want %v", got, want)
+		}
+		delay = got
+	}
+}
+
+// shortenRetry makes the retry quick enough to wait for in a test.
+func shortenRetry(t *testing.T) {
+	t.Helper()
+
+	previousMin, previousMax := retryMin, retryMax
+	retryMin, retryMax = 150*time.Millisecond, 400*time.Millisecond
+	t.Cleanup(func() { retryMin, retryMax = previousMin, previousMax })
 }

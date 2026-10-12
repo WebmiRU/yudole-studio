@@ -2,6 +2,7 @@ package chat
 
 import (
 	"encoding/json/v2"
+	"strings"
 	"testing"
 )
 
@@ -116,5 +117,142 @@ func TestChatLine(t *testing.T) {
 	}
 	if line.Text != "Miker, :panic:" {
 		t.Errorf("text = %q", line.Text)
+	}
+}
+
+// Смайлы приезжают отдельным файлом. Берём кусок настоящего ответа.
+func TestSmiles(t *testing.T) {
+	const raw = `{"Smiles":[{
+		"id":"874","bind":"26","name":"thup","donat":0,"premium":0,
+		"internal_id":104,"paid":0,"animated":"1","tag":"?tuvney",
+		"img":"https://goodgame.ru/images/smiles/thup.png",
+		"img_big":"https://goodgame.ru/images/smiles/thup-big.png",
+		"img_gif":"https://goodgame.ru/images/anismiles/thup-gif.gif",
+		"channel":"","channel_id":0}],
+	"Channel_Smiles":{"1577":[{
+		"id":"95","name":"shimoro2","premium":1,"channel":"SHIMORO",
+		"channel_id":"1577","animated":"","tag":"?tuvney"}]}}`
+
+	var smiles Smiles
+	if err := json.Unmarshal([]byte(raw), &smiles); err != nil {
+		t.Fatalf("global.json не разобрался: %v", err)
+	}
+	if len(smiles.Common) != 1 || smiles.Common[0].Name != "thup" {
+		t.Fatalf("общие = %+v", smiles.Common)
+	}
+	if !smiles.Common[0].IsAnimated() {
+		t.Error("animated: \"1\" должен значить гифку")
+	}
+	if len(smiles.Channel["1577"]) != 1 {
+		t.Fatalf("смайлы канала = %+v", smiles.Channel)
+	}
+
+	set := NewSet(smiles.Common...)
+	set.Add(smiles.Channel["1577"])
+
+	for _, code := range []string{"thup", ":thup:"} {
+		if _, ok := set.Lookup(code); !ok {
+			t.Errorf("смайл %q не нашёлся", code)
+		}
+	}
+	if _, ok := set.Lookup("nosmile"); ok {
+		t.Error("несуществующий смайл нашёлся")
+	}
+	if set.Len() != 2 {
+		t.Errorf("в наборе %d смайлов, want 2", set.Len())
+	}
+}
+
+// Ответ на запрос токена — приходит на сайт, не в чат.
+func TestLogin(t *testing.T) {
+	const raw = `{"code":4,"user_id":"12345","login_page":"",
+		"settings":"{\"alignType\":0}","token":"fa2e9010cb9a4228215be14fbde13226",
+		"result":true,"return":false,"response":"Вы успешно вошли на сайт"}`
+
+	var login Login
+	if err := json.Unmarshal([]byte(raw), &login); err != nil {
+		t.Fatal(err)
+	}
+	if login.UserID != "12345" || login.Token == "" || !login.Result {
+		t.Errorf("login = %+v", login)
+	}
+}
+
+// Подписчика сервер шлёт то с userId, то с user_id — читаем оба.
+func TestFollowerTakesBothSpellings(t *testing.T) {
+	cases := map[string]struct {
+		id   ID
+		name string
+	}{
+		`{"type":"follower","data":{"userId":58559,"userName":"MyDream","channel_id":158456}}`:  {"58559", "MyDream"},
+		`{"type":"follower","data":{"user_id":58559,"username":"MyDream","channel_id":158456}}`: {"58559", "MyDream"},
+	}
+
+	for raw, want := range cases {
+		message, err := Decode([]byte(raw))
+		if err != nil {
+			t.Errorf("%s: %v", raw, err)
+			continue
+		}
+		var follower Follower
+		if err := message.Into(&follower); err != nil {
+			t.Errorf("%s: %v", raw, err)
+			continue
+		}
+		if follower.User() != want.id || follower.Name() != want.name {
+			t.Errorf("%s → %s/%s, want %s/%s", raw, follower.User(), follower.Name(), want.id, want.name)
+		}
+		if follower.Channel != "158456" {
+			t.Errorf("канал = %q", follower.Channel)
+		}
+	}
+}
+
+// get_poll спрашивает отдельно от get_poll_results: первое отдаёт само
+// голосование, второе — результаты.
+func TestGetPollRequest(t *testing.T) {
+	message, err := New("get_poll", GetPollRequest{ChannelID: "5"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := message.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(line) != `{"type":"get_poll","data":{"channel_id":"5"}}` {
+		t.Errorf("get_poll = %s", line)
+	}
+}
+
+// Удаление реплики: номер приходит строкой в запросе и числом в ответе. Если
+// объявить его целым, запрос перестанет разбираться вовсе.
+func TestRemovedMessageIDTakesBothForms(t *testing.T) {
+	cases := map[string]string{
+		`{"channel_id":"5","message_id":"100"}`:                                 "100",
+		`{"channel_id":"163568","message_id":1693044447764,"adminName":"Homo"}`: "1693044447764",
+	}
+
+	for raw, want := range cases {
+		var removed Removed
+		if err := json.Unmarshal([]byte(raw), &removed); err != nil {
+			t.Errorf("%s: %v", raw, err)
+			continue
+		}
+		if string(removed.MessageID) != want {
+			t.Errorf("%s → %q, want %q", raw, removed.MessageID, want)
+		}
+	}
+
+	// И обратно: то, что мы читаем, должно уходить обратно в обоих видах.
+	message, err := New("remove_message", Removed{Channel: "5", MessageID: "100"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	line, err := message.Encode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(line), `"message_id":"100"`) {
+		t.Errorf("remove_message = %s", line)
 	}
 }

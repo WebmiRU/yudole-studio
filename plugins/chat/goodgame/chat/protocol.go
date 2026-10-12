@@ -15,6 +15,42 @@
 // "cup:…" is a tournament. So the id is kept as a string everywhere.
 //
 // Source: https://github.com/GoodGame/API/blob/master/Chat/protocol2.md
+//
+// What is here, in the order of the paper:
+//
+//	протокол      welcome → Welcome
+//	авторизация   auth → AuthRequest, success_auth → Auth
+//	каналы        get_channels_list → ChannelsListRequest, channels_list → ChannelsList
+//	              join → JoinRequest, success_join → Join
+//	              unjoin → UnjoinRequest, unjoin → Unjoined
+//	о канале      get_users_list2 → UsersListRequest, users_list → Users
+//	              get_stream_moders_list → ModersRequest, stream_moders_list → Moders
+//	              get_channel_counters → CountersRequest, channel_counters → Counter
+//	              update_channel_info → ChannelInfo
+//	              update_channel_info_jobs → ChannelInfoJobs
+//	              setting → Setting
+//	              get_random → RandomRequest, random_result → Random
+//	игнор-лист    get_ignore_list → IgnoreListRequest, add_to_ignore_list →
+//	              IgnoreAddRequest, del_from_ignore_list → IgnoreDelRequest,
+//	              ignore_list → IgnoreList
+//	история       get_channel_history → HistoryRequest, channel_history → History
+//	сообщения     send_message → SendRequest, message → Line
+//	              private_message → PrivateLine
+//	донаты        follower → Follower, payment → Payment, premium → Premium,
+//	              gifted_premiums → Gifted
+//	модерация     remove_message → Removed, ban2 → BanRequest, user_ban → Ban
+//	              warn → WarnRequest, user_warn → Warn
+//	              make_moderator / clean_moderator → ModeratorRequest
+//	голосования   new_poll → PollRequest, new_poll → Poll, get_poll → GetPollRequest
+//	              vote → VoteRequest, get_poll_results → PollResultsRequest,
+//	              poll_results → PollResults
+//	телепорт      teleport_user → Teleport, teleport_aim → TeleportAim
+//	смайлы        set_smile_only_mode → SmileOnlyMode; сам список смайлов и
+//	              ответ на запрос токена — в smiles.go
+//	ошибка        error → Error
+//
+// Где одна структура ходит в обе стороны, она названа дважды: сначала запрос,
+// потом ответ.
 package chat
 
 import (
@@ -112,7 +148,13 @@ func Decode(line []byte) (*Message, error) {
 }
 
 // ID is an identifier that GoodGame sends as a string in one message and as a
-// number in another. Both are read as strings.
+// number in another — и сам документ путается так же: в `message` это
+// "15365", а в `follower` уже 158456.
+//
+// Ни string, ни int64 не берут оба вида сразу: первый спотыкается на числе,
+// второй на строке, и в обоих случаях не разбирается всё сообщение целиком.
+// Поэтому свой тип, который читает и то и другое. Внутри это строка — с
+// идентификаторами не приходится считать.
 type ID string
 
 func (id ID) String() string { return string(id) }
@@ -130,8 +172,12 @@ func (id *ID) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
 		*id = ID(text)
 		return nil
 	case '0':
-		// Identifiers are big enough to lose precision in a float64, so the
-		// number is read as text.
+		// Число читаем как текст: ни int64, ни string не подходят на оба
+		// вида сразу, а приходят оба.
+		//
+		// Про точность: её тут терять нечего — номера каналов и пользователей
+		// короткие, а message_id и так объявлен int64, где 1693062969443
+		// читается точно.
 		raw, err := dec.ReadValue()
 		if err != nil {
 			return err
@@ -218,6 +264,13 @@ func (f Flag) MarshalJSONFrom(enc *jsontext.Encoder) error {
 func (f Flag) True() bool { return f.Known && f.Value }
 
 // Rights levels GoodGame gives to a user. The numbers are fixed by the service.
+//
+//	casual         Обычный            0
+//	stream_moder   Помощник стримера  10
+//	streamer       Стример            20
+//	moderator      Модератор          30
+//	smoderator     Супермодератор     40
+//	admin          Администратор      50
 const (
 	RightsCasual         = 0
 	RightsStreamModer    = 10
@@ -226,6 +279,9 @@ const (
 	RightsSuperModerator = 40
 	RightsAdmin          = 50
 )
+
+// CanModerate reports whether these rights are enough to manage a channel.
+func CanModerate(rights int) bool { return rights >= RightsStreamer }
 
 // User is a person seen in a channel or in the channel list.
 type User struct {
@@ -493,10 +549,33 @@ type PrivateLine struct {
 }
 
 // Follower is somebody who subscribed to a channel.
+//
+// The paper shows both spellings of every field in the same example, so both
+// are read: who sends only one из них — тот сам.
 type Follower struct {
-	Channel  ID     `json:"channel_id"`
-	UserID   ID     `json:"user_id"`
-	UserName string `json:"username"`
+	Channel ID `json:"channel_id"`
+
+	UserID  ID `json:"userId,omitempty"`
+	UserID2 ID `json:"user_id,omitempty"`
+
+	UserName  string `json:"userName,omitempty"`
+	UserName2 string `json:"username,omitempty"`
+}
+
+// Name is the nickname, whichever spelling it arrived in.
+func (f Follower) Name() string {
+	if f.UserName != "" {
+		return f.UserName
+	}
+	return f.UserName2
+}
+
+// User is the user, whichever spelling it arrived in.
+func (f Follower) User() ID {
+	if f.UserID != "" {
+		return f.UserID
+	}
+	return f.UserID2
 }
 
 // Payment is a donation. Total and Title are filled in only when the money went
@@ -538,9 +617,13 @@ type Gifted struct {
 
 // Removed is a message a moderator took out. The same type is the request to
 // remove one.
+//
+// Номер сообщения приходит в двух видах: в запросе он строкой ("100"), в
+// ответе числом (1693044447764). Поэтому он не int64 — иначе удалить чужую
+// реплику было бы невозможно: запрос не разобрался бы.
 type Removed struct {
 	Channel   ID     `json:"channel_id"`
-	MessageID int64  `json:"message_id"`
+	MessageID ID     `json:"message_id"`
 	AdminName string `json:"adminName"`
 }
 
@@ -763,6 +846,12 @@ type PollRequest struct {
 	ChannelID ID       `json:"channel_id"`
 	Title     string   `json:"title"`
 	Answers   []Answer `json:"answers"`
+}
+
+// GetPollRequest asks what the vote in a channel is. The answer is new_poll
+// for those who have not voted yet, and poll_results for those who have.
+type GetPollRequest struct {
+	ChannelID ID `json:"channel_id"`
 }
 
 // PollResultsRequest asks how the vote went.

@@ -54,6 +54,12 @@ type Manager struct {
 	problems    map[string]string
 	fields      map[string]map[string]string
 
+	// subscribers read the events of every plugin. The chat page is one of
+	// them: it shows all the chats at once, so it needs the events from all
+	// the plugins at the same time.
+	subscribers map[int]chan Event
+	nextSub     int
+
 	// lifetime is the context the plugin processes hang on. It is the kernel
 	// context, never a request context: a request that ends must not take the
 	// process down with it.
@@ -82,6 +88,8 @@ func NewManager(configPath, pluginsDir string) (*Manager, error) {
 		infos:       map[string]Info{},
 		problems:    map[string]string{},
 		fields:      map[string]map[string]string{},
+
+		subscribers: map[int]chan Event{},
 	}
 	for _, d := range descriptors {
 		m.descriptors[d.Name] = d
@@ -141,6 +149,7 @@ func (m *Manager) Shutdown() {
 
 	m.mu.Lock()
 	m.running = map[string]*Plugin{}
+	m.subscribers = map[int]chan Event{}
 	m.mu.Unlock()
 
 	if err := m.save(); err != nil {
@@ -297,8 +306,74 @@ func (m *Manager) enable(id string) error {
 	delete(m.problems, id)
 	m.mu.Unlock()
 
+	// События плагина кто-то должен читать, иначе очередь переполнится и
+	// реплики начнут теряться. Читаем их всегда, даже когда никто не смотрит:
+	// подписчики придут и увидят то, что после них.
+	events, stopWatching := process.Watch()
+	go m.pump(id, events, stopWatching)
+
 	slog.Info("plugin ready", "plugin", id, "title", info.Title, "options", len(info.Options))
 	return nil
+}
+
+// pump carries the events of one plugin to everybody who is watching.
+func (m *Manager) pump(id string, events <-chan Event, stopWatching func()) {
+	defer stopWatching()
+
+	for event := range events {
+		m.broadcast(event)
+	}
+}
+
+// Subscribe hands out a stream of events from every plugin and returns the
+// function that closes it. Closing matters: a page that closes the tab must not
+// leave a channel behind that fills up and makes the kernel drop events.
+func (m *Manager) Subscribe(buffer int) (<-chan Event, func()) {
+	if buffer <= 0 {
+		buffer = 64
+	}
+
+	m.mu.Lock()
+	id := m.nextSub
+	m.nextSub++
+	events := make(chan Event, buffer)
+	m.subscribers[id] = events
+	m.mu.Unlock()
+
+	var once sync.Once
+	return events, func() {
+		once.Do(func() {
+			m.mu.Lock()
+			defer m.mu.Unlock()
+
+			if _, ok := m.subscribers[id]; !ok {
+				return
+			}
+			delete(m.subscribers, id)
+			close(events)
+		})
+	}
+}
+
+// broadcast passes an event to every subscriber. A subscriber that is behind
+// loses this event rather than holding up the rest: the chat is live, and a
+// slow page must not make the kernel drop lines for everyone else.
+func (m *Manager) broadcast(event Event) {
+	m.mu.Lock()
+	subscribers := make([]chan Event, 0, len(m.subscribers))
+	for _, events := range m.subscribers {
+		subscribers = append(subscribers, events)
+	}
+	m.mu.Unlock()
+
+	for _, events := range subscribers {
+		select {
+		case events <- event:
+		default:
+			slog.Warn("subscriber is behind, dropping an event",
+				"plugin", event.Plugin, "kind", event.Kind())
+		}
+	}
 }
 
 // Disable switches a plugin off and stops its process. The settings stay in the

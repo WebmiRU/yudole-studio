@@ -7,7 +7,6 @@ import (
 	"os"
 	"regexp"
 	"slices"
-	"strconv"
 	"strings"
 	"time"
 
@@ -26,6 +25,14 @@ const (
 	// Первая пауза перед переподключением и её потолок.
 	reconnectMin = 2 * time.Second
 	reconnectMax = 30 * time.Second
+)
+
+// Как часто переспрашиваем каналы, в которые не удалось войти: не сразу,
+// чтобы не ловить отказ GoodGame на каждый чих. Переменные, а не константы:
+// в тесте ждать полчаса ради проверки никто не подписывался.
+var (
+	retryMin = 30 * time.Second
+	retryMax = 5 * time.Minute
 )
 
 // event — всё, что плагин хочет сказать ядру: готовое сообщение протокола.
@@ -118,7 +125,23 @@ func (s *socket) session(ctx context.Context, wanted func() []chat.ID) (map[chat
 		}
 	}()
 
-	s.sync(ctx, client, live, wanted)
+	// Неудачные попытки помним с отсрочкой: иначе канал, в который не пускают,
+	// молчал бы до следующей смены настроек или переподключения.
+	failed := map[chat.ID]time.Time{}
+	backoff := retryMin
+
+	// Сигнал мог остаться от настроек, пришедших до открытия соединения. Он уже
+	// учтён в sync ниже, и второй раз сработать не должен: иначе сессия вошла бы
+	// в каналы дважды подряд и стёрла бы отсрочки неудачных попыток.
+	select {
+	case <-s.changed:
+	default:
+	}
+
+	s.sync(ctx, client, live, failed, wanted)
+
+	retry := time.NewTicker(retryMin)
+	defer retry.Stop()
 
 	for {
 		select {
@@ -126,7 +149,17 @@ func (s *socket) session(ctx context.Context, wanted func() []chat.ID) (map[chat
 			return live, nil
 
 		case <-s.changed:
-			s.sync(ctx, client, live, wanted)
+			// Человек что-то поменял: про отсрочки забываем, ведь он и ждал.
+			clear(failed)
+			backoff = retryMin
+			s.sync(ctx, client, live, failed, wanted)
+
+		case <-retry.C:
+			if len(failed) > 0 {
+				backoff = nextBackoff(backoff)
+				s.say(fmt.Sprintf("пробуем снова через %s: %s", shortTime(backoff), listChannels(failed)))
+				s.sync(ctx, client, live, failed, wanted)
+			}
 
 		case message, ok := <-client.Events():
 			if !ok {
@@ -137,30 +170,73 @@ func (s *socket) session(ctx context.Context, wanted func() []chat.ID) (map[chat
 	}
 }
 
+// nextBackoff удваивает паузу, но не выше потолка.
+func nextBackoff(current time.Duration) time.Duration {
+	if current *= 2; current > retryMax {
+		return retryMax
+	}
+	return current
+}
+
+// shortTime пишет паузу словами: «1м30с» читается быстрее «90s».
+func shortTime(d time.Duration) string {
+	if d >= time.Minute {
+		return d.Round(time.Second).String()
+	}
+	return d.Round(time.Second).String()
+}
+
+func listChannels(failed map[chat.ID]time.Time) string {
+	ids := slices.Sorted(maps.Keys(failed))
+	names := make([]string, 0, len(ids))
+	for _, id := range ids {
+		names = append(names, string(id))
+	}
+	return strings.Join(names, ", ")
+}
+
 // sync brings the channels in line with the settings: joins the new ones, leaves
 // the ones that are no longer there, and keeps the rest as they are.
-func (s *socket) sync(ctx context.Context, client *chat.Client, live map[chat.ID]bool, wanted func() []chat.ID) {
+func (s *socket) sync(ctx context.Context, client *chat.Client, live map[chat.ID]bool, failed map[chat.ID]time.Time, wanted func() []chat.ID) {
 	list := wanted()
 	join, unjoin := chat.Diff(slices.Collect(maps.Keys(live)), list)
 
-	for _, id := range unjoin {
+	// Канал, которому недавно отказали, трогать рано: он либо ещё закрыт, либо
+	// GoodGame просто не отвечает — и то и другое пройдёт само за паузу.
+	ready := func(ids []chat.ID) []chat.ID {
+		out := make([]chat.ID, 0, len(ids))
+		for _, id := range ids {
+			if until, bad := failed[id]; bad && time.Now().Before(until) {
+				continue
+			}
+			out = append(out, id)
+		}
+		return out
+	}
+
+	for _, id := range ready(unjoin) {
 		if err := client.Unjoin(ctx, id); err != nil {
 			s.say(fmt.Sprintf("канал %s: %v", id, err))
 			s.send(protocol.KindChannelUnjoinFailed, protocol.ChannelPayload{Channel: string(id), Reason: err.Error()})
 			continue
 		}
 		delete(live, id)
+		delete(failed, id)
 		s.send(protocol.KindChannelUnjoinSuccessful, protocol.ChannelPayload{Channel: string(id)})
 	}
 
-	for _, id := range join {
+	for _, id := range ready(join) {
 		joined, err := client.Join(ctx, id)
 		if err != nil {
 			s.say(fmt.Sprintf("канал %s: %v", id, err))
 			s.send(protocol.KindChannelJoinFailed, protocol.ChannelPayload{Channel: string(id), Reason: err.Error()})
+			// Запомним, когда пробовать в следующий раз, чтобы сессия сама
+			// вернулась к этому каналу, а не ждала новой смены настроек.
+			failed[id] = time.Now().Add(retryMin)
 			continue
 		}
 		live[id] = true
+		delete(failed, id)
 		name := joined.ChannelName
 		if name == "" {
 			name = string(id)
@@ -232,7 +308,7 @@ func (s *socket) forward(message *chat.Message) {
 		}
 		s.send(protocol.KindMessageDeleted, protocol.DeletedMessagePayload{
 			Channel:   string(removed.Channel),
-			MessageID: strconv.FormatInt(removed.MessageID, 10),
+			MessageID: string(removed.MessageID),
 			By:        removed.AdminName,
 		})
 

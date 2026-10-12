@@ -1,0 +1,45 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>studio — чат</title>
+</head>
+<body class="page-chat">
+
+<header class="topbar">
+    <a class="brand" href="/">
+        <span class="brand__mark" aria-hidden="true">◈</span>
+        <span class="brand__name">studio</span>
+    </a>
+
+    <span class="topbar__title">Чат</span>
+
+    <div class="topbar__state" id="state" data-state="connecting">
+        <span class="dot" aria-hidden="true"></span>
+        <span class="topbar__state-text" id="state-text">подключение…</span>
+    </div>
+
+    <div class="topbar__tools">
+        <label class="switch" for="only-chats">
+            <input type="checkbox" id="only-chats" class="switch__input">
+            <span class="switch__track" aria-hidden="true"><span class="switch__knob"></span></span>
+            <span class="switch__label">только реплики</span>
+        </label>
+
+        <label class="select">
+            <span class="select__label">Канал</span>
+            <select id="channel-filter" class="select__input"></select>
+        </label>
+    </div>
+</header>
+
+<main class="feed" id="feed" aria-live="polite" aria-label="Сообщения чата"></main>
+
+<footer class="statusbar">
+    <span id="summary">пока ничего не было</span>
+</footer>
+
+<script type="module" src="/js/chat.js"></script>
+</body>
+</html>

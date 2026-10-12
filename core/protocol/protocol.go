@@ -231,6 +231,21 @@ func DecodeChat(line []byte) (ChatPayload, error) {
 	return chat, nil
 }
 
+// DecodeChatMessage reads an already decoded envelope as a chat line and fills
+// in the kind.
+func DecodeChatMessage(message Message) (ChatPayload, error) {
+	if !IsChatKind(message.Kind) {
+		return ChatPayload{}, fmt.Errorf("not a chat line: kind %q", message.Kind)
+	}
+
+	var chat ChatPayload
+	if err := message.PayloadInto(&chat); err != nil {
+		return ChatPayload{}, err
+	}
+	chat.Kind = message.Kind
+	return chat, nil
+}
+
 // ChannelPayload is what a join, unjoin or a change in a channel carries. The
 // three kinds differ only in the kind itself.
 type ChannelPayload struct {

@@ -42,6 +42,8 @@ type Client struct {
 	endpoint string
 
 	writeMu sync.Mutex
+	// unjoinMu держит выходы по одному: ответ на них не называет канал.
+	unjoinMu sync.Mutex
 
 	mu      sync.Mutex
 	waiters []*waiter
@@ -307,6 +309,8 @@ func (c *Client) Join(ctx context.Context, id ID) (*Join, error) {
 		if m.Type == TypeSuccessJoin {
 			return ChannelOf(m) == id
 		}
+		// Ошибка может назвать канал, а может и не назвать — на то, что она
+		// пришла в ответ на наш вход, указывает то, что больше ждать нечего.
 		return m.Type == TypeError
 	})
 	if err != nil {
@@ -314,6 +318,7 @@ func (c *Client) Join(ctx context.Context, id ID) (*Join, error) {
 	}
 
 	if reply.Type == TypeError {
+		// Канал не повторяем: о входе в какой и так известно вызывающему.
 		return nil, serviceError(reply)
 	}
 
@@ -325,20 +330,32 @@ func (c *Client) Join(ctx context.Context, id ID) (*Join, error) {
 }
 
 // Unjoin leaves a channel.
+//
+// Ответ на выход приходит совсем без номера канала:
+//
+//	{"type":"unjoin","data":{"success":true}}
+//
+// так что опознать его можно только по типу, и два выхода одновременно стали бы
+// неразличимы. Поэтому выходы идут по одному — ответы по соединению всё равно
+// приходят по порядку.
 func (c *Client) Unjoin(ctx context.Context, id ID) error {
+	c.unjoinMu.Lock()
+	defer c.unjoinMu.Unlock()
+
 	request, err := New("unjoin", UnjoinRequest{ChannelID: id})
 	if err != nil {
 		return err
 	}
 
-	_, err = c.Do(ctx, request, func(m *Message) bool {
-		if m.Type == TypeUnjoin {
-			return ChannelOf(m) == id
-		}
-		return m.Type == TypeError
+	reply, err := c.Do(ctx, request, func(m *Message) bool {
+		return m.Type == TypeUnjoin || m.Type == TypeError
 	})
 	if err != nil {
 		return err
+	}
+	if reply.Type == TypeError {
+		// Канал не повторяем: о выходе из какого и так известно вызывающему.
+		return serviceError(reply)
 	}
 	return nil
 }

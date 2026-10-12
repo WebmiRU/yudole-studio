@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"log/slog"
 	"os/exec"
+	"slices"
 	"sync"
 	"time"
 
@@ -25,7 +26,8 @@ const (
 	scanLimit   = 1 << 20 // 1 MiB per line
 	stopTimeout = 3 * time.Second
 	replyQueue  = 4   // answers waiting to be read by the kernel
-	chatQueue   = 256 // lines of chat held while nobody reads them
+	chatQueue   = 256 // events held while nobody reads them
+	watchQueue  = 64  // events held for one subscriber before we skip it
 )
 
 // A Plugin is a running plugin process.
@@ -40,8 +42,13 @@ type Plugin struct {
 	// replies carries the answers the kernel is waiting for: info and ack.
 	replies chan protocol.Message
 
-	// chat carries the lines of chat, in the order the plugin sent them.
-	chat chan protocol.ChatPayload
+	// events carries everything the plugin has to say about the chat: the
+	// lines themselves, what happened to the channels, how the connection is.
+	// Очередь одна на всех: читателей может быть сколько угодно, читателей
+	// очереди — один.
+	events chan Event
+	// watchers read events; the manager reads them and passes them on.
+	watchers []chan Event
 
 	stateMu     sync.Mutex
 	waiting     bool
@@ -78,7 +85,7 @@ func Start(ctx context.Context, name, path string) (*Plugin, error) {
 		stdin:   stdin,
 		logger:  logger,
 		replies: make(chan protocol.Message, replyQueue),
-		chat:    make(chan protocol.ChatPayload, chatQueue),
+		events:  make(chan Event, chatQueue),
 		done:    make(chan struct{}),
 		waitErr: make(chan error, 1),
 	}
@@ -142,9 +149,9 @@ func (p *Plugin) Done() <-chan struct{} {
 	return p.done
 }
 
-// Chat is the stream of chat lines from this plugin.
-func (p *Plugin) Chat() <-chan protocol.ChatPayload {
-	return p.chat
+// Events is the stream of chat events from this plugin.
+func (p *Plugin) Events() <-chan Event {
+	return p.events
 }
 
 // readMessages turns the protocol lines of the plugin into messages: logs go
@@ -176,27 +183,68 @@ func (p *Plugin) readMessages(r io.Reader) {
 	}
 }
 
-// forward passes a chat line to the consumers. Control messages stay out of
-// it: one line, one meaning.
+// forward passes anything the plugin says about the chat to the consumers.
+// Control messages stay out of it: one line, one meaning.
 func (p *Plugin) forward(line []byte) bool {
-	chat, err := protocol.DecodeChat(line)
+	message, err := protocol.Decode(line)
 	if err != nil {
 		return false
 	}
+	if !protocol.IsChatKind(message.Kind) && !protocol.IsChannelKind(message.Kind) {
+		return false
+	}
 
-	p.logger.Info("chat message",
-		"kind", chat.Kind,
-		"channel", chat.Channel,
-		"user", chat.User.Name,
-		"text", chat.Message.Text,
-	)
+	event := Event{Plugin: p.Name, Message: message}
 
-	select {
-	case p.chat <- chat:
-	default:
-		p.logger.Warn("chat queue is full, dropping a line", "channel", chat.Channel)
+	// Подписчиков может быть много, и очередь на всех одна: кто не успевает,
+	// тот получит меньше. Лучше потерять строчку у одного читателя, чем
+	// затормозить всех.
+	p.stateMu.Lock()
+	watchers := slices.Clone(p.watchers)
+	p.stateMu.Unlock()
+
+	sent := false
+	for _, watcher := range watchers {
+		select {
+		case watcher <- event:
+			sent = true
+		default:
+			p.logger.Warn("a subscriber is behind, dropping an event", "kind", message.Kind)
+		}
+	}
+	if !sent {
+		select {
+		case p.events <- event:
+		default:
+			p.logger.Warn("event queue is full, dropping", "kind", message.Kind)
+		}
 	}
 	return true
+}
+
+// Watch adds a reader for this plugin's events and returns the function that
+// takes it away again.
+func (p *Plugin) Watch() (<-chan Event, func()) {
+	watcher := make(chan Event, watchQueue)
+
+	p.stateMu.Lock()
+	p.watchers = append(p.watchers, watcher)
+	p.stateMu.Unlock()
+
+	var once sync.Once
+	return watcher, func() {
+		once.Do(func() {
+			p.stateMu.Lock()
+			defer p.stateMu.Unlock()
+
+			for i, other := range p.watchers {
+				if other == watcher {
+					p.watchers = append(p.watchers[:i], p.watchers[i+1:]...)
+					return
+				}
+			}
+		})
+	}
 }
 
 // Waiting tells whether the plugin is busy and what it is busy with. The

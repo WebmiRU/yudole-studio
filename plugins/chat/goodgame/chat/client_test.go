@@ -25,6 +25,9 @@ type fakeChat struct {
 	refuse map[ID]bool
 	// greet is sent before the welcome, to check we do not read too early.
 	greet bool
+	// UnjoinWithoutChannel makes the service answer the way it really does:
+	// without the channel id.
+	UnjoinWithoutChannel bool
 }
 
 func newFakeChat(t *testing.T) *fakeChat {
@@ -96,6 +99,14 @@ func (f *fakeChat) serve(w http.ResponseWriter, r *http.Request) {
 				Users:       7,
 			})
 		case "unjoin":
+			f.mu.Lock()
+			bare := f.UnjoinWithoutChannel
+			f.mu.Unlock()
+			if bare {
+				// Именно так отвечает настоящий сервер: {"success":true}.
+				write(TypeUnjoin, map[string]any{"success": true})
+				continue
+			}
 			write(TypeUnjoin, Unjoined{Channel: ChannelOf(message), Success: true})
 		case "get_channels_list":
 			write(TypeChannelsList, ChannelsList{Channels: []Channel{
@@ -395,5 +406,25 @@ func TestJoinChannelID(t *testing.T) {
 		if JoinChannelID(id) {
 			t.Errorf("%q should not be a channel", id)
 		}
+	}
+}
+
+// Ответ на выход приходит совсем без номера канала — так сервер и делает.
+// Если ждать номера, уход из канала всегда будет падать по таймауту.
+func TestUnjoinAcceptsReplyWithoutChannel(t *testing.T) {
+	fake := newFakeChat(t)
+	fake.UnjoinWithoutChannel = true
+
+	client := openFake(t, fake)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	if err := client.Unjoin(ctx, "53029"); err != nil {
+		t.Fatalf("Unjoin: %v", err)
+	}
+	if elapsed := time.Since(start); elapsed > 2*time.Second {
+		t.Errorf("выход занял %v — значит, ответ не узнали и ждали таймаут", elapsed)
 	}
 }
