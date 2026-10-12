@@ -8,11 +8,11 @@ Thumbs.db
 /core/studio
 /core/studio.exe
 
-# бинарники плагинов: каждый собирается рядом с исходниками
-/plugins/chat/*/*/goodgame
-/plugins/chat/*/*/goodgame.exe
-/plugins/chat/*/*/twitch
-/plugins/chat/*/*/twitch.exe
+# бинарники плагинов: каждый собирается рядом с исходниками, в своём каталоге
+/plugins/chat/*/goodgame
+/plugins/chat/*/goodgame.exe
+/plugins/chat/*/twitch
+/plugins/chat/*/twitch.exe
 
 # логи
 *.log
