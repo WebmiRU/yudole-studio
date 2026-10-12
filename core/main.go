@@ -159,8 +159,9 @@ func run() error {
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", healthHandler(page))
-	mux.Handle("/api/", api.Handler(manager))
+	mux.Handle("GET /api/vkvideo-smile/{id}/icon/size/{size}", vkVideoSmileHandler())
 	mux.Handle("GET /api/chat", hub.Handler())
+	mux.Handle("/api/", api.Handler(manager))
 	mux.Handle("/", page)
 
 	srv := &http.Server{
