@@ -168,7 +168,11 @@ function line(entry) {
 // block is the shape of every message: who wrote it, a rule under the name, and
 // then the text itself.
 function block(entry, severity, head, text) {
-    const body = [...[text].flat()].filter((piece) => piece !== null && piece !== undefined && piece !== '');
+    // Текст собирается из кусков, а куски лежат в массивах: расплющиваем
+    // насколько угодно глубоко, иначе в блок попадёт сам массив.
+    const body = [...[text].flat(Infinity)].filter(
+        (piece) => piece !== null && piece !== undefined && piece !== '',
+    );
     if (body.length === 0) {
         return null;
     }
@@ -275,16 +279,26 @@ function connectionPhrase(state, service, reason) {
     }
 }
 
-// channelInfo adds what the service told about the channel to its name.
+// channelInfo adds what the plugin told about the channel. Приходит не всегда:
+// если название трансляции совпало с названием канала, повторять его смысла
+// нет, и плагин молчит.
 function channelInfo(payload) {
     const parts = [];
+
     if (payload?.name) {
-        parts.push(` — «${payload.name}»`);
+        parts.push([' — ', strong(payload.name)]);
     }
     if (payload?.clients) {
-        parts.push(`, ${payload.clients} в канале`);
+        parts.push([`, ${payload.clients} в канале`]);
     }
-    return parts.join('');
+    if (payload?.premiumOnly) {
+        parts.push([`, только для подписчиков`]);
+    }
+    if (payload?.smileOnly) {
+        parts.push([`, только смайлики`]);
+    }
+
+    return parts.flat();
 }
 
 function deletedPhrase(payload) {

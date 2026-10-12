@@ -25,6 +25,8 @@ type goodgame struct {
 	conn    *websocket.Conn
 	joined  []string
 	refused map[string]string
+	// StreamTitle overrides the channel title the fake reports on a join.
+	StreamTitle string
 	// refuseTimes turns the service down only this many times, then lets it
 	// through: так проверяется, что плагин возвращается к каналу сам.
 	refuseTimes map[string]int
@@ -111,8 +113,16 @@ func (f *goodgame) serve(w http.ResponseWriter, r *http.Request) {
 		switch message.Type {
 		case "join":
 			id := chat.ChannelOf(message)
+
+			title := "канал " + string(id)
+			f.mu.Lock()
+			if f.StreamTitle != "" {
+				title = f.StreamTitle
+			}
+			f.mu.Unlock()
+
 			send(chat.TypeSuccessJoin, chat.Join{
-				ChannelID: id, ChannelName: "канал " + string(id), ChannelKey: "streamer",
+				ChannelID: id, ChannelName: title, ChannelKey: "streamer",
 				Clients: 12, Users: 7,
 			})
 		case "unjoin":
@@ -225,10 +235,15 @@ func TestSocketJoinsConfiguredChannels(t *testing.T) {
 		t.Errorf("имя = %q, want E.Wolf из настроек", payload.Name)
 	}
 
-	// События о самом канале после входа не шлём: название и так названо в
-	// ChannelPayload, а счётчики придут отдельно и без нас.
-	if extra := kindWithin(socket, time.Second, protocol.KindChannelInfo); extra != "" {
-		t.Errorf("после входа пришло лишнее событие %s", extra)
+	// Название трансляции у фейка «канал 53029», а в настройках «E.Wolf» — они
+	// разные, значит сказать о нём стоит.
+	info := waitKind(t, socket, protocol.KindChannelInfo)
+	var shown protocol.ChannelInfoPayload
+	if err := info.PayloadInto(&shown); err != nil {
+		t.Fatal(err)
+	}
+	if shown.Name != "канал 53029" || shown.Clients != 12 {
+		t.Errorf("info = %+v, want the title and counters from success_join", shown)
 	}
 
 	if !fake.Saw("join") {
@@ -461,4 +476,22 @@ func shortenRetry(t *testing.T) {
 	previousMin, previousMax := retryMin, retryMax
 	retryMin, retryMax = 150*time.Millisecond, 400*time.Millisecond
 	t.Cleanup(func() { retryMin, retryMax = previousMin, previousMax })
+}
+
+// Если название трансляции совпало с названием канала, повторять его смысла
+// нет: страница показала бы «E.Wolf — «E.Wolf»».
+func TestSocketStaysQuietWhenTheTitleRepeatsTheName(t *testing.T) {
+	fake := newGoodgame(t)
+	fake.StreamTitle = "E.Wolf"
+
+	restore := currentChannels()
+	t.Cleanup(func() { setChannels(restore) })
+	setChannels([]protocol.ChoiceValue{{Value: "53029", Label: "E.Wolf"}})
+
+	socket, _ := watchSocket(t)
+	waitKind(t, socket, protocol.KindChannelJoinSuccess)
+
+	if extra := kindWithin(socket, time.Second, protocol.KindChannelInfo); extra != "" {
+		t.Errorf("пришло лишнее событие %s: название совпадает, повторять нечего", extra)
+	}
 }

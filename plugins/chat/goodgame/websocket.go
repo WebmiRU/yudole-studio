@@ -250,14 +250,28 @@ func (s *socket) sync(ctx context.Context, client *chat.Client, live map[chat.ID
 		live[id] = true
 		delete(failed, id)
 
-		// Один вход — одно событие. Название канала и так уже названо в
-		// ChannelPayload, а название трансляции и счётчики отдельным событием
-		// только шумят: следом придёт то же самое из счётчиков раз в двадцать
-		// секунд.
 		s.send(protocol.KindChannelJoinSuccess, protocol.ChannelPayload{
 			Channel: string(id), Name: channelName(id),
 		})
-		_ = joined
+
+		// Отдельно говорим только о том, чего вход не сказал. Название канала
+		// уже названо выше, и если название трансляции совпадает с ним —
+		// повторять нечего. Счётчики придут сами из update_channel_info.
+		info := protocol.ChannelInfoPayload{
+			Channel:     string(id),
+			Name:        joined.ChannelName,
+			Streamer:    joined.ChannelKey,
+			Clients:     joined.Clients,
+			Users:       joined.Users,
+			PremiumOnly: joined.PremiumOnly != 0,
+			SmileOnly:   joined.SmileOnlyMode,
+		}
+		if info.Name == channelName(id) {
+			info.Name = ""
+		}
+		if info.Name != "" || info.PremiumOnly || info.SmileOnly {
+			s.send(protocol.KindChannelInfo, info)
+		}
 	}
 }
 
