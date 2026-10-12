@@ -242,14 +242,24 @@ function localVKVideoSmileURL(raw) {
         return null;
     }
 
-    const match = url.pathname.match(/^\\/smile\\/([A-Za-z0-9-]{1,80})\\/icon\\/size\\/(small|medium|large)$/);
-    if (!match) {
+    const parts = url.pathname.split('/');
+    if (parts.length !== 6 || parts[1] !== 'smile'
+        || parts[3] !== 'icon' || parts[4] !== 'size') {
         return null;
     }
 
-    const local = new URL(`/api/vkvideo-smile/${match[1]}/icon/size/${match[2]}`, location.origin);
+    const id = parts[2];
+    const size = parts[5];
+    if (!/^[A-Za-z0-9-]{1,80}$/.test(id)
+        || !['small', 'medium', 'large'].includes(size)) {
+        return null;
+    }
+
+    const local = new URL(`/api/vkvideo-smile/${id}/icon/size/${size}`, location.origin);
     const changeTime = url.searchParams.get('change_time');
-    if (changeTime && /^\\d{1,20}$/.test(changeTime)) {
+    const validChangeTime = changeTime && changeTime.length <= 20
+        && [...changeTime].every((character) => character >= '0' && character <= '9');
+    if (validChangeTime) {
         local.searchParams.set('change_time', changeTime);
     }
     return local.pathname + local.search;
