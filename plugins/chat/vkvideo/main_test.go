@@ -436,8 +436,7 @@ func TestMessageLinePutsSmilesIntoHTML(t *testing.T) {
 	}
 }
 
-// Анимированный смайл приходит десятками одинаковых узлов — по одному на кадр.
-// Без отсечки одна реплика превращалась бы в двадцать одинаковых картинок.
+// Повторяющиеся смайлы сохраняются каждый раз и в том порядке, в котором пришли.
 func TestMessageLinePreservesRepeatedSmilesInOrder(t *testing.T) {
 	cat := `{"type":"smile","id":"a","name":"Cat","largeUrl":"https://images.live.vkvideo.ru/smile/a/icon/size/large"}`
 	party := `{"type":"smile","id":"b","name":"Party","largeUrl":"https://images.live.vkvideo.ru/smile/b/icon/size/large"}`
