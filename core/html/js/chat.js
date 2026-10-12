@@ -225,12 +225,77 @@ function block(entry, severity, head, text, notice = false) {
     return messagePanel(notice, head, content);
 }
 
+// This contour follows the X-COM reference silhouette. The SVG uses a fixed
+// design coordinate system and preserves stroke width while the long sections
+// stretch to the message's actual width and height.
+const MESSAGE_PANEL_OUTLINE = [
+    'M 0 18',
+    'L 0 0',
+    'L 18 0',
+    'L 52 10',
+    'L 310 39',
+    'L 350 43',
+    'L 378 48',
+    'L 400 70',
+    'L 420 80',
+    'L 458 86',
+    'L 790 99',
+    'L 1158 108',
+    'L 1260 111',
+    'L 1285 125',
+    'L 1320 158',
+    'L 1350 182',
+    'L 1350 478',
+    'L 1327 478',
+    'L 1327 498',
+    'L 1298 498',
+    'L 1280 510',
+    'L 1080 506',
+    'L 1051 470',
+    'L 1034 458',
+    'L 780 448',
+    'L 575 439',
+    'L 365 430',
+    'L 150 422',
+    'L 78 418',
+    'L 38 398',
+    'L 0 354',
+    'Z',
+].join(' ');
+
+function svgElement(tag, attrs = {}, children = []) {
+    const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
+    for (const [name, value] of Object.entries(attrs)) {
+        if (value !== undefined && value !== null) {
+            node.setAttribute(name, String(value));
+        }
+    }
+    for (const child of children) {
+        node.append(child);
+    }
+    return node;
+}
+
 // messagePanel keeps the message's content flow natural while the frame,
 // header ticks and footer hardware remain independent decorative layers.
 function messagePanel(notice, head, content) {
-    const frame = el('div', {class: 'msg__frame', 'aria-hidden': 'true'}, [
-        el('span', {class: 'msg__frame-rail msg__frame-rail--top'}),
-        el('span', {class: 'msg__frame-light'}),
+    const frame = svgElement('svg', {
+        class: 'msg__frame',
+        viewBox: '0 0 1350 520',
+        preserveAspectRatio: 'none',
+        'aria-hidden': 'true',
+        focusable: 'false',
+    }, [
+        svgElement('path', {class: 'msg__frame-glow', d: MESSAGE_PANEL_OUTLINE}),
+        svgElement('path', {class: 'msg__frame-shape', d: MESSAGE_PANEL_OUTLINE}),
+        svgElement('path', {
+            class: 'msg__frame-highlight',
+            d: 'M 8 5 L 52 12 L 310 39 L 352 43 M 2 360 L 38 400 L 78 418 L 140 422 M 1080 506 L 1110 518 L 1347 518',
+        }),
+        svgElement('path', {
+            class: 'msg__frame-detail',
+            d: 'M 18 19 L 18 345 M 1329 183 L 1329 468',
+        }),
     ]);
 
     const header = el('header', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]);
