@@ -153,8 +153,11 @@
   border-left: 4px solid transparent
   background: #000
 
+  // У реплик рамки нет, поэтому вид сообщения различает только полоска — и она
+  // должна быть заметной. Сине-серый, а не серый: в палитре серый уходил в
+  // фон и читался как граница блока.
   &[data-severity="neutral"]
-    --rule: #3a4658
+    --rule: #6e83a6
 
   &[data-severity="info"]
     border-left-color: tokens.$info
