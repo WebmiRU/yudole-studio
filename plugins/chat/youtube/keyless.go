@@ -213,7 +213,7 @@ func keylessFindLives(ctx context.Context, channelID string) ([]liveVideo, error
 		if title == "" {
 			title = result.page.title
 		}
-		lives = append(lives, liveVideo{ID: id, Title: title})
+		lives = append(lives, liveVideo{ID: id, Title: title, Page: &result.page})
 	}
 	return lives, nil
 }
@@ -600,9 +600,15 @@ func keylessWatchChats(ctx context.Context, channel, channelTitle string, lives 
 // server said, ask again.
 // onConnected вызывается именем канала, который выяснился на странице.
 func keylessReadOne(ctx context.Context, channelTitle string, video liveVideo, onConnected func(name string)) error {
-	page, err := keylessWatchPage(ctx, video.ID)
-	if err != nil {
-		return err
+	var page watchPage
+	if video.Page != nil {
+		page = *video.Page
+	} else {
+		var err error
+		page, err = keylessWatchPage(ctx, video.ID)
+		if err != nil {
+			return err
+		}
 	}
 	if page.token == "" || page.apiKey == "" {
 		return errNoLive
