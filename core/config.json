@@ -1,17 +1,31 @@
 {
   "kind": "config",
-  "version": "1.0",
   "plugins": {
     "chat": {
       "goodgame": {
         "enabled": true,
         "options": {
-          "channels": []
+          "channels": [
+            {
+              "label": "1234",
+              "value": "1234"
+            }
+          ]
         }
       },
-      "twitch": {},
-      "trovo": {},
-      "youtube": {}
+      "trovo": {
+        "enabled": false,
+        "options": {}
+      },
+      "twitch": {
+        "enabled": false,
+        "options": {}
+      },
+      "youtube": {
+        "enabled": false,
+        "options": {}
+      }
     }
-  }
+  },
+  "version": "1.0"
 }

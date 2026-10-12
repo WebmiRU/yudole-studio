@@ -1,104 +1,28 @@
 // Страница настроек: список чат-клиентов и форма их опций.
 //
-// Прототип: данные лежат здесь же, в CHAT_CLIENTS. Когда появится API, этот
-// файл заменит fetch('/api/plugins/chat'), а рендер останется прежним.
+// Плагины приходят с ядра: GET /api/plugins/chat. Каждый приносит свою форму
+// в поле options и сохранённые значения в values, так что здесь нет ни одного
+// захардкоженного плагина.
 
 import '../sass/app.sass';
 
-const STORAGE_PREFIX = 'studio.options.';
+const API = '/api/plugins/chat';
 
-const CHAT_CLIENTS = [
-    {
-        id: 'twitch',
-        name: 'Twitch',
-        mark: 'TW',
-        description: 'Чат через Twitch IRC',
-        fields: [
-            {
-                id: 'nick',
-                label: 'Ник в чате',
-                type: 'text',
-                placeholder: 'my_nickname',
-                required: true,
-            },
-            {
-                id: 'token',
-                label: 'OAuth-токен',
-                type: 'password',
-                mono: true,
-                placeholder: 'oauth:xxxxxxxxxxxx',
-                hint: 'Токен выдаёт Twitch на twitch.tv/chat-settings. Читать каналы можно и без него.',
-            },
-            {
-                id: 'channels',
-                label: 'Каналы',
-                type: 'tags',
-                placeholder: 'канал, Enter — добавить',
-                hint: 'Подключаться сразу к нескольким каналам.',
-            },
-            {
-                id: 'showInMain',
-                label: 'Сообщения в общую ленту',
-                type: 'switch',
-                value: true,
-            },
-            {
-                id: 'autoconnect',
-                label: 'Подключаться при запуске',
-                type: 'switch',
-                value: true,
-            },
-        ],
-    },
-    {
-        id: 'goodgame',
-        name: 'GoodGame',
-        mark: 'GG',
-        description: 'Чат игровой площадки goodgame.ru',
-        fields: [
-            {
-                id: 'login',
-                label: 'Логин',
-                type: 'text',
-                placeholder: 'user или e-mail',
-                required: true,
-            },
-            {
-                id: 'password',
-                label: 'Пароль',
-                type: 'password',
-                placeholder: '••••••••',
-            },
-            {
-                id: 'room',
-                label: 'Комната по умолчанию',
-                type: 'select',
-                choices: ['Общий чат', 'Игровая комната', 'Личный блог', 'Прямой эфир'],
-            },
-            {
-                id: 'games',
-                label: 'Игры',
-                type: 'tags',
-                placeholder: 'игра, Enter — добавить',
-                hint: 'Ограничить ленту сообщениями из этих игровых комнат.',
-            },
-            {
-                id: 'autoconnect',
-                label: 'Подключаться при запуске',
-                type: 'switch',
-                value: true,
-            },
-        ],
-    },
-];
-
-const ENABLED_FIELD = { id: 'enabled', label: 'Плагин включён', type: 'switch', value: true };
-
-// Выбранный клиент живёт в хеше адреса (#twitch): переживает перезагрузку
-// страницы, даёт прямые ссылки и работает с кнопкой «назад».
 const state = {
-    selectedId: clientIdFromHash() ?? CHAT_CLIENTS[0]?.id ?? null,
-    draft: Object.fromEntries(CHAT_CLIENTS.map((client) => [client.id, loadValues(client)])),
+    plugins: [],
+    selectedId: pluginIdFromHash(),
+    // Черновик значений выбранного плагина, до нажатия «Сохранить».
+    values: {},
+    // Плагины, для которых сейчас идёт enable/disable: переключатель нельзя
+    // дёргать второй раз, пока процесс поднимается.
+    busy: new Set(),
+    // Идёт сохранение: кнопка ждёт ответа плагина и показывает спиннер.
+    saving: false,
+    // Чем плагин занят прямо сейчас.
+    waitingText: '',
+    // Что плагин сказал о последней попытке: держим, чтобы пометки об ошибке
+    // пережили перерисовку.
+    fieldError: null,
 };
 
 const clientsEl = document.getElementById('clients');
@@ -106,352 +30,553 @@ const optionsEl = document.getElementById('options');
 const countEl = document.getElementById('clients-count');
 const toastEl = document.getElementById('toast');
 
-// --- Значения опций --------------------------------------------------------
+let toastTimer = 0;
 
-function defaultsOf(client) {
-    const values = { enabled: true };
-    for (const field of client.fields) {
-        switch (field.type) {
-            case 'tags':
-                values[field.id] = [];
-                break;
-            case 'switch':
-                values[field.id] = Boolean(field.value);
-                break;
-            case 'select':
-                values[field.id] = field.choices[0] ?? '';
-                break;
-            default:
-                values[field.id] = '';
+// --- Обращение к ядру -------------------------------------------------------
+
+async function api(path, options = {}) {
+    const response = await fetch(path, {
+        headers: { 'Content-Type': 'application/json' },
+        ...options,
+    });
+
+    const text = await response.text();
+    let data = {};
+    if (text) {
+        try {
+            data = JSON.parse(text);
+        } catch {
+            throw new Error('ядро ответило не JSON');
         }
     }
-    return values;
+    if (!response.ok) {
+        const error = new Error(data.error || `HTTP ${response.status}`);
+        error.fields = data.fields ?? null;
+        error.items = data.items ?? null;
+        error.status = response.status;
+        throw error;
+    }
+    return data;
 }
 
-function loadValues(client) {
-    const values = defaultsOf(client);
-    let saved;
-    try {
-        saved = JSON.parse(localStorage.getItem(STORAGE_PREFIX + client.id) ?? 'null');
-    } catch {
-        saved = null;
+async function loadPlugins() {
+    const data = await api(API);
+    state.plugins = data.plugins ?? [];
+
+    if (!state.plugins.some((plugin) => plugin.id === state.selectedId)) {
+        state.selectedId = state.plugins[0]?.id ?? null;
     }
-    if (!saved || typeof saved !== 'object') {
-        return values;
-    }
-    for (const [key, value] of Object.entries(saved)) {
-        if (key in values) {
-            values[key] = value;
-        }
-    }
-    return values;
+    resetValues();
 }
 
-function persist(client) {
-    try {
-        localStorage.setItem(STORAGE_PREFIX + client.id, JSON.stringify(state.draft[client.id]));
-    } catch {
-        // Приватный режим или переполненное хранилище — для прототипа не важно.
+function replacePlugin(view) {
+    const index = state.plugins.findIndex((plugin) => plugin.id === view.id);
+    if (index === -1) {
+        state.plugins.push(view);
+    } else {
+        state.plugins[index] = view;
+    }
+    if (view.id === state.selectedId) {
+        state.values = {...(view.values ?? {})};
     }
 }
 
-// --- Статус клиента --------------------------------------------------------
+function selected() {
+    return state.plugins.find((plugin) => plugin.id === state.selectedId) ?? null;
+}
 
-function statusOf(client) {
-    const values = state.draft[client.id];
-    if (!values.enabled) {
-        return { kind: 'off', text: 'Выключен' };
-    }
-    const missing = client.fields.some((field) => field.required && isEmpty(values[field.id]));
-    return missing ? { kind: 'warn', text: 'Требует настроек' } : { kind: 'ok', text: 'Готов' };
+// --- Значения формы --------------------------------------------------------
+
+function resetValues() {
+    state.values = {...(selected()?.values ?? {})};
 }
 
 function isEmpty(value) {
     return Array.isArray(value) ? value.length === 0 : !String(value ?? '').trim();
 }
 
-function summaryOf(client) {
-    const values = state.draft[client.id];
-    const list = values.channels ?? values.games;
-    if (Array.isArray(list) && list.length) {
-        return list.join(', ');
+// --- Статус плагина --------------------------------------------------------
+
+function statusOf(plugin) {
+    if (state.busy.has(plugin.id)) {
+        return {kind: 'busy', text: plugin.enabled ? 'Выключается…' : 'Включается…'};
     }
-    return values.nick || values.login || values.room || 'не настроен';
+    if (plugin.state === 'failed') {
+        return {kind: 'error', text: 'Ошибка', title: plugin.problem ?? ''};
+    }
+    if (!plugin.enabled) {
+        return {kind: 'off', text: 'Выключен'};
+    }
+    const missing = (plugin.options ?? []).some((option) => option.required && isEmpty(stateValue(plugin, option.key)));
+    return missing ? {kind: 'warn', text: 'Требует настроек'} : {kind: 'ok', text: 'Готов'};
+}
+
+// Значение опции: черновик формы, если плагин выбран, иначе сохранённое.
+function stateValue(plugin, key) {
+    if (plugin.id !== state.selectedId) {
+        return plugin.values?.[key];
+    }
+    return key in state.values ? state.values[key] : plugin.values?.[key];
+}
+
+function summaryOf(plugin) {
+    const tags = (plugin.options ?? []).filter((option) => option.type === 'text/multiple');
+    const filled = tags
+        .map((option) => stateValue(plugin, option.key))
+        .flatMap((value) => (Array.isArray(value) ? value : []));
+
+    if (filled.length) {
+        return filled.join(', ');
+    }
+    return plugin.enabled ? 'настроен' : 'не настроен';
 }
 
 // --- Рендер ----------------------------------------------------------------
 
 function render() {
-    countEl.textContent = String(CHAT_CLIENTS.length);
+    countEl.textContent = String(state.plugins.length);
     renderClients();
     renderOptions();
 }
 
 function renderClients() {
-    const items = CHAT_CLIENTS.map((client) => {
-        const selected = client.id === state.selectedId;
-        const button = el('button', {
-            type: 'button',
-            class: 'client',
-            'aria-pressed': String(selected),
-            'data-client': client.id,
-        }, [
-            el('span', { class: 'client__logo', 'aria-hidden': 'true' }, [client.mark]),
-            el('span', { class: 'client__info' }, [
-                el('span', { class: 'client__name' }, [client.name]),
-                el('span', { class: 'client__meta' }, [summaryOf(client)]),
-            ]),
-        ]);
-        button.addEventListener('click', () => select(client.id));
-
-        return el('li', { class: 'client-row' + (selected ? ' is-selected' : '') }, [
-            button,
-            enabledToggle(client),
-        ]);
-    });
-
-    clientsEl.replaceChildren(...items);
-}
-
-// Тумблер вкл/выкл прямо в списке. Это отдельная метка, а не вложенный input:
-// кнопка выбора клиента не должна содержать интерактивный элемент.
-function enabledToggle(client) {
-    const input = el('input', {
-        type: 'checkbox',
-        class: 'switch__input',
-        id: `${client.id}-enabled-list`,
-        'data-toggle-enabled': client.id,
-        'aria-label': `${client.name}: включить плагин`,
-    });
-    input.checked = Boolean(state.draft[client.id].enabled);
-
-    input.addEventListener('change', () => setEnabled(client, input.checked));
-
-    return el('label', { class: 'switch switch--compact' }, [
-        input,
-        el('span', { class: 'switch__track', 'aria-hidden': 'true' }),
-    ]);
-}
-
-function statusBadge(status) {
-    return el('span', {
-        class: 'status status--' + status.kind,
-        title: status.text,
-    }, [status.text]);
-}
-
-function renderOptions() {
-    const client = CHAT_CLIENTS.find((item) => item.id === state.selectedId);
-    if (!client) {
-        optionsEl.replaceChildren(el('p', { class: 'empty' }, ['Чат-клиенты не установлены']));
+    if (!state.plugins.length) {
+        clientsEl.replaceChildren(el('li', {class: 'panel__empty'},
+            [el('p', {class: 'empty'}, ['Плагины не найдены в plugins/chat'])]));
         return;
     }
 
-    const values = state.draft[client.id];
-    const form = el('form', { class: 'options', novalidate: '' });
+    clientsEl.replaceChildren(...state.plugins.map((plugin) => {
+        const selectedNow = plugin.id === state.selectedId;
+        const status = statusOf(plugin);
+
+        const button = el('button', {
+            type: 'button',
+            class: 'client',
+            'aria-pressed': String(selectedNow),
+            'data-plugin': plugin.id,
+        }, [
+            el('span', {class: 'client__logo', 'aria-hidden': 'true'}, [markOf(plugin)]),
+            el('span', {class: 'client__info'}, [
+                el('span', {class: 'client__name'}, [plugin.title || plugin.id]),
+                el('span', {class: 'client__meta'}, [summaryOf(plugin)]),
+            ]),
+        ]);
+        button.addEventListener('click', () => select(plugin.id));
+
+        return el('li', {class: 'client-row' + (selectedNow ? ' is-selected' : '')}, [
+            button,
+            enabledToggle(plugin),
+        ]);
+    }));
+}
+
+function markOf(plugin) {
+    const title = plugin.title || plugin.id;
+    return title.slice(0, 2).toUpperCase();
+}
+
+function enabledToggle(plugin) {
+    const input = el('input', {
+        type: 'checkbox',
+        class: 'switch__input',
+        // Отдельный id: в форме есть свой переключатель с ключом enabled.
+        id: `${plugin.id}-toggle`,
+        'aria-label': `${plugin.title || plugin.id}: включить плагин`,
+    });
+    input.checked = Boolean(plugin.enabled);
+    input.disabled = state.busy.has(plugin.id);
+
+    input.addEventListener('change', () => toggle(plugin, input.checked));
+
+    const label = el('label', {class: 'switch switch--compact'}, [
+        input,
+        el('span', {class: 'switch__track', 'aria-hidden': 'true'}),
+    ]);
+    if (state.busy.has(plugin.id)) {
+        label.classList.add('is-pending');
+    }
+    return label;
+}
+
+function renderOptions() {
+    const plugin = selected();
+    if (!plugin) {
+        optionsEl.replaceChildren(el('p', {class: 'empty'}, ['Выберите плагин слева']));
+        return;
+    }
+
+    const form = el('form', {class: 'options', novalidate: ''});
+    const status = statusOf(plugin);
+
+    const header = [
+        el('h2', {class: 'options__title'}, [plugin.title || plugin.id]),
+        el('p', {class: 'options__desc'}, [plugin.description ?? '']),
+    ];
+    if (plugin.state === 'failed' && plugin.problem) {
+        header.push(el('p', {class: 'options__problem'}, [plugin.problem]));
+    }
+    if (plugin.version) {
+        header.push(el('p', {class: 'options__version'}, ['версия ' + plugin.version]));
+    }
 
     form.append(
-        el('header', { class: 'options__head' }, [
-            el('div', {}, [
-                el('h2', { class: 'options__title' }, [client.name]),
-                el('p', { class: 'options__desc' }, [client.description]),
+        el('header', {class: 'options__head'}, [
+            el('div', {}, header),
+            statusBadge(status),
+        ]),
+        el('div', {class: 'options__body'}, renderBody(plugin)),
+        el('footer', {class: 'options__foot'}, [
+            el('span', {class: 'options__note'}, [
+                plugin.enabled ? 'Настройки сохраняются в config.json' : 'Плагин выключен — настройки сохраняются, но не применяются',
             ]),
-            statusBadge(statusOf(client)),
-        ]),
-        el('div', { class: 'options__body' }, [
-            renderRow(client, ENABLED_FIELD),
-            ...client.fields.map((field) => renderRow(client, field)),
-        ]),
-        el('footer', { class: 'options__foot' }, [
-            el('span', { class: 'options__note' }, ['Пока это прототип: настройки живут в браузере']),
-            el('span', { class: 'options__actions' }, [
-                el('button', { type: 'button', class: 'btn btn--ghost' }, ['Сбросить']),
-                el('button', { type: 'submit', class: 'btn btn--primary' }, ['Сохранить']),
+            el('span', {class: 'options__actions'}, [
+                el('button', {type: 'button', class: 'btn btn--ghost', disabled: state.saving}, ['Сбросить']),
+                saveButton(plugin),
             ]),
         ]),
     );
 
     form.addEventListener('submit', (event) => {
         event.preventDefault();
-        const invalid = validate(form, client);
-        if (invalid) {
-            invalid.querySelector('input, select, .tags__input')?.focus();
-            toast('Заполните обязательные поля');
-            return;
-        }
-        persist(client);
-        render();
-        toast(`${client.name}: настройки сохранены`);
+        save(plugin);
     });
-
     form.querySelector('.btn--ghost').addEventListener('click', () => {
-        state.draft[client.id] = defaultsOf(client);
-        persist(client);
+        resetValues();
         render();
-        toast(`${client.name}: настройки сброшены`);
+        toast('Черновик отменён');
     });
 
     optionsEl.replaceChildren(form);
+
+    // Пометки об ошибке накладываем после сборки формы: любая перерисовка
+    // сохраняет их, а не стирает.
+    if (state.fieldError) {
+        showFieldErrors(plugin, state.fieldError.fields, state.fieldError.items);
+    }
 }
 
-function renderRow(client, field) {
-    const values = state.draft[client.id];
-    const control = el('div', { class: 'field__control' });
+// saveButton во время сохранения показывает спиннер и то, чем занят плагин.
+function saveButton(plugin) {
+    const busy = state.saving || Boolean(plugin.waiting);
+    const label = busy
+        ? (state.waitingText || plugin.waitingText || 'Сохраняем…')
+        : 'Сохранить';
 
-    if (field.type === 'switch') {
-        control.append(renderSwitch(client, values, field));
-    } else if (field.type === 'tags') {
-        control.append(renderTags(client, values, field));
-    } else if (field.type === 'select') {
-        control.append(renderSelect(client, values, field));
-    } else {
-        control.append(renderInput(client, values, field));
+    const children = busy
+        ? [el('span', {class: 'spinner', 'aria-hidden': 'true'}), label]
+        : [label];
+
+    return el('button', {
+        type: 'submit',
+        class: 'btn btn--primary',
+        disabled: busy,
+    }, children);
+}
+
+function renderBody(plugin) {
+    const rows = [];
+
+    if (!plugin.enabled && !(plugin.options ?? []).length) {
+        rows.push(el('p', {class: 'empty'},
+            ['Включите плагин: ядро запустит его, и тот расскажет, какие у него настройки']));
+        return rows;
     }
 
-    if (field.required) {
-        control.append(el('p', { class: 'field__error' }, ['']));
+    for (const option of plugin.options ?? []) {
+        rows.push(renderRow(plugin, option));
+    }
+    return rows;
+}
+
+function renderRow(plugin, option) {
+    const id = `${plugin.id}-${option.key}`;
+    const control = el('div', {class: 'field__control'});
+
+    switch (option.type) {
+        case 'bool':
+            control.append(renderSwitch(plugin, option, id));
+            break;
+        case 'select':
+            control.append(renderSelect(plugin, option, id));
+            break;
+        case 'text/multiple':
+            // Список строк — подписи поля не нужны: каждая строка со своим вводом.
+            control.append(renderList(plugin, option));
+            break;
+        case 'select/multiple':
+            // Варианты с названиями: «E.Wolf» вместо «53029».
+            control.append(renderChoices(plugin, option));
+            break;
+        default:
+            control.append(renderInput(plugin, option, id));
     }
 
-    // У переключателя своя подпись рядом с тумблером, колонка-label не нужна.
-    let label = el('span', { class: 'field__label field__label--empty', 'aria-hidden': 'true' });
-    if (field.type !== 'switch') {
-        label = el('label', { class: 'field__label', for: `${client.id}-${field.id}` }, [field.label]);
-        if (field.hint) {
-            label.append(el('span', { class: 'field__hint' }, [field.hint]));
+    // Слот для ошибки нужен у любого поля: плагин может не принять и необязательное.
+    control.append(el('p', {class: 'field__error'}, ['']));
+
+    let label = el('span', {class: 'field__label field__label--empty', 'aria-hidden': 'true'});
+    if (option.type !== 'bool') {
+        label = el('label', {class: 'field__label', for: id}, [option.label || option.key]);
+        if (option.hint) {
+            label.append(el('span', {class: 'field__hint'}, [option.hint]));
         }
     }
 
-    return el('div', { class: 'field', 'data-field': field.id }, [label, control]);
+    return el('div', {class: 'field', 'data-field': option.key}, [label, control]);
 }
 
-function renderInput(client, values, field) {
+function renderInput(plugin, option, id) {
     const input = el('input', {
-        class: 'input' + (field.mono ? ' input--mono' : ''),
-        id: `${client.id}-${field.id}`,
-        type: field.type === 'password' ? 'password' : 'text',
-        placeholder: field.placeholder ?? '',
+        class: 'input',
+        id,
+        type: option.type === 'password' ? 'password' : option.type === 'number' ? 'number' : 'text',
+        placeholder: option.placeholder ?? '',
         autocomplete: 'off',
     });
-    input.value = values[field.id] ?? '';
-    input.addEventListener('input', (event) => {
-        values[field.id] = input.value;
-        changed(client, event.target);
+    input.value = stateValue(plugin, option.key) ?? '';
+
+    input.addEventListener('input', () => {
+        state.values[option.key] = option.type === 'number' ? Number(input.value) : input.value;
+        changed(plugin, input);
     });
     return input;
 }
 
-function renderSelect(client, values, field) {
-    const select = el('select', { class: 'select', id: `${client.id}-${field.id}` },
-        field.choices.map((choice) => el('option', { value: choice }, [choice])));
-    select.value = values[field.id] ?? field.choices[0] ?? '';
-    select.addEventListener('change', (event) => {
-        values[field.id] = select.value;
-        changed(client, event.target);
+function renderSelect(plugin, option, id) {
+    const select = el('select', {class: 'select', id},
+        (option.choices ?? []).map((choice) => el('option', {value: choice.value}, [choice.label ?? choice.value])));
+
+    select.value = stateValue(plugin, option.key) ?? (option.choices?.[0]?.value ?? '');
+    select.addEventListener('change', () => {
+        state.values[option.key] = select.value;
+        changed(plugin, select);
     });
     return select;
 }
 
-function renderSwitch(client, values, field) {
-    const input = el('input', {
-        type: 'checkbox',
-        class: 'switch__input',
-        id: `${client.id}-${field.id}`,
-        ...(field.id === 'enabled' ? { 'data-toggle-enabled': client.id } : {}),
-    });
-    input.checked = Boolean(values[field.id]);
+function renderSwitch(plugin, option, id) {
+	const input = el('input', {
+		type: 'checkbox',
+		class: 'switch__input',
+		id: id ?? `${plugin.id}-${option.key}`,
+	});
+	input.checked = Boolean(stateValue(plugin, option.key));
 
-    input.addEventListener('change', () => {
-        if (field.id === 'enabled') {
-            setEnabled(client, input.checked);
-            return;
-        }
-        values[field.id] = input.checked;
-        changed(client, input);
-    });
+	input.addEventListener('change', () => {
+		state.values[option.key] = input.checked;
+		changed(plugin, input);
+	});
 
-    return el('label', { class: 'switch' }, [
-        input,
-        el('span', { class: 'switch__track', 'aria-hidden': 'true' }),
-        el('span', { class: 'switch__text' }, [field.label]),
-    ]);
+	return el('label', {class: 'switch'}, [
+		input,
+		el('span', {class: 'switch__track', 'aria-hidden': 'true'}),
+		el('span', {class: 'switch__text'}, [option.label || option.key]),
+	]);
 }
 
-// Список тегов: Enter или запятая добавляет значение, Backspace в пустом поле
-// убирает последнее.
-function renderTags(client, values, field) {
-    const box = el('div', { class: 'tags' });
-    const items = values[field.id];
-    const input = el('input', { class: 'tags__input', id: `${client.id}-${field.id}`, autocomplete: 'off' });
+// Список значений: вертикальный список текстовых полей. Пустая строка не имеет
+// смысла и отбрасывается при сохранении.
+function renderList(plugin, option) {
+	const list = el('div', {class: 'fields-list'});
+	const items = Array.isArray(state.values[option.key])
+		? state.values[option.key]
+		: (Array.isArray(option.default) ? [...option.default] : []);
+	state.values[option.key] = items;
+
+	const commit = (source) => {
+		state.values[option.key] = items.filter((item) => String(item).trim() !== '');
+		changed(plugin, source);
+	};
+
+	const draw = () => {
+		list.replaceChildren(...items.map((item, index) => {
+			const input = el('input', {
+				class: 'input',
+				value: item,
+				placeholder: option.placeholder ?? '',
+				autocomplete: 'off',
+			});
+			input.addEventListener('input', () => {
+				items[index] = input.value;
+				input.parentElement.dataset.value = input.value;
+				changed(plugin, input);
+			});
+
+			const remove = el('button', {
+				type: 'button',
+				class: 'field-row__remove',
+				'aria-label': `Убрать поле ${index + 1}`,
+			}, ['\u00d7']);
+			remove.addEventListener('click', () => {
+				items.splice(index, 1);
+				draw();
+				commit(remove);
+			});
+
+			return el('div', {class: 'field-row', 'data-value': item}, [input, remove]);
+		}));
+
+		const add = el('button', {type: 'button', class: 'btn btn--ghost btn--small'},
+			[items.length ? '+ \u0415\u0449\u0451' : '+ \u0414\u043e\u0431\u0430\u0432\u0438\u0442\u044c']);
+		add.addEventListener('click', () => {
+			items.push('');
+			draw();
+			list.querySelector('.field-row:last-of-type .input')?.focus();
+		});
+		list.append(add);
+	};
+
+	draw();
+	return list;
+}
+
+// Список с названиями: у каждой записи есть фактическое значение и то, что
+// видит пользователь. Плагин присылает варианты в choices, а добавить своё
+// можно руками — например канал, которого он не знает.
+function renderChoices(plugin, option) {
+    const wrap = el('div', {class: 'choices'});
+    const picked = Array.isArray(state.values[option.key]) ? state.values[option.key] : [];
+    state.values[option.key] = picked;
+
+    const values = new Set(picked.map((entry) => entry.value));
+    const commit = (source) => changed(plugin, source);
+
+    const known = new Set();
+
+    const rows = (option.choices ?? []).map((choice) => {
+        known.add(choice.value);
+
+        const input = el('input', {type: 'checkbox', class: 'choices__input'});
+        input.checked = values.has(choice.value);
+
+        const toggle = () => {
+            if (input.checked) {
+                values.add(choice.value);
+                add({value: choice.value, label: choice.label || choice.value});
+            } else {
+                values.delete(choice.value);
+                remove(choice.value);
+            }
+            commit(input);
+        };
+        input.addEventListener('change', toggle);
+
+        return el('label', {class: 'choices__row', 'data-value': choice.value}, [
+            input,
+            el('span', {class: 'choices__label'}, [choice.label || choice.value]),
+            el('span', {class: 'choices__value'}, [choice.value]),
+        ]);
+    });
+
+    const add = (entry) => {
+        if (values.has(entry.value)) {
+            return;
+        }
+        values.add(entry.value);
+        picked.push(entry);
+        draw();
+    };
+
+    const remove = (value) => {
+        const index = picked.findIndex((entry) => entry.value === value);
+        if (index !== -1) {
+            picked.splice(index, 1);
+        }
+        values.delete(value);
+        draw();
+    };
+
+    const manual = el('input', {class: 'input', placeholder: option.placeholder ?? 'значение'});
+    const manualAdd = el('button', {type: 'button', class: 'btn btn--ghost btn--small'}, ['Добавить']);
+    manualAdd.addEventListener('click', () => {
+        const value = manual.value.trim();
+        manual.value = '';
+        if (!value) {
+            return;
+        }
+        add({value, label: value});
+        commit(manual);
+    });
+    manual.addEventListener('keydown', (event) => {
+        if (event.key === 'Enter') {
+            event.preventDefault();
+            manualAdd.click();
+        }
+    });
 
     const draw = () => {
-        box.replaceChildren(
-            ...items.map((item) => {
-                const remove = el('button', {
+        wrap.replaceChildren(...rows);
+
+        const extras = picked.filter((entry) => !known.has(entry.value));
+        if (extras.length) {
+            wrap.append(el('div', {class: 'choices__list'}, extras.map((entry) => {
+                const removeButton = el('button', {
                     type: 'button',
-                    class: 'tag__remove',
-                    'aria-label': `Убрать ${item}`,
-                }, ['×']);
-                remove.addEventListener('click', () => {
-                    items.splice(items.indexOf(item), 1);
-                    draw();
-                    changed(client, remove);
+                    class: 'field-row__remove',
+                    'aria-label': `Убрать ${entry.label || entry.value}`,
+                }, ['\u00d7']);
+                removeButton.addEventListener('click', () => {
+                    remove(entry.value);
+                    commit(removeButton);
                 });
-                return el('span', { class: 'tag' }, [item, remove]);
-            }),
-        );
-        if (!items.length) {
-            box.append(el('span', { class: 'tags__empty' }, [field.placeholder ?? 'пусто']));
+                return el('div', {class: 'field-row', 'data-value': entry.value}, [
+                    el('span', {class: 'choices__added'}, [entry.label || entry.value]),
+                    removeButton,
+                ]);
+            })));
         }
-        input.placeholder = items.length ? 'добавить' : '';
-        box.append(input);
-    };
 
-    const add = () => {
-        const value = input.value.trim().replace(/^#/, '');
-        if (!value || items.includes(value)) {
-            input.value = '';
-            return;
+        if (!(option.choices ?? []).length) {
+            wrap.append(el('p', {class: 'choices__hint'},
+                ['Плагин пока не прислал варианты — можно добавить значения вручную']));
         }
-        items.push(value);
-        input.value = '';
-        draw();
-        changed(client, input);
-    };
 
-    input.addEventListener('keydown', (event) => {
-        if (event.key === 'Enter' || event.key === ',') {
-            event.preventDefault();
-            add();
-        } else if (event.key === 'Backspace' && !input.value && items.length) {
-            items.pop();
-            draw();
-            changed(client, input);
-        }
-    });
-    input.addEventListener('blur', add);
-    box.addEventListener('click', (event) => {
-        if (event.target === box) {
-            input.focus();
-        }
-    });
+        wrap.append(el('div', {class: 'choices__manual'}, [manual, manualAdd]));
+    };
 
     draw();
-    return box;
+    return wrap;
 }
 
-// --- Валидация и обновление статусов --------------------------------------
+// --- Действия --------------------------------------------------------------
 
-function validate(form, client) {
-    const values = state.draft[client.id];
+async function toggle(plugin, enabled) {
+    if (state.busy.has(plugin.id)) {
+        return;
+    }
+    state.busy.add(plugin.id);
+    renderClients();
+
+    const name = plugin.title || plugin.id;
+    try {
+        const action = enabled ? 'enable' : 'disable';
+        const view = await api(`${API}/${plugin.id}/${action}`, {method: 'POST'});
+        replacePlugin(view);
+
+        if (view.state === 'failed') {
+            toast(`${name}: ${view.problem ?? 'не запустился'}`);
+        } else {
+            toast(`${name}: ${enabled ? 'включён' : 'выключен'}`);
+        }
+    } catch (error) {
+        toast(`${name}: ${error.message}`);
+    } finally {
+        state.busy.delete(plugin.id);
+        render();
+    }
+}
+
+function validate(plugin) {
     let firstInvalid = null;
 
-    for (const field of client.fields) {
-        const row = form.querySelector(`[data-field="${field.id}"]`);
+    for (const option of plugin.options ?? []) {
+        const row = optionsEl.querySelector(`[data-field="${CSS.escape(option.key)}"]`);
         const error = row?.querySelector('.field__error');
         if (!error) {
             continue;
         }
-        if (field.required && isEmpty(values[field.id])) {
+        if (option.required && isEmpty(state.values[option.key])) {
             error.textContent = 'Обязательное поле';
             firstInvalid ??= row;
         } else {
@@ -461,65 +586,181 @@ function validate(form, client) {
     return firstInvalid;
 }
 
-// Обновляет список клиентов и бейджи статуса, не трогая форму: перерисовка
-// снесла бы фокус и позицию курсора в поле ввода.
-function changed(client, source) {
-    if (source) {
-        source.closest('[data-field]')?.querySelector('.field__error')?.replaceChildren();
-    }
-
-    renderClients();
-
-    const headerBadge = optionsEl.querySelector('.options__head .status');
-    if (headerBadge) {
-        headerBadge.replaceWith(statusBadge(statusOf(client)));
-    }
-}
-
-// Тумблер «вкл/выкл» есть и в списке, и в шапке формы — держат одно значение
-// и обновляются вместе, форма при этом не перерисовывается.
-function setEnabled(client, enabled) {
-    state.draft[client.id].enabled = enabled;
-
-    renderClients();
-
-    for (const input of optionsEl.querySelectorAll('[data-toggle-enabled]')) {
-        input.checked = enabled;
-    }
-
-    const headerBadge = optionsEl.querySelector('.options__head .status');
-    if (headerBadge) {
-        headerBadge.replaceWith(statusBadge(statusOf(client)));
-    }
-}
-
-function select(id, { updateHash = true } = {}) {
-    if (!CHAT_CLIENTS.some((client) => client.id === id)) {
+function save(plugin) {
+    const invalid = validate(plugin);
+    if (invalid) {
+        invalid.querySelector('input, select, .tags__input')?.focus();
+        toast('Заполните обязательные поля');
         return;
     }
-    if (id === state.selectedId) {
+
+    state.saving = true;
+    state.waitingText = '';
+    render();
+
+    // Плагин может уйти в сеть, поэтому спрашиваем у ядра, чем он занят: так
+    // видно, что он не завис.
+    const poll = setInterval(refreshWaiting, 700);
+
+    api(`${API}/${plugin.id}/options`, {
+        method: 'PUT',
+        body: JSON.stringify({values: state.values}),
+    }).then((view) => {
+        replacePlugin(view);
+        state.fieldError = null;
+        clearFieldErrors(plugin);
+        toast(`${plugin.title || plugin.id}: настройки сохранены`);
+    }).catch((error) => {
+        // Плагин сказал, что не так: помечаем сами поля и конкретные записи в
+        // них. Всплывашку не показываем — она бы только отвлекла от сути.
+        if (error.fields) {
+            state.fieldError = {fields: error.fields, items: error.items};
+            showFieldErrors(plugin, error.fields, error.items);
+            return;
+        }
+        toast(error.message);
+    }).finally(() => {
+        clearInterval(poll);
+        state.saving = false;
+        state.waitingText = '';
+        render();
+    });
+}
+
+async function refreshWaiting() {
+    const plugin = selected();
+    if (!plugin) {
+        return;
+    }
+    try {
+        const view = await api(`${API}/${plugin.id}`);
+        replacePlugin(view);
+        state.waitingText = view.waitingText ?? '';
+        render();
+    } catch {
+        // Ядро не ответило: молча продолжаем ждать.
+    }
+}
+
+// showFieldErrors помечает поля, которые плагин не принял. Если плагин сказал,
+// какое именно значение не годится, отмечаем только его.
+function showFieldErrors(plugin, fields, items) {
+    // Сначала конкретные записи: если плагин назвал значение, красным должно
+    // быть только оно, а не всё поле целиком.
+    const blamed = new Set();
+
+    for (const [key, entries] of Object.entries(items ?? {})) {
+        const row = optionsEl.querySelector(`[data-field="${CSS.escape(key)}"]`);
+        for (const [value, reason] of Object.entries(entries ?? {})) {
+            const entry = findEntryRow(row, value);
+            if (!entry) {
+                blamed.add(key);
+                continue;
+            }
+            blamed.add(key);
+            entry.classList.add('item--invalid');
+            // Красная рамка — на самом поле, а не вокруг строки: крестик
+            // удаления к делу не относится.
+            for (const field of entry.querySelectorAll('.input, .choices__added')) {
+                field.classList.add('input--invalid');
+            }
+            entry.append(el('p', {class: 'item__error'}, [reason]));
+        }
+    }
+
+    for (const [key, message] of Object.entries(fields ?? {})) {
+        const row = optionsEl.querySelector(`[data-field="${CSS.escape(key)}"]`);
+        const error = row?.querySelector('.field__error');
+        if (error) {
+            error.textContent = message;
+        }
+        row?.classList.add('field--invalid');
+
+        // Виновна не одна запись, а всё поле — обводим его целиком.
+        if (!blamed.has(key)) {
+            for (const input of row?.querySelectorAll('.input, .choices__row') ?? []) {
+                input.classList.add('input--invalid');
+            }
+        }
+    }
+}
+
+// findEntryRow находит конкретную запись списка по тому, что в ней написано.
+// findEntryRow ищет именно ту запись, о которой плагин сказал. Сравниваем по
+// data-value целиком: «https://goodgame.ru/» — кусок «https://goodgame.ru/E.Wolf»,
+// и по вхождению одна ошибка встала бы на чужую запись.
+function findEntryRow(row, value) {
+    if (!row) {
+        return null;
+    }
+    const wanted = String(value).trim();
+    return row.querySelector(`[data-value="${CSS.escape(wanted)}"]`);
+}
+
+function clearFieldErrors(plugin) {
+    for (const option of plugin.options ?? []) {
+        const row = optionsEl.querySelector(`[data-field="${CSS.escape(option.key)}"]`);
+        row?.querySelector('.field__error')?.replaceChildren();
+        row?.classList.remove('field--invalid');
+        row?.querySelectorAll('.item--invalid')
+            .forEach((entry) => {
+                entry.classList.remove('item--invalid');
+                entry.querySelector('.item__error')?.remove();
+            });
+    }
+}
+
+// Обновляет список и бейджи, не трогая форму: перерисовка снесла бы фокус и
+// позицию курсора в поле ввода.
+function changed(plugin, source) {
+    if (source) {
+        state.fieldError = null;
+
+        const row = source.closest('[data-field]');
+        row?.querySelector('.field__error')?.replaceChildren();
+        row?.classList.remove('field--invalid');
+        row?.querySelectorAll('.item--invalid')
+            .forEach((entry) => {
+                entry.classList.remove('item--invalid');
+                entry.querySelector('.item__error')?.remove();
+            });
+    }
+    renderClients();
+
+    const headerBadge = optionsEl.querySelector('.options__head .status');
+    if (headerBadge) {
+        headerBadge.replaceWith(statusBadge(statusOf(plugin)));
+    }
+}
+
+function statusBadge(status) {
+    return el('span', {class: 'status status--' + status.kind, title: status.title ?? ''}, [status.text]);
+}
+
+function select(id) {
+    if (id === state.selectedId || !state.plugins.some((plugin) => plugin.id === id)) {
         return;
     }
     state.selectedId = id;
-    if (updateHash) {
-        location.hash = id;
-    }
+    location.hash = id;
+    resetValues();
     render();
 }
 
-// Хеш меняют и руками (ссылка, кнопка «назад»), и кликом по клиенту.
 window.addEventListener('hashchange', () => {
-    select(clientIdFromHash() ?? CHAT_CLIENTS[0]?.id, { updateHash: false });
+    const id = pluginIdFromHash();
+    if (id && id !== state.selectedId) {
+        state.selectedId = state.plugins.some((plugin) => plugin.id === id) ? id : state.selectedId;
+        resetValues();
+        render();
+    }
 });
 
-function clientIdFromHash() {
-    const id = location.hash.replace(/^#/, '');
-    return CHAT_CLIENTS.some((client) => client.id === id) ? id : null;
+function pluginIdFromHash() {
+    return location.hash.replace(/^#/, '') || null;
 }
 
 // --- Вспомогательное -------------------------------------------------------
-
-let toastTimer = 0;
 
 function toast(text) {
     toastEl.textContent = text;
@@ -527,7 +768,7 @@ function toast(text) {
     clearTimeout(toastTimer);
     toastTimer = setTimeout(() => {
         toastEl.hidden = true;
-    }, 2500);
+    }, 3000);
 }
 
 function el(tag, attrs = {}, children = []) {
@@ -542,4 +783,10 @@ function el(tag, attrs = {}, children = []) {
     return node;
 }
 
-render();
+loadPlugins().then(render).catch((error) => {
+    countEl.textContent = '0';
+    clientsEl.replaceChildren(el('li', {}, [
+        el('p', {class: 'empty'}, [`Ядро недоступно: ${error.message}`]),
+    ]));
+    optionsEl.replaceChildren(el('p', {class: 'empty'}, ['Запусти ядро: go run .']));
+});

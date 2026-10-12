@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"studio/core/api"
 	"studio/core/plugin"
 	"studio/core/settings"
 )
@@ -129,15 +130,17 @@ func run() error {
 	shutdownTimeout := flag.Duration("shutdown-timeout", 5*time.Second, "how long to wait for in-flight requests on shutdown")
 	flag.Parse()
 
-	config, err := settings.Load(*configPath)
+	manager, err := plugin.NewManager(*configPath, *pluginsDir)
 	if err != nil {
 		return err
 	}
+	config := manager.Config()
 	slog.Info("config loaded",
 		"path", relPath(*configPath),
 		"version", config.Version,
 		"plugins", len(config.ChatPlugins()),
 	)
+	slog.Info("chat plugins found", "plugins", strings.Join(pluginIDs(manager.List()), ", "))
 
 	page, err := newWeb(*webDir)
 	if err != nil {
@@ -152,6 +155,7 @@ func run() error {
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", healthHandler(page))
+	mux.Handle("/api/", api.Handler(manager))
 	mux.Handle("/", page)
 
 	srv := &http.Server{
@@ -176,8 +180,8 @@ func run() error {
 	pluginCtx, cancelPlugins := context.WithCancel(context.Background())
 	defer cancelPlugins()
 
-	plugins := startPlugins(pluginCtx, *pluginsDir, config)
-	defer plugins.StopAll()
+	manager.Start(pluginCtx)
+	defer manager.Shutdown()
 
 	listenErr := make(chan error, 1)
 	go func() {
@@ -207,74 +211,19 @@ func run() error {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 
-	// defers above do the same on early returns; StopAll is idempotent.
-	plugins.StopAll()
+	// defers above do the same on early returns; Shutdown is idempotent.
+	manager.Shutdown()
 	cancelPlugins()
 	return nil
 }
 
-// startPlugins discovers and launches chat plugins, tells them who they are
-// configured as and hands them their options. A broken plugin is logged and
-// skipped: the kernel and the other plugins keep working.
-func startPlugins(ctx context.Context, dir string, config *settings.Config) *plugin.Supervisor {
-	supervisor := &plugin.Supervisor{}
-
-	descriptors, err := plugin.Discover(dir)
-	if err != nil {
-		slog.Error("cannot read plugins", "dir", dir, "err", err)
-		return supervisor
+// pluginIDs lists the ids of the plugins found on disk.
+func pluginIDs(views []plugin.PluginView) []string {
+	ids := make([]string, 0, len(views))
+	for _, view := range views {
+		ids = append(ids, view.ID)
 	}
-	if len(descriptors) == 0 {
-		slog.Info("no chat plugins found", "dir", relPath(dir))
-		return supervisor
-	}
-
-	slog.Info("scanning chat plugins", "dir", relPath(dir), "found", len(descriptors))
-	for _, d := range descriptors {
-		slog.Info("plugin found", "plugin", d.Name, "path", relPath(d.Path))
-	}
-
-	supervisor.StartAll(ctx, descriptors)
-
-	for _, p := range supervisor.Plugins() {
-		activate(ctx, p, config)
-	}
-
-	slog.Info("chat plugins running", "plugins", strings.Join(supervisor.Names(), ", "))
-	return supervisor
-}
-
-// activate asks a plugin who it is and gives it the options from the config
-// file. Without a description it still runs, just without settings.
-func activate(ctx context.Context, p *plugin.Plugin, config *settings.Config) {
-	info, err := p.Describe(ctx)
-	if err != nil {
-		slog.Warn("plugin did not describe itself", "plugin", p.Name, "err", err)
-		return
-	}
-	slog.Info("plugin info",
-		"plugin", p.Name,
-		"title", info.Name,
-		"version", info.Version,
-		"options", len(info.Options),
-	)
-
-	stored, _ := config.Chat(p.Name)
-	values := plugin.ValuesFor(info, stored)
-
-	unknown, err := plugin.CheckValues(info.Options, values)
-	if err != nil {
-		slog.Warn("stored options do not fit the schema", "plugin", p.Name, "err", err)
-		slog.Debug("using the schema defaults instead", "plugin", p.Name)
-		values = plugin.Defaults(info.Options)
-	}
-	if len(unknown) > 0 {
-		slog.Info("options the plugin did not declare, keeping them", "plugin", p.Name, "keys", unknown)
-	}
-
-	if err := p.Configure(values); err != nil {
-		slog.Warn("plugin rejected its options", "plugin", p.Name, "err", err)
-	}
+	return ids
 }
 
 func envOr(key, fallback string) string {

@@ -1,20 +1,20 @@
 package plugin
 
 import (
-	"context"
 	"fmt"
 	"time"
 
+	"studio/core/protocol"
 	"studio/core/settings"
 )
 
 // Info is what a plugin told us about itself.
 type Info struct {
 	ID          string
-	Name        string
+	Title       string
 	Version     string
 	Description string
-	Options     []Option
+	Options     []protocol.Option
 }
 
 // OptionKeys lists the settings the plugin understands.
@@ -26,63 +26,102 @@ func (i Info) OptionKeys() []string {
 	return keys
 }
 
-const infoTimeout = 5 * time.Second
+// Плагин объявляет себя сразу, ждать долго незачем. А вот на настройки
+// время уходит: там может быть поход в сеть за списком каналов.
+const (
+	describeTimeout  = 5 * time.Second
+	configureTimeout = 20 * time.Second
+)
 
-// Describe asks the plugin who it is and what it can be configured with. A
-// plugin that does not answer in time still runs, just without a form.
-func (p *Plugin) Describe(ctx context.Context) (Info, error) {
-	if err := p.Send(Message{Type: TypeGetInfo}); err != nil {
-		return Info{}, err
-	}
-
+// Describe waits for the plugin to introduce itself: a plugin announces on
+// start and the kernel reads that announcement. A plugin that stays quiet
+// still runs, it just gets no settings page.
+func (p *Plugin) Describe() (Info, error) {
 	select {
 	case message := <-p.repliesTo():
-		if message.Type != TypeInfo {
-			return Info{}, fmt.Errorf("plugin %q answered get_info with %q", p.Name, message.Type)
+		if message.Kind != protocol.KindPluginChat {
+			return Info{}, fmt.Errorf("plugin %q introduced itself with %q", p.Name, message.Kind)
 		}
-		info := Info{
-			ID:          message.ID,
-			Name:        message.Name,
-			Version:     message.Version,
-			Description: message.Description,
-			Options:     message.Options,
-		}
-		if info.ID == "" {
-			info.ID = p.Name
-		}
-		return info, nil
 
-	case <-time.After(infoTimeout):
-		return Info{}, fmt.Errorf("plugin %q did not describe itself within %s", p.Name, infoTimeout)
+		var payload protocol.InfoPayload
+		if err := message.PayloadInto(&payload); err != nil {
+			return Info{}, fmt.Errorf("plugin %q sent an unreadable description: %w", p.Name, err)
+		}
+
+		return Info{
+			ID:          p.Name,
+			Title:       payload.Title,
+			Version:     payload.Version,
+			Description: payload.Description,
+			Options:     payload.Options,
+		}, nil
+
+	case <-time.After(describeTimeout):
+		return Info{}, fmt.Errorf("plugin %q did not introduce itself within %s", p.Name, describeTimeout)
 	}
+}
+
+// ValidationError means the plugin looked at the values and refused them,
+// pointing at the fields the user has to fix. The kernel must not save them.
+type ValidationError struct {
+	Message string
+	Fields  map[string]string
+	// Items narrows Fields down to individual entries of a list field.
+	Items map[string]map[string]string
+}
+
+func (e *ValidationError) Error() string {
+	if e.Message != "" {
+		return e.Message
+	}
+	return "the plugin rejected the options"
 }
 
 // Configure sends the options to the plugin. Unknown keys are kept: they belong
 // to a plugin version that knows more than the current schema.
 func (p *Plugin) Configure(values map[string]any) error {
-	if err := p.Send(Message{Type: TypeSetOptions, Values: values}); err != nil {
+	// Ответ снимет ожидание: и подтверждение, и отказ означают, что работа
+	// закончена.
+	defer p.setWaiting(false, "")
+
+	message, err := protocol.New(protocol.KindSetOptions, protocol.SetOptionsPayload{Values: values})
+	if err != nil {
+		return err
+	}
+	if err := p.Send(message); err != nil {
 		return err
 	}
 
 	select {
-	case message := <-p.repliesTo():
-		switch message.Type {
-		case TypeAck:
+	case reply := <-p.repliesTo():
+		switch reply.Kind {
+		case protocol.KindAck:
 			return nil
-		case TypeError:
-			return fmt.Errorf("plugin %q rejected the options: %s", p.Name, message.Message)
+		case protocol.KindError:
+			var payload protocol.ErrorPayload
+			if err := reply.PayloadInto(&payload); err != nil {
+				return fmt.Errorf("plugin %q refused the options and sent an unreadable reason", p.Name)
+			}
+			if len(payload.Fields) > 0 {
+				return &ValidationError{
+					Message: payload.Message,
+					Fields:  payload.Fields,
+					Items:   payload.Items,
+				}
+			}
+			return fmt.Errorf("plugin %q refused the options: %s", p.Name, payload.Message)
 		default:
-			return fmt.Errorf("plugin %q answered set_options with %q", p.Name, message.Type)
+			return fmt.Errorf("plugin %q answered set_options with %q", p.Name, reply.Kind)
 		}
-	case <-time.After(infoTimeout):
-		return fmt.Errorf("plugin %q did not confirm the options within %s", p.Name, infoTimeout)
+	case <-time.After(configureTimeout):
+		return fmt.Errorf("plugin %q did not confirm the options within %s", p.Name, configureTimeout)
 	}
 }
 
 // ValuesFor builds the option values of a plugin: the stored settings, with
 // the schema defaults filling in whatever the config file does not have.
 func ValuesFor(info Info, stored settings.Plugin) map[string]any {
-	values := Defaults(info.Options)
+	values := protocol.Defaults(info.Options)
 	for key, value := range stored.Options {
 		values[key] = value
 	}

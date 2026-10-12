@@ -1,9 +1,9 @@
 // Package plugin runs chat plugins: separate processes the kernel talks to
-// over stdin/stdout, one JSON message per line.
+// over stdin/stdout, one protocol message per line. The messages themselves
+// live in the protocol package, which the plugins import too.
 //
 // A plugin lives in its own directory with a binary of the same name, for
-// example plugins/chat/goodgame/goodgame. See protocol.go for the messages
-// the two sides exchange.
+// example plugins/chat/goodgame/goodgame.
 package plugin
 
 import (
@@ -17,12 +17,15 @@ import (
 	"os/exec"
 	"sync"
 	"time"
+
+	"studio/core/protocol"
 )
 
 const (
 	scanLimit   = 1 << 20 // 1 MiB per line
 	stopTimeout = 3 * time.Second
-	replyQueue  = 4 // answers waiting to be read by the kernel
+	replyQueue  = 4   // answers waiting to be read by the kernel
+	chatQueue   = 256 // lines of chat held while nobody reads them
 )
 
 // A Plugin is a running plugin process.
@@ -35,7 +38,14 @@ type Plugin struct {
 	logger *slog.Logger
 
 	// replies carries the answers the kernel is waiting for: info and ack.
-	replies chan Message
+	replies chan protocol.Message
+
+	// chat carries the lines of chat, in the order the plugin sent them.
+	chat chan protocol.ChatPayload
+
+	stateMu     sync.Mutex
+	waiting     bool
+	waitingText string
 
 	writeMu sync.Mutex
 	done    chan struct{}
@@ -67,7 +77,8 @@ func Start(ctx context.Context, name, path string) (*Plugin, error) {
 		cmd:     cmd,
 		stdin:   stdin,
 		logger:  logger,
-		replies: make(chan Message, replyQueue),
+		replies: make(chan protocol.Message, replyQueue),
+		chat:    make(chan protocol.ChatPayload, chatQueue),
 		done:    make(chan struct{}),
 		waitErr: make(chan error, 1),
 	}
@@ -85,29 +96,29 @@ func Start(ctx context.Context, name, path string) (*Plugin, error) {
 }
 
 // Send writes one message to the plugin.
-func (p *Plugin) Send(message Message) error {
-	line, err := Encode(message)
+func (p *Plugin) Send(message protocol.Message) error {
+	line, err := protocol.Encode(message)
 	if err != nil {
-		return fmt.Errorf("plugin %q: encode %s: %w", p.Name, message.Type, err)
+		return fmt.Errorf("plugin %q: encode %s: %w", p.Name, message.Kind, err)
 	}
 
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
 
 	if _, err := p.stdin.Write(line); err != nil {
-		return fmt.Errorf("plugin %q: send %s: %w", p.Name, message.Type, err)
+		return fmt.Errorf("plugin %q: send %s: %w", p.Name, message.Kind, err)
 	}
 	return nil
 }
 
 // repliesTo returns the answers waiting to be read by the kernel.
-func (p *Plugin) repliesTo() <-chan Message {
+func (p *Plugin) repliesTo() <-chan protocol.Message {
 	return p.replies
 }
 
 // Stop asks the plugin to quit, then kills it if it ignores the request.
 func (p *Plugin) Stop() error {
-	if err := p.Send(Message{Type: TypeQuit}); err != nil {
+	if err := p.Send(protocol.MustNew(protocol.KindQuit, nil)); err != nil {
 		// The plugin may already be gone; killing it below is enough.
 		p.logger.Debug("quit was not delivered", "err", err)
 	}
@@ -131,6 +142,11 @@ func (p *Plugin) Done() <-chan struct{} {
 	return p.done
 }
 
+// Chat is the stream of chat lines from this plugin.
+func (p *Plugin) Chat() <-chan protocol.ChatPayload {
+	return p.chat
+}
+
 // readMessages turns the protocol lines of the plugin into messages: logs go
 // straight to the kernel log, replies wait in the inbox for a request.
 func (p *Plugin) readMessages(r io.Reader) {
@@ -143,7 +159,11 @@ func (p *Plugin) readMessages(r io.Reader) {
 			continue
 		}
 
-		message, err := DecodeMessage([]byte(line))
+		if p.forward([]byte(line)) {
+			continue
+		}
+
+		message, err := protocol.Decode([]byte(line))
 		if err != nil {
 			p.logger.Warn("not a protocol message", "line", line, "err", err)
 			continue
@@ -156,23 +176,95 @@ func (p *Plugin) readMessages(r io.Reader) {
 	}
 }
 
-func (p *Plugin) handle(message Message) {
-	switch message.Type {
-	case TypeLog:
-		p.logger.Log(context.Background(), logLevel(message.Level), message.Message)
-	case TypeError:
-		p.logger.Error(message.Message)
+// forward passes a chat line to the consumers. Control messages stay out of
+// it: one line, one meaning.
+func (p *Plugin) forward(line []byte) bool {
+	chat, err := protocol.DecodeChat(line)
+	if err != nil {
+		return false
+	}
 
-	case TypeInfo, TypeAck:
-		select {
-		case p.replies <- message:
-		default:
-			p.logger.Warn("reply queue is full, dropping a message", "type", message.Type)
+	p.logger.Info("chat message",
+		"kind", chat.Kind,
+		"channel", chat.Channel,
+		"user", chat.User.Name,
+		"text", chat.Message.Text,
+	)
+
+	select {
+	case p.chat <- chat:
+	default:
+		p.logger.Warn("chat queue is full, dropping a line", "channel", chat.Channel)
+	}
+	return true
+}
+
+// Waiting tells whether the plugin is busy and what it is busy with. The
+// options page keeps the save button disabled while this is true.
+func (p *Plugin) Waiting() (bool, string) {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+	return p.waiting, p.waitingText
+}
+
+func (p *Plugin) setWaiting(waiting bool, text string) {
+	p.stateMu.Lock()
+	defer p.stateMu.Unlock()
+
+	if p.waiting != waiting {
+		if waiting {
+			p.logger.Info("busy", "reason", text)
+		} else {
+			p.logger.Info("idle")
 		}
+	}
+	p.waiting = waiting
+	p.waitingText = text
+}
+
+// reply hands an answer to whoever is waiting for it.
+func (p *Plugin) reply(message protocol.Message) {
+	select {
+	case p.replies <- message:
+	default:
+		p.logger.Warn("reply queue is full, dropping a message", "kind", message.Kind)
+	}
+}
+
+func (p *Plugin) handle(message protocol.Message) {
+	switch message.Kind {
+	case protocol.KindLog:
+		var payload protocol.LogPayload
+		if err := message.PayloadInto(&payload); err != nil {
+			p.logger.Warn("cannot read the log payload", "err", err)
+			return
+		}
+		p.logger.Log(context.Background(), logLevel(payload.Level), payload.Message)
+
+	case protocol.KindWaiting:
+		var payload protocol.WaitingPayload
+		if err := message.PayloadInto(&payload); err != nil {
+			p.logger.Warn("cannot read the waiting payload", "err", err)
+			return
+		}
+		p.setWaiting(true, payload.Message)
+
+	case protocol.KindError:
+		var payload protocol.ErrorPayload
+		if err := message.PayloadInto(&payload); err != nil {
+			p.logger.Warn("cannot read the error payload", "err", err)
+			return
+		}
+		p.logger.Error(payload.Message)
+		// Отказ — тоже ответ на наш запрос: его ждёт Configure.
+		p.reply(message)
+
+	case protocol.KindPluginChat, protocol.KindAck:
+		p.reply(message)
 
 	default:
 		// An older kernel must not choke on what a newer plugin says.
-		p.logger.Debug("message not handled here", "type", message.Type)
+		p.logger.Debug("message not handled here", "kind", message.Kind)
 	}
 }
 

@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+
+	"studio/core/protocol"
 )
 
 // Supervisor starts every discovered plugin and stops them all on shutdown.
@@ -49,14 +51,14 @@ func (s *Supervisor) Find(name string) (*Plugin, bool) {
 }
 
 // Broadcast sends a message to every running plugin.
-func (s *Supervisor) Broadcast(message Message) {
+func (s *Supervisor) Broadcast(message protocol.Message) {
 	var wg sync.WaitGroup
 	for _, p := range s.plugins {
 		wg.Add(1)
 		go func(p *Plugin) {
 			defer wg.Done()
 			if err := p.Send(message); err != nil {
-				p.logger.Error("broadcast failed", "type", message.Type, "err", err)
+				p.logger.Error("broadcast failed", "type", message.Kind, "err", err)
 			}
 		}(p)
 	}

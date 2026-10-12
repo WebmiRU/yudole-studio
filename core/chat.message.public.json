@@ -1,0 +1,16 @@
+{
+  "kind": "chat.message.public",
+  "payload": {
+    "channel": "",
+    "user": {
+      "name": "",
+      "id": "",
+      "login": ""
+    },
+    "message": {
+      "src": "",
+      "text": "",
+      "html": ""
+    }
+  }
+}

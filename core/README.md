@@ -111,12 +111,13 @@ NDJSON: одно JSON-сообщение в строке, `\n` — раздел�
 
 ```json
 "options": [
-  { "key": "channels", "type": "tags", "label": "Каналы", "hint": "Enter — добавить канал" }
+  { "key": "channels", "type": "text/multiple", "label": "Каналы", "hint": "Сколько нужно — столько и добавьте" }
 ]
 ```
 
-Типы: `text`, `password`, `number`, `bool`, `select` (с `choices`), `tags`
-(мульти-поле: сколько угодно значений). Атрибуты: `label`, `hint`,
+Типы: `text`, `password`, `number`, `bool`, `select` (с `choices`) и
+`text/multiple` — текстовое поле, которое заполняется несколько раз (каналы,
+ключевые слова) и рисуется вертикальным списком строк. Атрибуты: `label`, `hint`,
 `placeholder`, `required`, `default`, `choices`. Ключ `enabled` в схеме не
 участвует — это поле ядра.
 

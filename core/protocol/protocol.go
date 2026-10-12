@@ -1,0 +1,189 @@
+// Package protocol is the contract between the kernel and its plugins.
+//
+// Every line is one JSON object: a kind and a payload. The envelope has
+// exactly two fields and never grows, so adding a new kind of message cannot
+// pollute the namespace of the others.
+//
+//	{"kind":"plugin.chat","payload":{"title":"GoodGame","options":[...]}}
+//	{"kind":"set_options","payload":{"values":{"channels":["42"]}}}
+//	{"kind":"chat.message.public","payload":{"channel":"42","user":{...},"message":{...}}}
+//
+// The kernel and the plugins import this package instead of keeping their own
+// copies of the shapes: a mistake here then breaks both sides at once, rather
+// than one of them quietly sending something the other never reads.
+package protocol
+
+import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+	"fmt"
+)
+
+// Kinds of messages.
+const (
+	// A plugin introduces itself right after it starts.
+	KindPluginChat = "plugin.chat"
+	// The kernel hands the plugin the values the user filled in.
+	KindSetOptions = "set_options"
+	// The plugin confirms it took the options.
+	KindAck = "ack"
+	// Something went wrong inside the plugin.
+	KindError = "error"
+	// The plugin is busy: it will answer the request later.
+	KindWaiting = "waiting"
+	// Anything the plugin wants to say to the kernel log.
+	KindLog = "log"
+	// The kernel asks the plugin to finish.
+	KindQuit = "quit"
+
+	// A line of chat: public goes to the rooms everyone can see, private to a
+	// direct conversation.
+	KindMessagePublic  = "chat.message.public"
+	KindMessagePrivate = "chat.message.private"
+)
+
+// IsChatKind reports whether a kind carries a chat line.
+func IsChatKind(kind string) bool {
+	return kind == KindMessagePublic || kind == KindMessagePrivate
+}
+
+// Message is the envelope of one protocol line.
+type Message struct {
+	Kind    string         `json:"kind"`
+	Payload jsontext.Value `json:"payload,omitempty"`
+}
+
+// New builds an envelope with a payload of any shape.
+func New(kind string, payload any) (Message, error) {
+	raw, err := json.Marshal(payload, json.Deterministic(true))
+	if err != nil {
+		return Message{}, fmt.Errorf("encode the %s payload: %w", kind, err)
+	}
+	return Message{Kind: kind, Payload: raw}, nil
+}
+
+// MustNew is New for payloads that cannot fail to encode.
+func MustNew(kind string, payload any) Message {
+	message, err := New(kind, payload)
+	if err != nil {
+		panic("protocol: " + err.Error())
+	}
+	return message
+}
+
+// PayloadInto decodes the payload of a message into v.
+func (m Message) PayloadInto(v any) error {
+	if len(m.Payload) == 0 {
+		return fmt.Errorf("message %q has no payload", m.Kind)
+	}
+	return json.Unmarshal(m.Payload, v)
+}
+
+// Encode renders a message as one protocol line.
+func Encode(message Message) ([]byte, error) {
+	data, err := json.Marshal(message, json.Deterministic(true))
+	if err != nil {
+		return nil, err
+	}
+	return append(data, '\n'), nil
+}
+
+// Decode reads one protocol line. The kind must be there: a line without it
+// cannot be routed.
+func Decode(line []byte) (Message, error) {
+	var message Message
+	if err := json.Unmarshal(line, &message); err != nil {
+		return Message{}, err
+	}
+	if message.Kind == "" {
+		return Message{}, fmt.Errorf("message without a kind: %s", line)
+	}
+	return message, nil
+}
+
+// --- Payloads --------------------------------------------------------------
+
+// InfoPayload is what a plugin says about itself.
+type InfoPayload struct {
+	Title       string   `json:"title"`
+	Description string   `json:"description,omitempty"`
+	Version     string   `json:"version,omitempty"`
+	Options     []Option `json:"options,omitempty"`
+}
+
+// SetOptionsPayload carries the values the user filled in.
+type SetOptionsPayload struct {
+	Values map[string]any `json:"values"`
+}
+
+// AckPayload is empty on purpose: it only confirms.
+type AckPayload struct{}
+
+// LogPayload is a line for the kernel log.
+type LogPayload struct {
+	Level   string `json:"level"`
+	Message string `json:"message"`
+}
+
+// WaitingPayload says what the plugin is busy with, so the options page can
+// keep the save button disabled instead of pretending nothing happens.
+type WaitingPayload struct {
+	Message string `json:"message"`
+}
+
+// ErrorPayload explains what went wrong. Fields, when set, point at the exact
+// options the user has to fix: the kernel does not save the values and the
+// options page highlights those fields. Items narrows it further for list
+// fields: which of the entries is the problem, keyed by what the user typed.
+type ErrorPayload struct {
+	Message string                       `json:"message"`
+	Fields  map[string]string            `json:"fields,omitempty"`
+	Items   map[string]map[string]string `json:"items,omitempty"`
+}
+
+// ChatPayload is one line of chat, as chat.message.public or
+// chat.message.private.
+type ChatPayload struct {
+	// Kind is filled in by DecodeChat: it tells public from private. It is not
+	// part of the payload, the envelope already carries it.
+	Kind    string   `json:"-"`
+	Channel string   `json:"channel"`
+	User    ChatUser `json:"user"`
+	Message ChatLine `json:"message"`
+}
+
+// ChatUser is who wrote the line.
+type ChatUser struct {
+	Name  string `json:"name"`
+	ID    string `json:"id"`
+	Login string `json:"login"`
+}
+
+// ChatLine is one line of chat in three forms: as the service sent it, as
+// plain text, and as html for a rich view.
+type ChatLine struct {
+	// Src is the text exactly as it came in, with the service's own markup.
+	Src string `json:"src"`
+	// Text is the plain text: no smilies codes, no markup.
+	Text string `json:"text"`
+	// Html is the same line with the source's formatting, for a rich view.
+	Html string `json:"html"`
+}
+
+// DecodeChat reads one chat line and checks that the kind is a chat kind.
+func DecodeChat(line []byte) (ChatPayload, error) {
+	message, err := Decode(line)
+	if err != nil {
+		return ChatPayload{}, err
+	}
+	if !IsChatKind(message.Kind) {
+		return ChatPayload{}, fmt.Errorf("not a chat line: kind %q", message.Kind)
+	}
+
+	var chat ChatPayload
+	if err := message.PayloadInto(&chat); err != nil {
+		return ChatPayload{}, err
+	}
+	chat.Kind = message.Kind
+	return chat, nil
+}
