@@ -9,6 +9,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestParseChannelRef(t *testing.T) {
@@ -400,6 +403,21 @@ func TestGRPCChatDefinitelyEndedRequiresExplicitSignal(t *testing.T) {
 	} {
 		if grpcChatDefinitelyEnded(errors.New(message)) {
 			t.Errorf("grpcChatDefinitelyEnded(%q) = true; want false", message)
+		}
+	}
+}
+
+
+func TestPermanentGRPCErrorIncludesQuotaAndUnsupported(t *testing.T) {
+	for _, code := range []codes.Code{
+		codes.InvalidArgument,
+		codes.Unauthenticated,
+		codes.PermissionDenied,
+		codes.ResourceExhausted,
+		codes.Unimplemented,
+	} {
+		if !permanentGRPCError(status.Error(code, "test")) {
+			t.Errorf("permanentGRPCError(%s) = false; want true", code)
 		}
 	}
 }
