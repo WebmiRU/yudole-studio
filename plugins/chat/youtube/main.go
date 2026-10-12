@@ -1093,9 +1093,9 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			// Храним последний непустой continuation token. Пустое поле в одном
 			// ответе не должно сбрасывать курсор: иначе при следующем соединении
 			// чтение стартует заново и сообщения между попытками можно потерять.
-			nextToken := strings.TrimSpace(response.GetNextPageToken())
-			if nextToken != "" {
-				pageToken = nextToken
+			var hasNextToken bool
+			pageToken, hasNextToken = updateContinuationToken(pageToken, response.GetNextPageToken())
+			if hasNextToken {
 				missingPageToken = 0
 			} else {
 				missingPageToken++
@@ -1138,21 +1138,14 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 		if ctx.Err() != nil {
 			return errSettingsChanged
 		}
+		delay, nextAttempt := streamRetryDelay(attempt, received)
 		if !received {
 			logInfo("YouTube завершил поток без данных; пробую возобновить")
-			if !waitInterval(ctx, retryDelay(attempt)) {
-				return errSettingsChanged
-			}
-			attempt++
-			continue
 		}
-
-		// После корректного ответа сервер обычно уже успел выдать текущую
-		// порцию. Повторяем подключение с короткой постоянной паузой, а не с
-		// растущими 5/10/20/40 секундами; иначе новое сообщение ждёт backoff.
-		if !waitInterval(ctx, streamRestartDelay) {
+		if !waitInterval(ctx, delay) {
 			return errSettingsChanged
 		}
+		attempt = nextAttempt
 	}
 }
 
@@ -1274,6 +1267,25 @@ func waitInterval(ctx context.Context, delay time.Duration) bool {
 	case <-timer.C:
 		return true
 	}
+}
+
+// updateContinuationToken preserves the last usable cursor when a
+// response omits nextPageToken. Resetting it to empty restarts history retrieval.
+func updateContinuationToken(current, next string) (string, bool) {
+	next = strings.TrimSpace(next)
+	if next == "" {
+		return current, false
+	}
+	return next, true
+}
+
+// streamRetryDelay uses exponential backoff only when no response was received.
+// After a valid response, an ended RPC is resumed quickly from its page token.
+func streamRetryDelay(attempt int, received bool) (time.Duration, int) {
+	if received {
+		return streamRestartDelay, 0
+	}
+	return retryDelay(attempt), attempt + 1
 }
 
 func stringPtr(value string) *string { return &value }
