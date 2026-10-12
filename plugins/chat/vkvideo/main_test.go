@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
-	"strings"
+	"strconv"
 	"testing"
 
 	"studio/core/protocol"
@@ -25,6 +25,7 @@ func TestNormalizeChannel(t *testing.T) {
 		{input: "https://live.vkvideo.ru/@streamer/some-page", want: "streamer"},
 		{input: "https://vkplay.live/streamer", want: "streamer"},
 		{input: "https://example.org/streamer", bad: true},
+		{input: "ftp://live.vkvideo.ru/streamer", bad: true},
 		{input: "https://live.vkvideo.ru/", bad: true},
 		{input: "channel name", bad: true},
 		{input: "live.vkvideo.ru.evil.test/streamer", bad: true},
@@ -143,7 +144,7 @@ func TestSeenIDsSuppressesDuplicatesAndEvictsOldEntries(t *testing.T) {
 		t.Fatal("duplicate message ID was not suppressed")
 	}
 	for i := 0; i < maxMessageIDs; i++ {
-		seen.Add("id-" + strings.Repeat("x", i+1))
+		seen.Add("id-" + strconv.Itoa(i))
 	}
 	if !seen.Add("a") {
 		t.Fatal("old message ID should be evicted after the bounded cache fills")
