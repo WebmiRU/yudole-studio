@@ -44,10 +44,10 @@ const (
 	// What the plugin does with the channels it was given. These four are the
 	// same for every chat service: Twitch, YouTube, GoodGame — разница только
 	// в том, что под каналом понимается.
-	KindChannelJoinSuccessful   = "chat.channel.join.successful"
-	KindChannelJoinFailed       = "chat.channel.join.failed"
-	KindChannelUnjoinSuccessful = "chat.channel.unjoin.successful"
-	KindChannelUnjoinFailed     = "chat.channel.unjoin.failed"
+	KindChannelJoinSuccess   = "chat.channel.join.success"
+	KindChannelJoinFailed    = "chat.channel.join.failed"
+	KindChannelUnjoinSuccess = "chat.channel.unjoin.success"
+	KindChannelUnjoinFailed  = "chat.channel.unjoin.failed"
 
 	// The service told us something about a channel we are in: its name, who
 	// is streaming there, how many people are watching.
@@ -76,8 +76,8 @@ func IsChatKind(kind string) bool {
 // what happens in it.
 func IsChannelKind(kind string) bool {
 	switch kind {
-	case KindChannelJoinSuccessful, KindChannelJoinFailed,
-		KindChannelUnjoinSuccessful, KindChannelUnjoinFailed,
+	case KindChannelJoinSuccess, KindChannelJoinFailed,
+		KindChannelUnjoinSuccess, KindChannelUnjoinFailed,
 		KindChannelInfo, KindMessageDeleted, KindConnectionState:
 		return true
 	default:
@@ -252,6 +252,10 @@ type ChannelPayload struct {
 	// Channel is the value the plugin stores in the config, not the service's
 	// own id: it is what the user wrote and what we will reconnect to.
 	Channel string `json:"channel"`
+	// Name is what that channel is called in the plugin's settings. Настройки
+	// знает только плагин, поэтому и имя кладёт он — из своих настроек, с
+	// которыми он работает.
+	Name string `json:"name,omitempty"`
 	// Reason is filled in for the failed kinds only.
 	Reason string `json:"reason,omitempty"`
 }

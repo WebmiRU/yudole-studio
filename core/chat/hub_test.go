@@ -109,7 +109,7 @@ func TestPageGetsTheHistoryOnOpen(t *testing.T) {
 	t.Cleanup(func() { waitFor(2*time.Second, func() bool { return source.subbed == 1 }) })
 
 	source.push(t, "goodgame", protocol.KindConnectionState, protocol.ConnectionPayload{State: protocol.ConnectionOnline})
-	source.push(t, "goodgame", protocol.KindChannelJoinSuccessful, protocol.ChannelPayload{Channel: "53029"})
+	source.push(t, "goodgame", protocol.KindChannelJoinSuccess, protocol.ChannelPayload{Channel: "53029"})
 	source.push(t, "goodgame", protocol.KindMessagePublic, protocol.ChatPayload{
 		Channel: "53029",
 		User:    protocol.ChatUser{Name: "E.Wolf"},

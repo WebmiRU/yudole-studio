@@ -14,6 +14,9 @@ const state = {
     entries: [],
     // channels — какие каналы мы видели, чтобы в списке был выбор.
     channels: new Map(),
+    // names — как называть канал. Приходит из событий плагина: настройки его
+    // мы не видим, и он сам кладёт имя в каждое своё событие.
+    names: new Map(),
     // plugins — кто пишет: имя плагина и его заголовок.
     plugins: new Map(),
     // filter — канал, который выбран в списке; пустая строка означает «все».
@@ -65,6 +68,7 @@ function connect() {
 function handle(message) {
     if (message.hello) {
         state.plugins.clear();
+        state.names.clear();
         for (const plugin of message.hello.plugins ?? []) {
             state.plugins.set(plugin.plugin, plugin);
         }
@@ -87,6 +91,16 @@ function handle(message) {
 function take(entry) {
     state.entries.push(entry);
     state.seen++;
+
+    // Плагин назвал канал в своём событии — запоминаем, чтобы следующие
+    // сообщения о нём тоже называть по-человечески.
+    //
+    // Только из событий входа и выхода: там name — это имя канала из
+    // настроек. А у chat.channel.info name значит другое: там название
+    // трансляции, и оно названием канала не является.
+    if (entry.channel && entry.payload?.name && namesChannel(entry.kind)) {
+        state.names.set(entry.channel, entry.payload.name);
+    }
 
     if (entry.channel) {
         const known = state.channels.get(entry.channel) ?? {name: '', plugin: entry.plugin, count: 0};
@@ -158,7 +172,9 @@ function block(entry, severity, head, text) {
         // выстроена в строку, и внутри неё полоска легла бы вбок.
         el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
         el('div', {class: 'msg__rule'}),
-        el('div', {class: 'msg__text'}, [text]),
+        el('div', {class: 'msg__text'}, [...[text].flat().map(piece => (
+            typeof piece === 'string' ? document.createTextNode(piece) : piece
+        ))]),
     ]);
 }
 
@@ -185,11 +201,11 @@ function severityOf(entry) {
             // человек должен это заметить.
             return state === 'offline' ? 'error' : 'info';
         }
-        case 'chat.channel.join.successful':
+        case 'chat.channel.join.success':
             return 'success';
         case 'chat.channel.join.failed':
             return 'error';
-        case 'chat.channel.unjoin.successful':
+        case 'chat.channel.unjoin.success':
             // Мы вышли сами, по настройкам: это было задумано, а не поломка.
             return 'info';
         case 'chat.channel.unjoin.failed':
@@ -202,25 +218,71 @@ function severityOf(entry) {
     }
 }
 
+// describe is the text of a service message. It returns pieces, not one string:
+// название канала внутри фразы выделяется жирным, а для этого нужен узел.
 function describe(entry) {
+    const name = channelName(entry.channel);
+    const reason = entry.payload?.reason;
+    const service = entry.payload?.service ?? 'чат';
+
     switch (entry.kind) {
         case 'chat.connection.state':
-            return `${entry.payload?.service ?? 'чат'}: ${stateWord(entry.payload?.state)}`;
-        case 'chat.channel.join.successful':
-            return `вошли в канал ${channelTitle(entry.channel)}`;
+            return [connectionPhrase(entry.payload?.state, service, reason)];
+        case 'chat.channel.join.success':
+            return ['Успешное подключение к каналу ', strong(name)];
         case 'chat.channel.join.failed':
-            return `не вошли в канал ${channelTitle(entry.channel)}: ${entry.payload?.reason ?? '?'}`;
-        case 'chat.channel.unjoin.successful':
-            return `вышли из канала ${channelTitle(entry.channel)}`;
+            return [`Не получилось подключиться к каналу `, strong(name), `: ${reason ?? '?'}`];
+        case 'chat.channel.unjoin.success':
+            return ['Отключились от канала ', strong(name)];
         case 'chat.channel.unjoin.failed':
-            return `не вышли из канала ${channelTitle(entry.channel)}: ${entry.payload?.reason ?? '?'}`;
+            return [`Не получилось отключиться от канала `, strong(name), `: ${reason ?? '?'}`];
         case 'chat.channel.info':
-            return `${channelTitle(entry.channel)}${entry.payload?.clients ? ` — ${entry.payload.clients} в канале` : ''}`;
+            return [strong(name), channelInfo(entry.payload)];
         case 'chat.message.deleted':
-            return `реплику ${entry.payload?.messageId ?? '?'} удалили`;
+            return [deletedPhrase(entry.payload)];
         default:
             return entry.kind;
     }
+}
+
+// connectionPhrase says how the connection to the service is. Каждое состояние
+// читается как отдельная фраза, а не как слово в столбце.
+function connectionPhrase(state, service, reason) {
+    const withReason = (text) => (reason ? `${text}: ${reason}` : text);
+
+    switch (state) {
+        case 'online':
+            return `Подключились к ${service}`;
+        case 'connecting':
+            return `Подключаемся к ${service}`;
+        case 'reconnecting':
+            return withReason(`Переподключаемся к ${service}`);
+        case 'offline':
+            return `Нет связи с ${service}`;
+        default:
+            return `${service}: ${stateWord(state)}`;
+    }
+}
+
+// channelInfo adds what the service told about the channel to its name.
+function channelInfo(payload) {
+    const parts = [];
+    if (payload?.name) {
+        parts.push(` — «${payload.name}»`);
+    }
+    if (payload?.clients) {
+        parts.push(`, ${payload.clients} в канале`);
+    }
+    return parts.join('');
+}
+
+function deletedPhrase(payload) {
+    return payload?.by ? `Реплику удалил ${payload.by}` : 'Реплику удалили';
+}
+
+// strong is what makes a channel name stand out inside a sentence.
+function strong(text) {
+    return el('b', {class: 'msg__channel'}, [text]);
 }
 
 function stateWord(value) {
@@ -232,12 +294,38 @@ function stateWord(value) {
     }[value] ?? value ?? '';
 }
 
+// namesChannel reports whether the event's name is the channel's own name.
+function namesChannel(kind) {
+    return kind === 'chat.channel.join.success'
+        || kind === 'chat.channel.join.failed'
+        || kind === 'chat.channel.unjoin.success'
+        || kind === 'chat.channel.unjoin.failed';
+}
+
+// channelName is what we call a channel in the text. First the name the user
+// gave it in the settings, then the title the service knows it by, and only
+// в конце — номер: назвать канал его номером значит сказать человеку «как
+// зовут».
+function channelName(id) {
+    if (!id) {
+        return '';
+    }
+    const fromSettings = state.names.get(id);
+    if (fromSettings) {
+        return fromSettings;
+    }
+    const known = state.channels.get(id);
+    return known?.name || id;
+}
+
+// channelTitle is the long form, for places with room to explain.
 function channelTitle(id) {
     const known = state.channels.get(id);
-    if (!known) {
-        return id;
+    const name = channelName(id);
+    if (!known || !known.name || known.name === name) {
+        return name;
     }
-    return known.name ? `${id} — ${known.name}` : id;
+    return `${name} — «${known.name}»`;
 }
 
 function updateSummary(shown) {

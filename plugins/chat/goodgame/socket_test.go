@@ -213,7 +213,7 @@ func TestSocketJoinsConfiguredChannels(t *testing.T) {
 
 	socket, _ := watchSocket(t)
 
-	joined := waitKind(t, socket, protocol.KindChannelJoinSuccessful)
+	joined := waitKind(t, socket, protocol.KindChannelJoinSuccess)
 	var payload protocol.ChannelPayload
 	if err := joined.PayloadInto(&payload); err != nil {
 		t.Fatal(err)
@@ -248,7 +248,7 @@ func TestSocketForwardsChatLines(t *testing.T) {
 	})
 
 	socket, _ := watchSocket(t)
-	waitKind(t, socket, protocol.KindChannelJoinSuccessful)
+	waitKind(t, socket, protocol.KindChannelJoinSuccess)
 
 	line := waitKind(t, socket, protocol.KindMessagePublic)
 	var payload protocol.ChatPayload
@@ -300,14 +300,14 @@ func TestSocketFollowsTheChannelList(t *testing.T) {
 	setChannels([]protocol.ChoiceValue{{Value: "53029", Label: "E.Wolf"}})
 
 	socket, _ := watchSocket(t)
-	waitKind(t, socket, protocol.KindChannelJoinSuccessful)
+	waitKind(t, socket, protocol.KindChannelJoinSuccess)
 
 	setChannels([]protocol.ChoiceValue{
 		{Value: "53029", Label: "E.Wolf"},
 		{Value: "5", Label: "miker"},
 	})
 
-	joined := waitKind(t, socket, protocol.KindChannelJoinSuccessful)
+	joined := waitKind(t, socket, protocol.KindChannelJoinSuccess)
 	var payload protocol.ChannelPayload
 	joined.PayloadInto(&payload)
 	if payload.Channel != "5" {
@@ -351,11 +351,11 @@ func TestSocketReportsUnjoinOnDisconnect(t *testing.T) {
 	setChannels([]protocol.ChoiceValue{{Value: "53029", Label: "E.Wolf"}})
 
 	socket, cancel := watchSocket(t)
-	waitKind(t, socket, protocol.KindChannelJoinSuccessful)
+	waitKind(t, socket, protocol.KindChannelJoinSuccess)
 
 	cancel()
 
-	left := waitKind(t, socket, protocol.KindChannelUnjoinSuccessful)
+	left := waitKind(t, socket, protocol.KindChannelUnjoinSuccess)
 	var payload protocol.ChannelPayload
 	if err := left.PayloadInto(&payload); err != nil {
 		t.Fatal(err)
@@ -402,7 +402,7 @@ func TestSocketRetriesAChannelItCouldNotJoin(t *testing.T) {
 
 	// А вторая, по таймеру, должна удаться — без вмешательства человека.
 	started := time.Now()
-	waitKind(t, socket, protocol.KindChannelJoinSuccessful)
+	waitKind(t, socket, protocol.KindChannelJoinSuccess)
 	if elapsed := time.Since(started); elapsed < retryMin/2 {
 		t.Errorf("повтор через %v — таймер ждёт не меньше %v", elapsed, retryMin)
 	}

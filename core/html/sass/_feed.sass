@@ -192,10 +192,15 @@
   font-weight: 500
 
 .msg__rule
-  width: 86%
+  width: 100%
   margin: 7px 0 9px
   border: 0
   border-top: 1px solid tokens.$border-hi
+
+// Название канала внутри фразы: жирное, чтобы взгляд цеплялся за него.
+.msg__channel
+  color: tokens.$text
+  font-weight: 600
 
 .msg__text
   color: tokens.$text
@@ -209,7 +214,12 @@
 .msg[data-severity="info"] .msg__text,
 .msg[data-severity="success"] .msg__text,
 .msg[data-severity="warning"] .msg__text,
-.msg[data-severity="error"] .msg__text
+.msg[data-severity="error"] // Название канала внутри фразы: жирное, чтобы взгляд цеплялся за него.
+.msg__channel
+  color: tokens.$text
+  font-weight: 600
+
+.msg__text
   color: tokens.$text-dim
   font-size: 13.5px
 

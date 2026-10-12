@@ -121,7 +121,9 @@ func (s *socket) session(ctx context.Context, wanted func() []chat.ID) (map[chat
 		// Соединение оборвалось: во всех каналах, где мы были, нас больше
 		// нет. Ядру нужно это сказать, иначе он будет считать их нашими.
 		for _, id := range slices.Sorted(maps.Keys(live)) {
-			s.send(protocol.KindChannelUnjoinSuccessful, protocol.ChannelPayload{Channel: string(id)})
+			s.send(protocol.KindChannelUnjoinSuccess, protocol.ChannelPayload{
+				Channel: string(id), Name: channelName(id),
+			})
 		}
 	}()
 
@@ -219,19 +221,25 @@ func (s *socket) sync(ctx context.Context, client *chat.Client, live map[chat.ID
 	for _, id := range ready(unjoin) {
 		if err := client.Unjoin(ctx, id); err != nil {
 			s.say(fmt.Sprintf("канал %s: %v", id, err))
-			s.send(protocol.KindChannelUnjoinFailed, protocol.ChannelPayload{Channel: string(id), Reason: err.Error()})
+			s.send(protocol.KindChannelUnjoinFailed, protocol.ChannelPayload{
+				Channel: string(id), Name: channelName(id), Reason: err.Error(),
+			})
 			continue
 		}
 		delete(live, id)
 		delete(failed, id)
-		s.send(protocol.KindChannelUnjoinSuccessful, protocol.ChannelPayload{Channel: string(id)})
+		s.send(protocol.KindChannelUnjoinSuccess, protocol.ChannelPayload{
+			Channel: string(id), Name: channelName(id),
+		})
 	}
 
 	for _, id := range ready(join) {
 		joined, err := client.Join(ctx, id)
 		if err != nil {
 			s.say(fmt.Sprintf("канал %s: %v", id, err))
-			s.send(protocol.KindChannelJoinFailed, protocol.ChannelPayload{Channel: string(id), Reason: err.Error()})
+			s.send(protocol.KindChannelJoinFailed, protocol.ChannelPayload{
+				Channel: string(id), Name: channelName(id), Reason: err.Error(),
+			})
 			// Запомним, когда пробовать в следующий раз, чтобы сессия сама
 			// вернулась к этому каналу, а не ждала новой смены настроек.
 			failed[id] = time.Now().Add(retryMin)
@@ -243,7 +251,9 @@ func (s *socket) sync(ctx context.Context, client *chat.Client, live map[chat.ID
 		if name == "" {
 			name = string(id)
 		}
-		s.send(protocol.KindChannelJoinSuccessful, protocol.ChannelPayload{Channel: string(id)})
+		s.send(protocol.KindChannelJoinSuccess, protocol.ChannelPayload{
+			Channel: string(id), Name: channelName(id),
+		})
 		s.send(protocol.KindChannelInfo, protocol.ChannelInfoPayload{
 			Channel:     string(id),
 			Name:        name,
@@ -347,6 +357,18 @@ func (s *socket) send(kind string, payload any) {
 	default:
 		s.say("очередь переполнена, потеряно сообщение " + kind)
 	}
+}
+
+// channelName is what we call a channel in our own events: the name it has in
+// our settings. Ядро наших настроек не видит, поэтому назвать канал может
+// только плагин — и это он.
+func channelName(id chat.ID) string {
+	for _, channel := range currentChannels() {
+		if channel.Value == string(id) {
+			return channel.Label
+		}
+	}
+	return string(id)
 }
 
 // errText is what we tell the kernel about a failure: nothing is fine too.

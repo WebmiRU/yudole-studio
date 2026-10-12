@@ -136,8 +136,12 @@ func toEntry(event plugin.Event) *Entry {
 	return entry
 }
 
-// Channels tells what the plugins are in and how the connection goes: the
-// first thing a page shows, before any line has arrived.
+// Channels tells which plugins are and how they are doing. The page shows it
+// before any line has arrived.
+//
+// Здесь только то, что плагин объявил о себе сам: название и состояние.
+// Названий его каналов ядро не знает и знать не должно — это его настройки, и
+// оно само присылает их в своих событиях.
 func (h *Hub) Channels() []Channel {
 	views := h.source.List()
 
@@ -156,7 +160,7 @@ func (h *Hub) Channels() []Channel {
 	return out
 }
 
-// Channel is what a plugin is doing, for the sidebar of the page.
+// Channel is what a plugin is doing.
 type Channel struct {
 	Plugin  string `json:"plugin"`
 	Title   string `json:"title,omitempty"`
