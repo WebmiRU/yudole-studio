@@ -362,6 +362,9 @@ func (w *watcher) searchLoop(ctx context.Context) ([]liveVideo, error) {
 			if w.useKeyless("исчерпан лимит официального поиска") {
 				continue
 			}
+			// Если переключение выключено в настройках, не продолжаем без
+			// конца тратить дневную квоту на одинаковый отрицательный поиск.
+			return nil, errNoLive
 		}
 
 		if !waitInterval(ctx, searchInterval) {
