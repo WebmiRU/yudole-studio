@@ -148,78 +148,268 @@
   padding: 14px 20px 22px
   scroll-behavior: auto
 
-  // Компактная панель тактического HUD: один тонкий бирюзовый контур,
-  // асимметричные срезы и очень тёмное стекло. Текст остаётся обычным HTML.
+  // X-COM tactical-panel treatment. The frame, top/bottom hardware and
+  // message content are separate layers so variable-height and wide messages
+  // can stretch without stretching their corner geometry.
   .msg
     position: relative
     isolation: isolate
     margin-bottom: 18px
-    padding: 12px 18px 14px
+    padding: 0
     border: 0
     background: transparent
-    --xcom-accent: #69e7f2
-
-    &::before,
-    &::after
-      content: ""
-      position: absolute
-      pointer-events: none
-      clip-path: polygon(0 12px, 13px 12px, 13px 0, calc(100% - 30px) 0, calc(100% - 17px) 13px, 100% 13px, 100% calc(100% - 20px), calc(100% - 13px) calc(100% - 20px), calc(100% - 13px) 100%, 26px 100%, 13px calc(100% - 13px), 0 calc(100% - 13px))
-
-    // Внешний слой отвечает только за тонкий неоновый контур.
-    &::before
-      inset: 0
-      z-index: -2
-      background: var(--xcom-accent)
-      filter: drop-shadow(0 0 2px rgba(83, 227, 243, .2))
-
-    // Внутренняя геометрия почти повторяет внешний силуэт: линия получается
-    // одинаковой толщины и не превращается в толстые бирюзовые ступени.
-    &::after
-      inset: 1px
-      z-index: -1
-      clip-path: polygon(0 11px, 12px 11px, 12px 0, calc(100% - 29px) 0, calc(100% - 17px) 12px, 100% 12px, 100% calc(100% - 19px), calc(100% - 12px) calc(100% - 19px), calc(100% - 12px) 100%, 26px 100%, 12px calc(100% - 12px), 0 calc(100% - 12px))
-      background: rgba(3, 8, 11, .96)
-
-    > *
-      position: relative
-
-    .msg__head
-      min-height: 20px
-
-    .msg__author
-      color: var(--xcom-accent)
-      letter-spacing: .02em
-      text-shadow: 0 0 6px rgba(75, 222, 238, .1)
-
-    .msg__rule
-      height: 1px
-      margin: 7px 0 8px
-      background: linear-gradient(90deg, rgba(105, 231, 242, .82), rgba(105, 231, 242, .08))
-
-    .msg__text
-      color: #e0f0f2
-      line-height: 1.5
-
-    &[data-severity="neutral"],
-    &[data-severity="info"]
-      --xcom-accent: #69e7f2
-
-    &[data-severity="success"]
-      --xcom-accent: #73e6ae
-
-    &[data-severity="warning"]
-      --xcom-accent: #f0c66c
-
-    &[data-severity="error"]
-      --xcom-accent: #ff7778
-
-    &.is-notice
-      opacity: .9
+    perspective: 1400px
 
     &:last-child
       margin-bottom: 0
 
+    // Neutral glass body: text never sits inside an SVG or a clipped element.
+    .msg__panel
+      position: relative
+      z-index: 1
+      min-width: 0
+      padding: 11px 23px 7px
+
+    // Frame sits behind the HTML. The outline uses pixel-sized corner cuts,
+    // not a stretched SVG path, so those cuts keep their proportions at any
+    // sensible chat width.
+    .msg__frame
+      position: absolute
+      inset: 0
+      z-index: 0
+      pointer-events: none
+      transform: perspective(1400px) rotateY(-.12deg) rotateX(.05deg)
+      transform-origin: center
+      --frame-light: #64e3ee
+      --frame-dim: rgba(76, 190, 202, .64)
+
+      &::before,
+      &::after
+        content: ""
+        position: absolute
+        pointer-events: none
+        clip-path: polygon(0 15px, 17px 15px, 17px 3px, 22px 3px, 22px 0, calc(100% - 62px) 0, calc(100% - 48px) 14px, calc(100% - 18px) 14px, 100% 32px, 100% calc(100% - 18px), calc(100% - 21px) calc(100% - 18px), calc(100% - 21px) 100%, 43px 100%, 27px calc(100% - 15px), 14px calc(100% - 15px), 14px calc(100% - 1px), 0 calc(100% - 1px))
+
+      // Layer one is only the illuminated contour, with a small depth shadow.
+      &::before
+        inset: 0
+        z-index: 0
+        background: linear-gradient(132deg, #8cf7ff 0%, #50d9e5 16%, #318c98 43%, #5edbe7 68%, #2c929e 86%, #82f1f8 100%)
+        filter: drop-shadow(0 0 3px rgba(75, 221, 234, .15)) drop-shadow(0 4px 5px rgba(0, 0, 0, .32))
+
+      // The inset dark shape leaves a crisp, one-pixel outline instead of a
+      // thick cyan slab. Subtle gradients simulate smoked tactical glass.
+      &::after
+        inset: 1px
+        z-index: 1
+        clip-path: polygon(0 14px, 16px 14px, 16px 3px, 21px 3px, 21px 0, calc(100% - 62px) 0, calc(100% - 48px) 13px, calc(100% - 18px) 13px, 100% 31px, 100% calc(100% - 18px), calc(100% - 20px) calc(100% - 18px), calc(100% - 20px) 100%, 43px 100%, 27px calc(100% - 15px), 14px calc(100% - 15px), 14px calc(100% - 1px), 0 calc(100% - 1px))
+        background: linear-gradient(180deg, rgba(10, 27, 33, .97) 0%, rgba(5, 15, 20, .98) 62%, rgba(3, 10, 14, .98) 100%)
+
+      .msg__frame-rail
+        position: absolute
+        z-index: 2
+        height: 1px
+        pointer-events: none
+
+      .msg__frame-rail--top
+        top: 1px
+        left: 43px
+        width: clamp(54px, 13%, 180px)
+        background: linear-gradient(90deg, rgba(216, 254, 255, .9), rgba(100, 227, 238, .15))
+
+      .msg__frame-rail--bottom
+        right: 39px
+        bottom: 1px
+        width: clamp(42px, 10%, 128px)
+        background: linear-gradient(90deg, rgba(100, 227, 238, .08), rgba(126, 243, 250, .82))
+
+      .msg__frame-joint
+        position: absolute
+        z-index: 2
+        width: 22px
+        height: 1px
+        background: rgba(169, 250, 255, .9)
+        box-shadow: 0 0 4px rgba(88, 222, 235, .35)
+
+      .msg__frame-joint--right
+        top: 20px
+        right: 5px
+        transform: rotate(48deg)
+        transform-origin: right center
+
+      .msg__frame-joint--left
+        bottom: 7px
+        left: 4px
+        transform: rotate(48deg)
+        transform-origin: left center
+
+      .msg__frame-light
+        position: absolute
+        z-index: 2
+        top: 47px
+        right: 5px
+        width: 1px
+        height: 25px
+        background: linear-gradient(180deg, transparent, rgba(128, 240, 248, .8), transparent)
+        box-shadow: 0 0 5px rgba(83, 227, 243, .25)
+
+    .msg__head
+      display: flex
+      align-items: center
+      gap: 9px
+      min-height: 22px
+      padding: 2px 0 3px
+
+    .msg__author
+      color: #70edf5
+      font-size: 14px
+      font-weight: 600
+      letter-spacing: .025em
+      text-shadow: 0 0 7px rgba(73, 220, 234, .12)
+
+    .msg__author--plugin
+      color: #6edce6
+      font-weight: 500
+
+    .msg__service
+      opacity: .94
+      filter: drop-shadow(0 0 3px rgba(60, 220, 236, .12))
+
+    .msg__rule
+      position: relative
+      width: 100%
+      height: 1px
+      margin: 6px 0 9px
+      background: linear-gradient(90deg, rgba(107, 231, 241, .62), rgba(56, 155, 166, .36) 61%, rgba(48, 128, 139, .07))
+
+      &::after
+        content: ""
+        position: absolute
+        top: -2px
+        right: 14%
+        width: 9px
+        height: 4px
+        border-top: 1px solid rgba(119, 237, 246, .65)
+        border-right: 1px solid rgba(119, 237, 246, .65)
+        transform: skewX(-35deg)
+
+    .msg__rule-signal
+      position: absolute
+      top: -1px
+      left: 0
+      width: 34px
+      height: 2px
+      background: #a4faff
+      box-shadow: 0 0 5px rgba(94, 226, 238, .32)
+
+    .msg__content
+      position: relative
+      min-width: 0
+      padding: 0 0 1px
+
+      &::before
+        content: ""
+        position: absolute
+        top: 3px
+        bottom: 4px
+        left: -9px
+        width: 1px
+        background: linear-gradient(180deg, rgba(103, 231, 241, .42), transparent)
+        pointer-events: none
+
+    .msg__text
+      min-width: 0
+      color: #d8e9ec
+      font-size: 15px
+      line-height: 1.5
+      white-space: pre-wrap
+      word-break: break-word
+
+    .msg__foot
+      display: flex
+      align-items: center
+      justify-content: flex-end
+      gap: 5px
+      height: 7px
+      margin-top: 8px
+      opacity: .8
+
+    .msg__foot-mark
+      position: relative
+      width: 13px
+      height: 5px
+      border-right: 1px solid rgba(110, 229, 239, .72)
+      border-left: 1px solid rgba(110, 229, 239, .72)
+
+      &::after
+        content: ""
+        position: absolute
+        top: 1px
+        right: 3px
+        left: 3px
+        height: 1px
+        background: rgba(110, 229, 239, .62)
+
+    .msg__foot-line
+      width: clamp(32px, 8%, 96px)
+      height: 1px
+      background: linear-gradient(90deg, rgba(76, 190, 202, .08), rgba(111, 233, 242, .65))
+
+    .msg__foot-tick
+      width: 8px
+      height: 5px
+      border-top: 1px solid rgba(132, 242, 249, .82)
+      border-right: 1px solid rgba(132, 242, 249, .82)
+      transform: skewX(35deg)
+
+    &[data-severity="neutral"],
+    &[data-severity="info"]
+      .msg__frame
+        --frame-light: #64e3ee
+
+    &[data-severity="success"]
+      .msg__frame
+        --frame-light: #7de7b2
+
+      .msg__frame::before
+        background: linear-gradient(132deg, #a5f7ce 0%, #70e2a6 35%, #368e72 72%, #9aefc2 100%)
+
+      .msg__rule-signal
+        background: #a5f7ce
+
+    &[data-severity="warning"]
+      .msg__frame
+        --frame-light: #f1ca75
+
+      .msg__frame::before
+        background: linear-gradient(132deg, #ffe5a0 0%, #e9bd61 35%, #927240 72%, #ffe09a 100%)
+
+      .msg__rule-signal
+        background: #ffe5a0
+
+    &[data-severity="error"]
+      .msg__frame
+        --frame-light: #ff8b8d
+
+      .msg__frame::before
+        background: linear-gradient(132deg, #ffc0c1 0%, #f36f78 35%, #a3434b 72%, #ffb2b4 100%)
+
+      .msg__rule-signal
+        background: #ffc0c1
+
+    &.is-notice
+      opacity: .9
+
+  @media (max-width: 720px)
+    .msg
+      .msg__panel
+        padding: 10px 17px 6px
+
+      .msg__frame-rail--top
+        left: 39px
+
+      .msg__frame-light
+        right: 4px
 // --- Подвал -----------------------------------------------------------------
 
 .statusbar
