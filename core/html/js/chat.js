@@ -239,13 +239,13 @@ function describe(entry) {
         case 'chat.connection.state':
             return [connectionPhrase(entry.payload?.state, service, reason)];
         case 'chat.channel.join.success':
-            return ['Успешное подключение к каналу ', strong(name)];
+            return ['Канал ', strong(name), ' подключён'];
         case 'chat.channel.join.failed':
-            return [`Не получилось подключиться к каналу `, strong(name), `: ${reason ?? '?'}`];
+            return ['Не удалось подключить канал ', strong(name), `: ${reason ?? '?'}`];
         case 'chat.channel.unjoin.success':
-            return ['Отключились от канала ', strong(name)];
+            return ['Канал ', strong(name), ' отключён'];
         case 'chat.channel.unjoin.failed':
-            return [`Не получилось отключиться от канала `, strong(name), `: ${reason ?? '?'}`];
+            return ['Не удалось отключить канал ', strong(name), `: ${reason ?? '?'}`];
         case 'chat.channel.info':
             // Счётчики и название трансляции. Пока их не шлём, но когда
             // начнём — покажем, а не выкинем.

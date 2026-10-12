@@ -18,7 +18,6 @@ import (
 	"syscall"
 
 	"studio/core/protocol"
-	"studio/plugins/chat/goodgame/chat"
 )
 
 const (
@@ -111,18 +110,18 @@ func main() {
 	}
 }
 
-// channelList — каналы, к которым надо быть подключены прямо сейчас.
-func channelList() []chat.ID {
-	var ids []chat.ID
+// channelList — каналы, к которым надо быть подключены прямо сейчас, вместе с
+// именами: имя нужно и чтобы войти, и чтобы потом сказать, из чего вышли.
+func channelList() []protocol.ChoiceValue {
+	var out []protocol.ChoiceValue
 	for _, channel := range currentChannels() {
-		id, err := channelID(channel.Value)
-		if err != nil {
+		if _, err := channelID(channel.Value); err != nil {
 			sayLog(fmt.Sprintf("канал %q пропущен: %v", channel.Label, err))
 			continue
 		}
-		ids = append(ids, id)
+		out = append(out, channel)
 	}
-	return ids
+	return out
 }
 
 // describe is what we tell about ourselves: the kind of plugin, its title and

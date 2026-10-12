@@ -495,3 +495,42 @@ func TestSocketStaysQuietWhenTheTitleRepeatsTheName(t *testing.T) {
 		t.Errorf("пришло лишнее событие %s: название совпадает, повторять нечего", extra)
 	}
 }
+
+// Убрали канал из настроек — выходим из него по имени, а не по номеру. К
+// моменту выхода канала в настройках уже нет, и искать имя негде: оно
+// запомнено при входе.
+func TestUnjoinRemembersTheNameAfterTheChannelIsRemoved(t *testing.T) {
+	fake := newGoodgame(t)
+
+	restore := currentChannels()
+	t.Cleanup(func() { setChannels(restore) })
+	setChannels([]protocol.ChoiceValue{
+		{Value: "53029", Label: "E.Wolf"},
+		{Value: "5", Label: "Miker"},
+	})
+
+	socket, _ := watchSocket(t)
+
+	joined := waitKind(t, socket, protocol.KindChannelJoinSuccess)
+	var first protocol.ChannelPayload
+	if err := joined.PayloadInto(&first); err != nil {
+		t.Fatal(err)
+	}
+
+	// Убираем канал из настроек — так же, как это делает человек.
+	setChannels([]protocol.ChoiceValue{{Value: "53029", Label: "E.Wolf"}})
+
+	left := waitKind(t, socket, protocol.KindChannelUnjoinSuccess)
+	var gone protocol.ChannelPayload
+	if err := left.PayloadInto(&gone); err != nil {
+		t.Fatal(err)
+	}
+	if gone.Channel == first.Channel {
+		t.Fatalf("вышли не из того канала: %s", gone.Channel)
+	}
+	if gone.Name == "" || gone.Name == gone.Channel {
+		t.Errorf("имя = %q, а ушли из %q — должно быть имя из настроек", gone.Name, gone.Channel)
+	}
+
+	_ = fake
+}

@@ -66,7 +66,7 @@ func newSocket() *socket {
 }
 
 // watch keeps a connection to GoodGame alive for as long as the plugin runs.
-func (s *socket) watch(ctx context.Context, wanted func() []chat.ID) {
+func (s *socket) watch(ctx context.Context, wanted func() []protocol.ChoiceValue) {
 	go func() {
 		backoff := reconnectMin
 		attempt := 0
@@ -102,7 +102,7 @@ func (s *socket) watch(ctx context.Context, wanted func() []chat.ID) {
 
 // session is one connection from start to finish. It returns the channels we
 // got into, so the caller can tell the kernel they are gone.
-func (s *socket) session(ctx context.Context, wanted func() []chat.ID) (map[chat.ID]bool, error) {
+func (s *socket) session(ctx context.Context, wanted func() []protocol.ChoiceValue) (map[chat.ID]string, error) {
 	s.send(protocol.KindConnectionState, protocol.ConnectionPayload{
 		State: protocol.ConnectionConnecting, Service: serviceName(),
 	})
@@ -118,13 +118,16 @@ func (s *socket) session(ctx context.Context, wanted func() []chat.ID) (map[chat
 		State: protocol.ConnectionOnline, Service: serviceName(),
 	})
 
-	live := map[chat.ID]bool{}
+	// live — каналы, в которых мы сейчас, и имя каждого. Имя запоминается при
+	// входе: как только канал убрали из настроек, искать его имя больше негде,
+	// а выйти из него всё равно надо.
+	live := map[chat.ID]string{}
 	defer func() {
 		// Соединение оборвалось: во всех каналах, где мы были, нас больше
 		// нет. Ядру нужно это сказать, иначе он будет считать их нашими.
 		for _, id := range slices.Sorted(maps.Keys(live)) {
 			s.send(protocol.KindChannelUnjoinSuccess, protocol.ChannelPayload{
-				Channel: string(id), Name: channelName(id),
+				Channel: string(id), Name: live[id],
 			})
 		}
 	}()
@@ -201,9 +204,20 @@ func listChannels(failed map[chat.ID]time.Time) string {
 
 // sync brings the channels in line with the settings: joins the new ones, leaves
 // the ones that are no longer there, and keeps the rest as they are.
-func (s *socket) sync(ctx context.Context, client *chat.Client, live map[chat.ID]bool, failed map[chat.ID]time.Time, wanted func() []chat.ID) {
+func (s *socket) sync(ctx context.Context, client *chat.Client, live map[chat.ID]string, failed map[chat.ID]time.Time, wanted func() []protocol.ChoiceValue) {
+	// Список с именами снимаем один раз, на всю синхронизацию. Если читать
+	// настройки по ходу, то канал, убранный человеком прямо в этот момент, к
+	// своему выходу останется без имени.
 	list := wanted()
-	join, unjoin := chat.Diff(slices.Collect(maps.Keys(live)), list)
+	names := make(map[chat.ID]string, len(list))
+	ids := make([]chat.ID, 0, len(list))
+	for _, channel := range list {
+		id := chat.ID(channel.Value)
+		names[id] = channel.Label
+		ids = append(ids, id)
+	}
+
+	join, unjoin := chat.Diff(slices.Collect(maps.Keys(live)), ids)
 
 	// Канал, которому недавно отказали, трогать рано: он либо ещё закрыт, либо
 	// GoodGame просто не отвечает — и то и другое пройдёт само за паузу.
@@ -221,17 +235,21 @@ func (s *socket) sync(ctx context.Context, client *chat.Client, live map[chat.ID
 	// Выход засчитывается по отправке: подтверждения сервер не даёт. Не
 	// отправилось — значит, мы в канале остались, и это уже неудача.
 	for _, id := range ready(unjoin) {
+		// Имя берём из того, что запомнили при входе: в списке этого раза
+		// канала уже нет, а назвать его в событии надо.
+		name := live[id]
+
 		if err := client.Unjoin(ctx, id); err != nil {
 			s.say(fmt.Sprintf("канал %s: %v", id, err))
 			s.send(protocol.KindChannelUnjoinFailed, protocol.ChannelPayload{
-				Channel: string(id), Name: channelName(id), Reason: err.Error(),
+				Channel: string(id), Name: name, Reason: err.Error(),
 			})
 			continue
 		}
 		delete(live, id)
 		delete(failed, id)
 		s.send(protocol.KindChannelUnjoinSuccess, protocol.ChannelPayload{
-			Channel: string(id), Name: channelName(id),
+			Channel: string(id), Name: name,
 		})
 	}
 
@@ -240,18 +258,19 @@ func (s *socket) sync(ctx context.Context, client *chat.Client, live map[chat.ID
 		if err != nil {
 			s.say(fmt.Sprintf("канал %s: %v", id, err))
 			s.send(protocol.KindChannelJoinFailed, protocol.ChannelPayload{
-				Channel: string(id), Name: channelName(id), Reason: err.Error(),
+				Channel: string(id), Name: names[id], Reason: err.Error(),
 			})
 			// Запомним, когда пробовать в следующий раз, чтобы сессия сама
 			// вернулась к этому каналу, а не ждала новой смены настроек.
 			failed[id] = time.Now().Add(retryMin)
 			continue
 		}
-		live[id] = true
+		name := names[id]
+		live[id] = name
 		delete(failed, id)
 
 		s.send(protocol.KindChannelJoinSuccess, protocol.ChannelPayload{
-			Channel: string(id), Name: channelName(id),
+			Channel: string(id), Name: name,
 		})
 
 		// Отдельно говорим только о том, чего вход не сказал. Название канала
@@ -266,7 +285,7 @@ func (s *socket) sync(ctx context.Context, client *chat.Client, live map[chat.ID
 			PremiumOnly: joined.PremiumOnly != 0,
 			SmileOnly:   joined.SmileOnlyMode,
 		}
-		if info.Name == channelName(id) {
+		if info.Name == name {
 			info.Name = ""
 		}
 		if info.Name != "" || info.PremiumOnly || info.SmileOnly {
@@ -372,18 +391,6 @@ func (s *socket) send(kind string, payload any) {
 // каталога, а человек знает плагин как GoodGame.
 func serviceName() string {
 	return describe().Title
-}
-
-// channelName is what we call a channel in our own events: the name it has in
-// our settings. Ядро наших настроек не видит, поэтому назвать канал может
-// только плагин — и это он.
-func channelName(id chat.ID) string {
-	for _, channel := range currentChannels() {
-		if channel.Value == string(id) {
-			return channel.Label
-		}
-	}
-	return string(id)
 }
 
 // errText is what we tell the kernel about a failure: nothing is fine too.
