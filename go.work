@@ -5,4 +5,5 @@ use (
 	./plugins/chat/goodgame
 	./plugins/chat/twitch
 	./plugins/chat/youtube
+	./plugins/chat/vkvideo
 )

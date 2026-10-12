@@ -31,6 +31,10 @@
           "token": ""
         }
       },
+      "vkvideo": {
+        "enabled": false,
+        "options": {}
+      },
       "youtube": {
         "enabled": false,
         "options": {}

@@ -226,6 +226,9 @@ func normalizeChannel(input string) (string, error) {
 		if err != nil {
 			return "", errors.New("не удалось разобрать ссылку")
 		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return "", errors.New("ссылка должна использовать HTTP или HTTPS")
+		}
 		host := strings.ToLower(parsed.Hostname())
 		switch host {
 		case "live.vkvideo.ru", "www.live.vkvideo.ru", "vkplay.live", "www.vkplay.live", "live.vkplay.ru":
@@ -336,7 +339,10 @@ func supervise(ctx context.Context) {
 			reason = err.Error()
 		}
 		emitConnection(protocol.ConnectionReconnecting, reason, attempt)
-		delay := time.Duration(min(attempt, int(maxBackoff/time.Second))) * time.Second
+		delay := time.Second * time.Duration(1<<min(attempt-1, 6))
+		if delay > maxBackoff {
+			delay = maxBackoff
+		}
 		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
@@ -354,6 +360,25 @@ func runSession(parent context.Context, current settings) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
+	var joinedChannels []vkChannel
+	defer func() {
+		if ctx.Err() == nil || parent.Err() != nil {
+			return
+		}
+		wanted := make(map[string]bool)
+		for _, input := range getSettings().Channels {
+			wanted[input] = true
+		}
+		for _, channel := range joinedChannels {
+			if wanted[channel.Input] {
+				continue
+			}
+			send(protocol.KindChannelUnjoinSuccess, protocol.ChannelPayload{
+				Channel: channel.Slug, Name: channelName(channel),
+			})
+		}
+	}()
+
 	go func() {
 		for {
 			select {
@@ -369,6 +394,7 @@ func runSession(parent context.Context, current settings) error {
 	}()
 
 	channels := make([]vkChannel, 0, len(current.Channels))
+	seenChannelIDs := make(map[string]bool)
 	retryableFailures := 0
 	for _, input := range current.Channels {
 		if ctx.Err() != nil {
@@ -383,7 +409,14 @@ func runSession(parent context.Context, current settings) error {
 			}
 			continue
 		}
+		if seenChannelIDs[channel.ID] {
+			continue
+		}
+		seenChannelIDs[channel.ID] = true
 		channels = append(channels, channel)
+	}
+	if ctx.Err() != nil {
+		return errSettingsChanged
 	}
 	if len(channels) == 0 {
 		if retryableFailures > 0 {
@@ -411,6 +444,9 @@ func runSession(parent context.Context, current settings) error {
 
 	token, err := getConnectToken(ctx, httpClient, apiBase)
 	if err != nil {
+		if ctx.Err() != nil && parent.Err() == nil {
+			return errSettingsChanged
+		}
 		return err
 	}
 
@@ -420,6 +456,9 @@ func runSession(parent context.Context, current settings) error {
 	if err := invoke(ctx, conn, nextID, map[string]any{
 		"connect": map[string]any{"token": token, "name": "js"},
 	}, &pending); err != nil {
+		if ctx.Err() != nil && parent.Err() == nil {
+			return errSettingsChanged
+		}
 		return fmt.Errorf("handshake VK Видео Live: %w", err)
 	}
 
@@ -438,6 +477,9 @@ func runSession(parent context.Context, current settings) error {
 		if err := invoke(ctx, conn, nextID, map[string]any{
 			"subscribe": map[string]any{"channel": chatChannel},
 		}, &pending); err != nil {
+			if ctx.Err() != nil && parent.Err() == nil {
+				return errSettingsChanged
+			}
 			send(protocol.KindChannelJoinFailed, protocol.ChannelPayload{
 				Channel: channel.Slug, Name: channelName(channel), Reason: "подписка на чат: " + err.Error(),
 			})
@@ -450,9 +492,16 @@ func runSession(parent context.Context, current settings) error {
 		if err := invoke(ctx, conn, nextID, map[string]any{
 			"subscribe": map[string]any{"channel": "channel-info:" + channel.ID},
 		}, &pending); err != nil {
+			if ctx.Err() != nil && parent.Err() == nil {
+				return errSettingsChanged
+			}
 			logInfo(fmt.Sprintf("VK Видео Live: метаданные канала %q недоступны: %v", channel.Slug, err))
 		}
+		if ctx.Err() != nil && parent.Err() == nil {
+			return errSettingsChanged
+		}
 		send(protocol.KindChannelJoinSuccess, protocol.ChannelPayload{Channel: channel.Slug, Name: channelName(channel)})
+		joinedChannels = append(joinedChannels, channel)
 		joined++
 	}
 	if joined == 0 {
