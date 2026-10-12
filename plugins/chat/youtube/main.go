@@ -286,6 +286,13 @@ type apiError struct {
 	Message string
 }
 
+func redactAPIKey(value, apiKey string) string {
+	if apiKey == "" {
+		return value
+	}
+	return strings.ReplaceAll(value, apiKey, "[redacted]")
+}
+
 func (e *apiError) Error() string {
 	if e.Reason != "" {
 		return fmt.Sprintf("YouTube API (%d, %s): %s", e.Status, e.Reason, e.Message)
@@ -315,7 +322,7 @@ func apiRequest(ctx context.Context, apiKey, method string, params url.Values, r
 	response, err := httpClient.Do(request)
 	if err != nil {
 		// http.Client errors often contain the full URL, including the API key.
-		return errors.New(strings.ReplaceAll(err.Error(), apiKey, "[redacted]"))
+		return errors.New(redactAPIKey(err.Error(), apiKey))
 	}
 	defer response.Body.Close()
 
@@ -338,7 +345,7 @@ func apiRequest(ctx context.Context, apiKey, method string, params url.Values, r
 		if len(payload.Error.Errors) > 0 {
 			reason = payload.Error.Errors[0].Reason
 		}
-		message := strings.ReplaceAll(payload.Error.Message, apiKey, "[redacted]")
+		message := redactAPIKey(payload.Error.Message, apiKey)
 		return &apiError{Status: response.StatusCode, Reason: reason, Message: message}
 	}
 	if err := json.Unmarshal(body, result); err != nil {
