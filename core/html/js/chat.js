@@ -205,64 +205,13 @@ function serviceTitle(entry) {
 // экранировал всё, что не разметка.
 function richBlock(entry, severity, head, html, notice = false) {
     const text = el('div', {class: 'msg__text'});
-
-    // Parse rich markup while it is still inert, then rewrite VK smile URLs
-    // before the images enter the document. Besides newly received messages,
-    // this also fixes messages already buffered in the hub's chat history.
-    const template = document.createElement('template');
-    template.innerHTML = html;
-    for (const image of template.content.querySelectorAll('img[src]')) {
-        const localURL = localVKVideoSmileURL(image.getAttribute('src'));
-        if (localURL) {
-            image.setAttribute('src', localURL);
-            image.setAttribute('referrerpolicy', 'no-referrer');
-        }
-    }
-    text.append(template.content);
+    text.innerHTML = html;
 
     return el('article', noticeAttrs(notice), [
         el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
         el('div', {class: 'msg__rule'}),
         text,
     ]);
-}
-
-// localVKVideoSmileURL migrates old chat entries that still have an absolute
-// VK CDN URL to the same-origin proxy. Validate the exact host and path: this
-// must never turn arbitrary URLs from plugin markup into proxied requests.
-function localVKVideoSmileURL(raw) {
-    let url;
-    try {
-        url = new URL(raw, location.href);
-    } catch {
-        return null;
-    }
-    if (url.protocol !== 'https:' || url.hostname !== 'images.live.vkvideo.ru'
-        || url.port || url.username || url.password) {
-        return null;
-    }
-
-    const parts = url.pathname.split('/');
-    if (parts.length !== 6 || parts[1] !== 'smile'
-        || parts[3] !== 'icon' || parts[4] !== 'size') {
-        return null;
-    }
-
-    const id = parts[2];
-    const size = parts[5];
-    if (!/^[A-Za-z0-9-]{1,80}$/.test(id)
-        || !['small', 'medium', 'large'].includes(size)) {
-        return null;
-    }
-
-    const local = new URL(`/api/vkvideo-smile/${id}/icon/size/${size}`, location.origin);
-    const changeTime = url.searchParams.get('change_time');
-    const validChangeTime = changeTime && changeTime.length <= 20
-        && [...changeTime].every((character) => character >= '0' && character <= '9');
-    if (validChangeTime) {
-        local.searchParams.set('change_time', changeTime);
-    }
-    return local.pathname + local.search;
 }
 
 // block is the shape of every message: who wrote it, a rule under the name, and
