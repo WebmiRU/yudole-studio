@@ -198,7 +198,7 @@
         content: ""
         position: absolute
         pointer-events: none
-        clip-path: polygon(0 22px, 19px 22px, 19px 8px, 31px 8px, 31px 0, calc(100% - 74px) 0, calc(100% - 60px) 13px, calc(100% - 36px) 13px, calc(100% - 25px) 24px, 100% 24px, 100% calc(100% - 24px), calc(100% - 21px) calc(100% - 24px), calc(100% - 21px) calc(100% - 5px), calc(100% - 46px) calc(100% - 5px), calc(100% - 52px) 100%, 51px 100%, 31px calc(100% - 17px), 16px calc(100% - 17px), 16px calc(100% - 1px), 0 calc(100% - 1px))
+        clip-path: polygon(0 18px, 0 0, 42px 0, 54px 12px, calc(100% - 92px) 12px, calc(100% - 78px) 0, calc(100% - 34px) 0, calc(100% - 18px) 16px, 100% 16px, 100% calc(100% - 26px), calc(100% - 24px) calc(100% - 26px), calc(100% - 24px) calc(100% - 8px), calc(100% - 48px) calc(100% - 8px), calc(100% - 56px) 100%, 48px 100%, 32px calc(100% - 16px), 14px calc(100% - 16px), 14px 100%, 0 100%)
 
       // Layer one is only the illuminated contour, with a small depth shadow.
       &::before
@@ -212,7 +212,7 @@
       &::after
         inset: 1px
         z-index: 1
-        clip-path: polygon(0 21px, 18px 21px, 18px 7px, 30px 7px, 30px 0, calc(100% - 74px) 0, calc(100% - 60px) 12px, calc(100% - 36px) 12px, calc(100% - 25px) 23px, 100% 23px, 100% calc(100% - 24px), calc(100% - 22px) calc(100% - 24px), calc(100% - 22px) calc(100% - 5px), calc(100% - 46px) calc(100% - 5px), calc(100% - 52px) 100%, 51px 100%, 31px calc(100% - 16px), 16px calc(100% - 16px), 16px calc(100% - 1px), 0 calc(100% - 1px))
+        clip-path: polygon(0 18px, 0 0, 42px 0, 54px 12px, calc(100% - 92px) 12px, calc(100% - 78px) 0, calc(100% - 34px) 0, calc(100% - 18px) 16px, 100% 16px, 100% calc(100% - 26px), calc(100% - 24px) calc(100% - 26px), calc(100% - 24px) calc(100% - 8px), calc(100% - 48px) calc(100% - 8px), calc(100% - 56px) 100%, 48px 100%, 32px calc(100% - 16px), 14px calc(100% - 16px), 14px 100%, 0 100%)
         background: linear-gradient(180deg, rgba(10, 27, 33, .97) 0%, rgba(5, 15, 20, .98) 62%, rgba(3, 10, 14, .98) 100%)
 
       .msg__frame-rail
@@ -221,37 +221,14 @@
         height: 1px
         pointer-events: none
 
+      // Bright short rail sits directly on the raised upper-left tab.
       .msg__frame-rail--top
         top: 1px
-        left: 43px
-        width: clamp(54px, 13%, 180px)
-        background: linear-gradient(90deg, rgba(216, 254, 255, .9), rgba(100, 227, 238, .15))
-
-      .msg__frame-rail--bottom
-        right: 39px
-        bottom: 1px
-        width: clamp(42px, 10%, 128px)
-        background: linear-gradient(90deg, rgba(100, 227, 238, .08), rgba(126, 243, 250, .82))
-
-      .msg__frame-joint
-        position: absolute
-        z-index: 2
-        width: 22px
-        height: 1px
-        background: rgba(169, 250, 255, .9)
-        box-shadow: 0 0 4px rgba(88, 222, 235, .35)
-
-      .msg__frame-joint--right
-        top: 20px
-        right: 5px
-        transform: rotate(48deg)
-        transform-origin: right center
-
-      .msg__frame-joint--left
-        bottom: 7px
-        left: 4px
-        transform: rotate(48deg)
-        transform-origin: left center
+        left: 3px
+        width: 32px
+        height: 1.5px
+        background: linear-gradient(90deg, #d5fdff, #69e7f2 75%, rgba(105, 231, 242, .28))
+        box-shadow: 0 0 4px rgba(111, 235, 244, .28)
 
       .msg__frame-light
         position: absolute
