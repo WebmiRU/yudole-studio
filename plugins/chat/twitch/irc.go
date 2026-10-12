@@ -129,7 +129,7 @@ func parseEmoteRanges(tag string) []emoteRange {
 
 	for _, group := range strings.Split(tag, "/") {
 		id, positions, found := strings.Cut(group, ":")
-		if !found || !digitsOnly(id) {
+		if !found || !validEmoteID(id) {
 			continue
 		}
 		for _, position := range strings.Split(positions, ",") {
@@ -148,12 +148,13 @@ func parseEmoteRanges(tag string) []emoteRange {
 	return ranges
 }
 
-func digitsOnly(value string) bool {
+func validEmoteID(value string) bool {
 	if value == "" {
 		return false
 	}
 	for _, r := range value {
-		if r < '0' || r > '9' {
+		if !(r >= 'a' && r <= 'z' || r >= 'A' && r <= 'Z' ||
+			r >= '0' && r <= '9' || r == '_' || r == '-') {
 			return false
 		}
 	}
