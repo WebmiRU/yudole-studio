@@ -147,10 +147,12 @@
   overflow-y: auto
   padding: 14px 20px 22px
   scroll-behavior: auto
+  // Зелёный здесь — общий фон между чёрными сообщениями, а не цвет их края.
+  background: #19351f
 
-  // У сообщений рваный внешний силуэт, как у выбранного референса.
-  // Шумовой SVG-фильтр применяется только к фоновым слоям — текст, ссылки,
-  // значки и смайлы остаются резкими и полностью интерактивными.
+  // Чёрная карточка имеет рваный силуэт; зелёный виден только как общий
+  // фон между сообщениями. Фильтр действует лишь на внешний слой, поэтому
+  // текст, ссылки, значки и смайлы остаются резкими.
   .msg
     position: relative
     isolation: isolate
@@ -164,20 +166,23 @@
       content: ""
       position: absolute
       pointer-events: none
-      filter: url("#chat-torn-edge")
 
-    // Тёмно-зелёный неровный край виден на фоне ленты, но не перекрашивает
-    // сами сообщения: внутри остаётся привычная чёрная карточка.
     &::before
       inset: 0
       z-index: -2
-      background: #19351f
+      background: #000
 
     &::after
       inset: 3px
       z-index: -1
       background: #000
       box-shadow: inset 4px 0 var(--message-accent)
+
+    // У каждого сообщения свой seed фильтра. Вариант назначается один раз
+    // при создании элемента и остаётся тем же при последующих redraw.
+    @for $variant from 1 through 8
+      &[data-rip="#{$variant}"]::before
+        filter: url("#chat-torn-edge-#{$variant}")
 
     > *
       position: relative
