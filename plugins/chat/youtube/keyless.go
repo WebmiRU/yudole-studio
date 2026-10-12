@@ -25,6 +25,7 @@ import (
 	"net/http"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 	"sync"
 	"time"
@@ -59,6 +60,11 @@ var (
 	videoIDRe = regexp.MustCompile(`"videoId":"([A-Za-z0-9_-]{11})"`)
 	// titleRe — название для ленты: сперва идёт то, что в <title> страницы.
 	titleRe = regexp.MustCompile(`<title>([^<]*)</title>`)
+	// ownerRe и ownerIDRe — кто вещает. Без них в ленте вместо названия канала
+	// светится пустое «Канал», а это ни о чём не говорит.
+	ownerRe    = regexp.MustCompile(`"ownerChannelName":"([^"]+)"`)
+	ownerIDRe  = regexp.MustCompile(`"(?:externalChannelId|channelId)":"(UC[A-Za-z0-9_-]{20,})"`)
+	legacyName = regexp.MustCompile(`<link itemprop="name" content="([^"]+)">`)
 )
 
 // errNoLive означает, что эфира сейчас нет. Это не поломка: канал молчит.
@@ -195,9 +201,13 @@ var feedVideoRe = regexp.MustCompile(`<yt:videoId>([A-Za-z0-9_-]{11})</yt:videoI
 type watchPage struct {
 	isLive bool
 	title  string
-	token  string
-	apiKey string
-	ver    string
+	// owner и ownerID — канал, который вещает. Их показываем в ленте, иначе
+	// человек видит вместо канала пустое слово «Канал».
+	owner   string
+	ownerID string
+	token   string
+	apiKey  string
+	ver     string
 }
 
 // keylessWatchPage opens the stream page and pulls out of it everything needed
@@ -222,6 +232,11 @@ func keylessWatchPage(ctx context.Context, videoID string) (watchPage, error) {
 	if m := titleRe.FindStringSubmatch(html); m != nil {
 		page.title = strings.TrimSpace(m[1])
 	}
+	page.owner = firstSubmatch(ownerRe, html)
+	if page.owner == "" {
+		page.owner = firstSubmatch(legacyName, html)
+	}
+	page.ownerID = firstSubmatch(ownerIDRe, html)
 	return page, nil
 }
 
@@ -237,32 +252,73 @@ type chatPage struct {
 	messages  []keylessMessage
 	continue_ string
 	waitMS    int
+	// offline — YouTube прямо сказал, что трансляция закончилась. Только это
+	// и означает конец чата: пустой continuation после долгого ожидания —
+	// обычное дело, а не прощание.
+	offline bool
 }
 
+// keylessRun — кусок реплики: либо текст, либо эмодзи.
+type keylessRun struct {
+	Text  string `json:"text"`
+	Emoji struct {
+		EmojiID string `json:"emojiId"`
+		Custom  struct {
+			Thumbnails []struct {
+				URL    string `json:"url"`
+				Width  int    `json:"width"`
+				Height int    `json:"height"`
+			} `json:"thumbnails"`
+		} `json:"customEmojiRendered"`
+	} `json:"emoji"`
+}
+
+// keylessMessage — одна реплика.
+//
+// Форму YouTube менял: сейчас имя автора лежит в authorName, а текст — внутри
+// message.runs. Прежняя разметка держала их на верхнем уровне, и на ней реплики
+// разбирались, а на новой молча терялись все. Потерянные реплики не видно нигде:
+// эфир выглядит просто пустым, и кажется, что читать нечего. Поэтому понимаем
+// обе формы.
 type keylessMessage struct {
-	ID     string
+	ID       string `json:"id"`
+	TimeUSec string `json:"timestampUsec"`
+
 	Author struct {
-		Name  string `json:"simpleText"`
-		ID    string `json:"id"`
-		Login string `json:"login"`
-	}
-	Runs []struct {
-		Text  string `json:"text"`
-		Emoji struct {
-			EmojiID string `json:"emojiId"`
-			Custom  struct {
-				Thumbnails []struct {
-					URL    string `json:"url"`
-					Width  int    `json:"width"`
-					Height int    `json:"height"`
-				} `json:"thumbnails"`
-			} `json:"customEmojiRendered"`
-		} `json:"emoji"`
-	}
+		Name string `json:"simpleText"`
+	} `json:"authorName"`
+	AuthorID string `json:"authorExternalChannelId"`
+
+	Message struct {
+		Runs []keylessRun `json:"runs"`
+	} `json:"message"`
+
+	// Прежняя форма, оставлена на всякий случай.
+	OldAuthor struct {
+		Name string `json:"simpleText"`
+	} `json:"author"`
+	OldRuns []keylessRun `json:"runs"`
 }
 
-// keylessChatPage asks for the next batch of messages.
-func keylessChatPage(ctx context.Context, page watchPage, continuation string) (chatPage, error) {
+// authorName достаёт имя автора из любой из форм.
+func (m keylessMessage) authorName() string {
+	if m.Author.Name != "" {
+		return m.Author.Name
+	}
+	return m.OldAuthor.Name
+}
+
+// runs достаёт куски реплики из любой из форм.
+func (m keylessMessage) runs() []keylessRun {
+	if len(m.Message.Runs) > 0 {
+		return m.Message.Runs
+	}
+	return m.OldRuns
+}
+
+// keylessChatRaw спрашивает у InnerTube следующую порцию и отдаёт ответ как есть,
+// разбирать его — дело вызывающего.
+func keylessChatRaw(ctx context.Context, page watchPage, continuation string) ([]byte, error) {
 	body, err := json.Marshal(map[string]any{
 		"context": map[string]any{"client": map[string]any{
 			"clientName": "WEB", "clientVersion": page.ver, "hl": "en",
@@ -270,13 +326,13 @@ func keylessChatPage(ctx context.Context, page watchPage, continuation string) (
 		"continuation": continuation,
 	})
 	if err != nil {
-		return chatPage{}, err
+		return nil, err
 	}
 
 	req, err := http.NewRequestWithContext(ctx, "POST",
 		ytBase+ytChatPath+"?key="+page.apiKey, strings.NewReader(string(body)))
 	if err != nil {
-		return chatPage{}, err
+		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) Chrome/120")
@@ -284,15 +340,24 @@ func keylessChatPage(ctx context.Context, page watchPage, continuation string) (
 
 	resp, err := httpClient.Do(req)
 	if err != nil {
-		return chatPage{}, err
+		return nil, err
 	}
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(io.LimitReader(resp.Body, ytPageLimit))
 	if err != nil {
-		return chatPage{}, err
+		return nil, err
 	}
 	if resp.StatusCode != http.StatusOK {
-		return chatPage{}, fmt.Errorf("live chat отдал HTTP %d", resp.StatusCode)
+		return nil, fmt.Errorf("live chat отдал HTTP %d", resp.StatusCode)
+	}
+	return raw, nil
+}
+
+// keylessChatPage asks for the next batch of messages.
+func keylessChatPage(ctx context.Context, page watchPage, continuation string) (chatPage, error) {
+	raw, err := keylessChatRaw(ctx, page, continuation)
+	if err != nil {
+		return chatPage{}, err
 	}
 
 	var root map[string]any
@@ -300,7 +365,19 @@ func keylessChatPage(ctx context.Context, page watchPage, continuation string) (
 		return chatPage{}, fmt.Errorf("ответ live chat не разобран: %w", err)
 	}
 
+	// continuationContents встречается и объектом, и массивом — в зависимости от
+	// того, чему именно продолжение продолжено. Искать только одним способом
+	// значит либо читать пустоту, либо падать на смене формы; поэтому пробуем
+	// оба.
 	live := digMap(root, "continuationContents", "liveChatContinuation")
+	if len(live) == 0 {
+		for _, section := range digSlice(root["continuationContents"]) {
+			if cont := digMap(digMapAny(section), "liveChatContinuation"); len(cont) > 0 {
+				live = cont
+				break
+			}
+		}
+	}
 	out := chatPage{waitMS: 5000}
 
 	actions, _ := live["actions"].([]any)
@@ -310,26 +387,60 @@ func keylessChatPage(ctx context.Context, page watchPage, continuation string) (
 			blob, _ := json.Marshal(node)
 			var msg keylessMessage
 			json.Unmarshal(blob, &msg)
-			if msg.Author.Name == "" {
+			if msg.authorName() == "" {
 				continue
 			}
 			out.messages = append(out.messages, msg)
 		}
 	}
 
+	// continuations — тоже массив, но внутри элементов лежат объекты, поэтому
+	// обходить надо по их значениям, а не по элементам.
 	conts, _ := live["continuations"].([]any)
 	for _, c := range conts {
-		for _, v := range digSlice(c) {
-			m, _ := v.(map[string]any)
+		for key, v := range digMapAny(c) {
+			m := digMapAny(v)
 			if tok, _ := m["continuation"].(string); tok != "" {
 				out.continue_ = tok
 			}
-			if ms, ok := m["timeoutMs"].(float64); ok && ms > 0 {
+			if ms, ok := numberOf(m["timeoutMs"]); ok && ms > 0 {
 				out.waitMS = int(ms)
+			}
+			_ = key
+		}
+	}
+
+	out.offline = hasOfflineMarker(root)
+	return out, nil
+}
+
+// hasOfflineMarker ищет в ответе прямое указание, что трансляция закончилась.
+//
+// Искать надо именно маркер, а не отсутствие сообщений: после долгого ожидания
+// пустой ответ — норма, в эфире может быть тихо десять минут подряд, и это не
+// конец. Обрывать чтение по тишине значит объявить живой эфир мёртвым.
+func hasOfflineMarker(v any) bool {
+	switch node := v.(type) {
+	case map[string]any:
+		for key, child := range node {
+			if strings.Contains(key, "offlineSlate") || key == "isLiveNow" {
+				if b, ok := child.(bool); !ok || !b {
+					return true
+				}
+				continue
+			}
+			if hasOfflineMarker(child) {
+				return true
+			}
+		}
+	case []any:
+		for _, child := range node {
+			if hasOfflineMarker(child) {
+				return true
 			}
 		}
 	}
-	return out, nil
+	return false
 }
 
 // digMap walks a decoded JSON tree, returning an empty map rather than panicking
@@ -353,6 +464,25 @@ func digSlice(v any) []any {
 	return s
 }
 
+// digMapAny достаёт объект, а отсутствие ключа отличает пустым значением: так
+// видно, ветку мы нашли или промахнулись.
+func digMapAny(v any) map[string]any {
+	m, _ := v.(map[string]any)
+	return m
+}
+
+// numberOf читает число, которое YouTube может прислать и числом, и строкой.
+func numberOf(v any) (float64, bool) {
+	switch n := v.(type) {
+	case float64:
+		return n, true
+	case string:
+		parsed, err := strconv.ParseFloat(n, 64)
+		return parsed, err == nil
+	}
+	return 0, false
+}
+
 // keylessWatchChats reads the chat of every live stream, one goroutine per
 // stream, and ends when all of them are over.
 func keylessWatchChats(ctx context.Context, channel, channelTitle string, lives []liveVideo) error {
@@ -368,10 +498,17 @@ func keylessWatchChats(ctx context.Context, channel, channelTitle string, lives 
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			results <- result{video: video, err: keylessReadOne(ctx, channel, video, func() {
+			// Название канала выясняется уже на странице трансляции, поэтому
+			// подписаться на канал мы можем только оттуда — и подписываемся
+			// именно на тот канал, который реально вещает этот эфир.
+			results <- result{video: video, err: keylessReadOne(ctx, channelTitle, video, func(name string) {
+				label := name
+				if label == "" {
+					label = channelTitle
+				}
 				send(protocol.KindChannelJoinSuccess, protocol.ChannelPayload{
-					Channel: channel,
-					Name:    channelTitle,
+					Channel: name,
+					Name:    label,
 				})
 				emitConnection(protocol.ConnectionOnline, "Читаю чат YouTube без ключа", 0)
 			})}
@@ -409,7 +546,8 @@ func keylessWatchChats(ctx context.Context, channel, channelTitle string, lives 
 
 // keylessReadOne is the read loop of a single stream: ask, wait as long as the
 // server said, ask again.
-func keylessReadOne(ctx context.Context, channel string, video liveVideo, onConnected func()) error {
+// onConnected вызывается именем канала, который выяснился на странице.
+func keylessReadOne(ctx context.Context, channelTitle string, video liveVideo, onConnected func(name string)) error {
 	page, err := keylessWatchPage(ctx, video.ID)
 	if err != nil {
 		return err
@@ -418,9 +556,28 @@ func keylessReadOne(ctx context.Context, channel string, video liveVideo, onConn
 		return errNoLive
 	}
 
+	// Название канала берём со страницы самой трансляции: там оно точно есть и
+	// точно правильное. Заглушка вроде «YouTube» или пустое «Канал» человеку
+	// ничего не объясняет, а id канала хотя бы что-то значит.
+	channel := page.owner
+	if channel == "" {
+		channel = page.ownerID
+	}
+	if channel == "" {
+		channel = channelTitle
+	}
+
 	seen := map[string]bool{}
-	connected := false
 	token := page.token
+
+	// Токен получен — значит чат уже читается, и можно честно сказать «в сети».
+	// Ждать первого сообщения для этого нельзя: в эфире бывает тихо по минуте,
+	// и человек в это время видит «офлайн» у живого плагина.
+	onConnected(channel)
+	// lastMessage — когда последний раз что-то приходило. Тишина сама по себе
+	// ни о чём не говорит, но бесконечное молчание стоит перепроверить: вдруг
+	// эфир всё-таки закончился, а плагин об этом не узнал.
+	lastMessage := time.Now()
 
 	for {
 		if ctx.Err() != nil {
@@ -441,22 +598,50 @@ func keylessReadOne(ctx context.Context, channel string, video liveVideo, onConn
 				}
 				seen[msg.ID] = true
 			}
-			if !connected {
-				connected = true
-				onConnected()
-			}
+			lastMessage = time.Now()
 			emitKeylessMessage(channel, msg)
 		}
 
-		if batch.continue_ == "" {
+		if batch.offline {
 			return errChatEnded
 		}
-		token = batch.continue_
+		if batch.continue_ != "" {
+			token = batch.continue_
+		}
+		// Токен пустой — просто продолжаем с прежним: после ожидания сервер
+		// имеет право не прислать ничего нового.
+
+		if time.Since(lastMessage) >= silenceRecheck {
+			fresh, err := keylessWatchPage(ctx, video.ID)
+			if err == nil && fresh.token != "" {
+				page = fresh
+				token = fresh.token
+				logInfo(fmt.Sprintf(
+					"Молчит уже %s, эфир %s — продолжаю",
+					time.Since(lastMessage).Round(time.Minute), describeLiveness(fresh)))
+				lastMessage = time.Now()
+			} else if err == nil && fresh.token == "" {
+				return errNoLive
+			}
+		}
 
 		if !waitInterval(ctx, time.Duration(batch.waitMS)*time.Millisecond) {
 			return errSettingsChanged
 		}
 	}
+}
+
+// silenceRecheck — сколько можно молчать, прежде чем перепроверить эфир. В
+// эфире бывают паузы и по десять минут, но час молчания — уже повод спросить
+// у самой страницы, не закончилось ли всё.
+const silenceRecheck = 10 * time.Minute
+
+// describeLiveness пишет по-человечески, живой эфир или нет.
+func describeLiveness(page watchPage) string {
+	if page.isLive {
+		return "всё ещё идёт"
+	}
+	return "больше не идёт"
 }
 
 // emitKeylessMessage turns one message into what the kernel and the page expect.
@@ -466,7 +651,7 @@ func keylessReadOne(ctx context.Context, channel string, video liveVideo, onConn
 // то, что человек написал буквами.
 func emitKeylessMessage(channel string, msg keylessMessage) {
 	var text, html strings.Builder
-	for _, run := range msg.Runs {
+	for _, run := range msg.runs() {
 		if run.Emoji.EmojiID != "" {
 			if run.Emoji.Custom.Thumbnails != nil {
 				pick := run.Emoji.Custom.Thumbnails
@@ -497,9 +682,9 @@ func emitKeylessMessage(channel string, msg keylessMessage) {
 	send(protocol.KindMessagePublic, protocol.ChatPayload{
 		Channel: channel,
 		User: protocol.ChatUser{
-			Name:  msg.Author.Name,
-			ID:    msg.Author.ID,
-			Login: msg.Author.Login,
+			Name:  msg.authorName(),
+			ID:    msg.AuthorID,
+			Login: msg.AuthorID,
 		},
 		Message: line,
 	})

@@ -52,6 +52,11 @@ var (
 	// официальный путь нерабочим. Три попытки за полторы минуты: мигание сети
 	// обрывы дают, а вот «открылся и сразу умер» — это уже не сеть.
 	maxStreamRestarts = 3
+
+	// chatEndedInterval — пауза после завершившегося чата. Раунд без паузы
+	// превращается в тысячу одинаковых попыток за час, а это уже не чтение,
+	// а долбёжка чужого сервиса.
+	chatEndedInterval = 30 * time.Second
 	channelIDPattern  = regexp.MustCompile("^UC[A-Za-z0-9_-]{20,}$")
 	httpClient        = &http.Client{Timeout: requestTimeout}
 )
@@ -640,6 +645,12 @@ func supervise(ctx context.Context) {
 		}
 		if errors.Is(err, errChatEnded) {
 			emitConnection(protocol.ConnectionReconnecting, "Эфир или чат завершились; ищу следующий активный эфир", 0)
+			// Паузу здесь пропустить нельзя: чат может быть завершён мгновенно,
+			// и без неё цикл станет крутиться раз в секунду, наскоро перезаходя
+			// на один и тот же адрес и отправляя YouTube запрос за запросом.
+			if !waitInterval(ctx, chatEndedInterval) {
+				return
+			}
 			continue
 		}
 		if err != nil {
@@ -676,24 +687,34 @@ func runConfiguration(ctx context.Context, config settings) error {
 	// Стримы, указанные адресом, читаем сразу: искать по адресу нечего, человек
 	// уже сказал, какой именно. Каналы — ждём, пока проснутся.
 	direct := directVideos(config.Targets)
+	channels := channelTargets(config.Targets)
+
 	if len(direct) > 0 {
 		logInfo("Стримы указаны адресом, иду сразу без поиска: " + strings.Join(direct, ", "))
 		w.channel = direct[0]
 		w.title = "YouTube"
-		return w.watchDirect(ctx, direct)
-	}
-
-	if len(config.Targets) == 0 {
+		err := w.watchDirect(ctx, direct)
+		// Список может смешивать стримы и каналы. Стрим, который уже
+		// закончился, не воскреснет, и крутить его по кругу незачем: если в
+		// списке есть ещё и каналы, идут они.
+		if err == nil || len(channels) == 0 ||
+			errors.Is(err, errSettingsChanged) || ctx.Err() != nil {
+			return err
+		}
+		logInfo("Стримы из списка закончились, перехожу к каналам")
+		w.channel = ""
+		w.title = ""
+	} else if len(channels) == 0 {
 		return errChannelNotFound
 	}
 
-	channelID, channelTitle, err := w.resolveAll(ctx, config.Targets)
+	channelID, channelTitle, err := w.resolveAll(ctx, channels)
 	if err != nil {
 		return err
 	}
 	w.title = channelTitle
 	if channelTitle == "" {
-		w.title = firstLabel(config.Targets)
+		w.title = firstLabel(channels)
 	}
 	logInfo(fmt.Sprintf("Канал YouTube разрешён: %s (%s), чтение: %s", w.title, channelID, w))
 
@@ -729,6 +750,17 @@ func directVideos(targets []target) []string {
 	for _, t := range targets {
 		if t.video != "" {
 			out = append(out, t.video)
+		}
+	}
+	return out
+}
+
+// channelTargets — те, что каналы: их надо искать, они просыпаются сами.
+func channelTargets(targets []target) []target {
+	var out []target
+	for _, t := range targets {
+		if t.video == "" {
+			out = append(out, t)
 		}
 	}
 	return out
