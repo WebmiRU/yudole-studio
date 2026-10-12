@@ -429,6 +429,9 @@ func TestMessageLinePutsSmilesIntoHTML(t *testing.T) {
 		!strings.Contains(html, "images.live.vkvideo.ru/smile/abc-123") {
 		t.Fatalf("в разметке нет картинки смайла: %q", html)
 	}
+	if !strings.Contains(html, `referrerpolicy="no-referrer"`) {
+		t.Errorf("запрос за смайлом не должен передавать Referer: %q", html)
+	}
 	// Код смайла в разметку попадать не должен: человек его не писал.
 	if strings.Contains(html, "legionaveGgigiggg") &&
 		!strings.Contains(html, `alt="legionaveGgigiggg"`) {
