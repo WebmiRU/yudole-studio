@@ -416,24 +416,54 @@ func keylessChatPage(ctx context.Context, page watchPage, continuation string) (
 		}
 	}
 
-	// continuations — тоже массив, но внутри элементов лежат объекты, поэтому
-	// обходить надо по их значениям, а не по элементам.
-	conts, _ := live["continuations"].([]any)
-	for _, c := range conts {
-		for key, v := range digMapAny(c) {
-			m := digMapAny(v)
-			if tok, _ := m["continuation"].(string); tok != "" {
-				out.continue_ = tok
-			}
-			if ms, ok := numberOf(m["timeoutMs"]); ok && ms > 0 {
-				out.waitMS = int(ms)
-			}
-			_ = key
-		}
-	}
+	out.continue_, out.waitMS = selectChatContinuation(live)
 
 	out.offline = hasOfflineMarker(root)
 	return out, nil
+}
+
+// selectChatContinuation picks one usable cursor in a stable order. YouTube can
+// return several continuation kinds together; choosing the last item (or ranging
+// over a map) can select a seek/reload cursor instead of the live chat cursor,
+// causing gaps, repeated history, or long waits.
+func selectChatContinuation(live map[string]any) (string, int) {
+	const defaultWait = 5000
+	priority := []string{
+		"invalidationContinuationData",
+		"timedContinuationData",
+		"reloadContinuationData",
+		"liveChatReplayContinuationData",
+		"playerSeekContinuationData",
+	}
+	type candidate struct {
+		token string
+		wait  int
+	}
+	found := make(map[string]candidate)
+	continuations, _ := live["continuations"].([]any)
+	for _, item := range continuations {
+		wrapper := digMapAny(item)
+		for _, key := range priority {
+			data := digMapAny(wrapper[key])
+			token, _ := data["continuation"].(string)
+			if token == "" {
+				continue
+			}
+			wait := defaultWait
+			if ms, ok := numberOf(data["timeoutMs"]); ok && ms > 0 {
+				wait = int(ms)
+			}
+			if _, exists := found[key]; !exists {
+				found[key] = candidate{token: token, wait: wait}
+			}
+		}
+	}
+	for _, key := range priority {
+		if selected, ok := found[key]; ok {
+			return selected.token, selected.wait
+		}
+	}
+	return "", defaultWait
 }
 
 // hasOfflineMarker ищет в ответе прямое указание, что трансляция закончилась.
