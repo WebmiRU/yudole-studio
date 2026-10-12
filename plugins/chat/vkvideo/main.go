@@ -357,6 +357,25 @@ func runSession(parent context.Context, current settings) error {
 	ctx, cancel := context.WithCancel(parent)
 	defer cancel()
 
+	var joinedChannels []vkChannel
+	defer func() {
+		if ctx.Err() == nil || parent.Err() != nil {
+			return
+		}
+		wanted := make(map[string]bool)
+		for _, input := range getSettings().Channels {
+			wanted[input] = true
+		}
+		for _, channel := range joinedChannels {
+			if wanted[channel.Input] {
+				continue
+			}
+			send(protocol.KindChannelUnjoinSuccess, protocol.ChannelPayload{
+				Channel: channel.Slug, Name: channelName(channel),
+			})
+		}
+	}()
+
 	go func() {
 		for {
 			select {
@@ -475,7 +494,11 @@ func runSession(parent context.Context, current settings) error {
 			}
 			logInfo(fmt.Sprintf("VK Видео Live: метаданные канала %q недоступны: %v", channel.Slug, err))
 		}
+		if ctx.Err() != nil && parent.Err() == nil {
+			return errSettingsChanged
+		}
 		send(protocol.KindChannelJoinSuccess, protocol.ChannelPayload{Channel: channel.Slug, Name: channelName(channel)})
+		joinedChannels = append(joinedChannels, channel)
 		joined++
 	}
 	if joined == 0 {
