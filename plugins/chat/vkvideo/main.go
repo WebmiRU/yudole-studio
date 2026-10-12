@@ -1029,6 +1029,51 @@ func newVKLine() *vkLine {
 // человек написал, а внутреннее имя картинки. В ленте такое читать невозможно.
 // Анимированные приходят десятками одинаковых узлов, по одному на кадр, и без
 // отсечки одна реплика превращалась в двадцать одинаковых картинок подряд.
+// localSmileURL serves known VK CDN smiles through the studio origin.
+// The browser otherwise requests images.live.vkvideo.ru directly, where image
+// hotlinking/security policies can behave differently from opening the URL.
+func localSmileURL(raw string) string {
+	parsed, err := url.Parse(raw)
+	if err != nil || parsed.Scheme != "https" || parsed.Host != "images.live.vkvideo.ru" {
+		return raw
+	}
+
+	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
+	if len(parts) != 5 || parts[0] != "smile" || parts[2] != "icon" || parts[3] != "size" {
+		return raw
+	}
+	id, size := parts[1], parts[4]
+	if id == "" {
+		return raw
+	}
+	for _, c := range id {
+		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') &&
+			(c < '0' || c > '9') && c != '-' {
+			return raw
+		}
+	}
+	if size != "small" && size != "medium" && size != "large" {
+		return raw
+	}
+
+	local := "/api/vkvideo-smile/" + id + "/icon/size/" + size
+	if changed := parsed.Query().Get("change_time"); changed != "" {
+		valid := len(changed) <= 20
+		for _, c := range changed {
+			if c < '0' || c > '9' {
+				valid = false
+				break
+			}
+		}
+		if valid {
+			query := url.Values{}
+			query.Set("change_time", changed)
+			local += "?" + query.Encode()
+		}
+	}
+	return local
+}
+
 func (l *vkLine) addSmile(node map[string]any) {
 	id := firstNonEmpty(asString(node["id"]), asString(node["name"]))
 	if id == "" {
@@ -1055,7 +1100,7 @@ func (l *vkLine) addSmile(node map[string]any) {
 	// приватности это помогает CDN, который проверяет Referer, не ломать
 	// встраивание картинки в сторонний чат.
 	fmt.Fprintf(&l.html, `<img class="smile" src="%s" alt="%s" referrerpolicy="no-referrer">`,
-		htmlEscape(image), htmlEscape(asString(node["name"])))
+		htmlEscape(localSmileURL(image)), htmlEscape(asString(node["name"])))
 }
 
 // addText кладёт кусок текста в оба вида. В разметку — экранированным: текст
