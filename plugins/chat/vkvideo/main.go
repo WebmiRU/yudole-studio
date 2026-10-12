@@ -226,6 +226,9 @@ func normalizeChannel(input string) (string, error) {
 		if err != nil {
 			return "", errors.New("не удалось разобрать ссылку")
 		}
+		if parsed.Scheme != "http" && parsed.Scheme != "https" {
+			return "", errors.New("ссылка должна использовать HTTP или HTTPS")
+		}
 		host := strings.ToLower(parsed.Hostname())
 		switch host {
 		case "live.vkvideo.ru", "www.live.vkvideo.ru", "vkplay.live", "www.vkplay.live", "live.vkplay.ru":
