@@ -22,3 +22,7 @@ go.work.sum
 # бинарники чат-плагина YouTube
 /plugins/chat/youtube/youtube
 /plugins/chat/youtube/youtube.exe
+
+# бинарники чат-плагина VK Видео Live
+/plugins/chat/vkvideo/vkvideo
+/plugins/chat/vkvideo/vkvideo.exe
