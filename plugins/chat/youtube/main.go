@@ -128,6 +128,11 @@ var (
 	current    settings
 	changed    = make(chan struct{}, 1)
 	stdoutMu   sync.Mutex
+
+	// Не допускаем дублирующихся событий «Подключились к YouTube», если
+	// несколько потоков одновременно подтверждают одно и то же состояние.
+	connectionStateMu sync.Mutex
+	lastConnectionState string
 )
 
 func main() {
@@ -1278,6 +1283,15 @@ func streamRetryDelay(attempt int, received bool) (time.Duration, int) {
 func stringPtr(value string) *string { return &value }
 
 func emitConnection(state, reason string, attempt int) {
+	connectionStateMu.Lock()
+	defer connectionStateMu.Unlock()
+
+	// Состояние в UI уже «в сети» — повторный успешный ответ от второго
+	// активного видео не означает нового подключения и не должен засорять чат.
+	if state == protocol.ConnectionOnline && lastConnectionState == protocol.ConnectionOnline {
+		return
+	}
+	lastConnectionState = state
 	send(protocol.KindConnectionState, protocol.ConnectionPayload{
 		State:   state,
 		Service: "YouTube",
