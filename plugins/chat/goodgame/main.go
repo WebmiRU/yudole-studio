@@ -141,8 +141,10 @@ func updateSmiles(ctx context.Context, book *smileBook) {
 	count := len(book.get())
 	sayLog(fmt.Sprintf("смайлов в базе: %d", count))
 
+	// Число — главное, время второстепенно. Раньше строка читалась «12.10 17:28
+	// в 5879»: предлог остался, а слово после него потерялось.
 	if at, ok := book.UpdatedAt(); ok {
-		sendDone(fmt.Sprintf("База смайлов обновлена: %s в %d", at.Local().Format("02.01 15:04"), count))
+		sendDone(fmt.Sprintf("База смайлов обновлена: %d (%s)", count, at.Local().Format("02.01 в 15:04")))
 		return
 	}
 	sendDone(fmt.Sprintf("База смайлов обновлена: %d", count))
