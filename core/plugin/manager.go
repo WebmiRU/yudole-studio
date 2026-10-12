@@ -269,7 +269,7 @@ func (m *Manager) enable(id string) error {
 		slog.Warn("stored options do not fit the schema, using defaults", "plugin", id, "err", err)
 		values = protocol.Defaults(info.Options)
 	}
-	if err := process.Configure(values); err != nil {
+	if accepted, err := process.Configure(values); err != nil {
 		// Плагин может быть жив, а сохранённые настройки ему не нравятся —
 		// например, канал удалили. Это не поломка: запускаем как есть и
 		// показываем, что поправить.
@@ -281,6 +281,13 @@ func (m *Manager) enable(id string) error {
 			m.setProblem(id, err)
 			_ = process.Stop()
 			return err
+		}
+	} else if accepted != nil {
+		// Плагин привёл настройки к своему виду (например, превратил ссылки
+		// в номера каналов) — сохраняем то, с чем он реально работает.
+		m.remember(id, accepted)
+		if err := m.save(); err != nil {
+			slog.Warn("cannot save the settings the plugin settled on", "plugin", id, "err", err)
 		}
 	}
 
@@ -339,15 +346,15 @@ func (m *Manager) SaveOptions(id string, values map[string]any) (PluginView, err
 		}
 	}
 
-	stored := m.config.EnsureChat(id)
-	stored.Options = values
 	process := m.running[id]
 	m.mu.Unlock()
 
 	// A plugin that is switched off keeps its settings but is not running, so
 	// there is nobody to send them to yet.
+	accepted := values
 	if process != nil {
-		if err := process.Configure(values); err != nil {
+		result, err := process.Configure(values)
+		if err != nil {
 			view, _ := m.Get(id)
 			// Отказ с указанием на поля: показываем их, но в файл ничего не
 			// пишем — иначе сломанные значения останутся в конфиге.
@@ -363,18 +370,47 @@ func (m *Manager) SaveOptions(id string, values map[string]any) (PluginView, err
 			m.setProblem(id, err)
 			return view, err
 		}
+		// Плагин мог привести значения к своему виду: ссылка или ник вместо
+		// номера канала. В конфиг идёт то, с чем он реально работает.
+		accepted = merged(values, result)
 	}
 
-	m.mu.Lock()
-	m.config.Plugins.Chat[id] = stored
-	delete(m.fields, id)
-	m.mu.Unlock()
+	m.remember(id, accepted)
 
 	if err := m.save(); err != nil {
 		return PluginView{}, err
 	}
 	view, _ := m.Get(id)
 	return view, nil
+}
+
+// remember puts the values a plugin settled on into the config. Until the file
+// is saved they live only in memory.
+func (m *Manager) remember(id string, values map[string]any) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+
+	stored := m.config.EnsureChat(id)
+	stored.Options = values
+	m.config.Plugins.Chat[id] = stored
+	delete(m.fields, id)
+}
+
+// merged overlays what the plugin answered with onto what the user sent. A
+// plugin usually only names the options it handled; everything else — including
+// keys from a newer plugin version — has to survive.
+func merged(sent, accepted map[string]any) map[string]any {
+	if accepted == nil {
+		return sent
+	}
+	out := make(map[string]any, len(sent)+len(accepted))
+	for key, value := range sent {
+		out[key] = value
+	}
+	for key, value := range accepted {
+		out[key] = value
+	}
+	return out
 }
 
 // processContext is the lifetime of plugin processes: the kernel context, or

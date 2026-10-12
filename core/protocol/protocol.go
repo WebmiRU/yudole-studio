@@ -116,8 +116,13 @@ type SetOptionsPayload struct {
 	Values map[string]any `json:"values"`
 }
 
-// AckPayload is empty on purpose: it only confirms.
-type AckPayload struct{}
+// AckPayload confirms that the plugin took the options. It may also carry the
+// values it actually ended up with: a plugin is allowed to normalize them (turn
+// a nickname or a link into a channel id), and the kernel saves what the plugin
+// works with, not what the user happened to type.
+type AckPayload struct {
+	Values map[string]any `json:"values,omitempty"`
+}
 
 // LogPayload is a line for the kernel log.
 type LogPayload struct {

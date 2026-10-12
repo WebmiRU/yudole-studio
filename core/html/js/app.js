@@ -77,7 +77,7 @@ function replacePlugin(view) {
         state.plugins[index] = view;
     }
     if (view.id === state.selectedId) {
-        state.values = {...(view.values ?? {})};
+        state.values = cloneValues(view.values);
     }
 }
 
@@ -88,7 +88,20 @@ function selected() {
 // --- Значения формы --------------------------------------------------------
 
 function resetValues() {
-    state.values = {...(selected()?.values ?? {})};
+    state.values = cloneValues(selected()?.values);
+}
+
+// cloneValues копирует настройки для формы. Копия должна быть настоящей: если
+// поделить массив с сохранёнными значениями, правка в поле изменит и их, и
+// «Сбросить» будет не от чего откатывать.
+function cloneValues(values) {
+    const out = {};
+    for (const [key, value] of Object.entries(values ?? {})) {
+        out[key] = Array.isArray(value)
+            ? value.map((entry) => (entry && typeof entry === 'object' ? {...entry} : entry))
+            : value;
+    }
+    return out;
 }
 
 function isEmpty(value) {
@@ -231,7 +244,7 @@ function renderOptions() {
                 plugin.enabled ? 'Настройки сохраняются в config.json' : 'Плагин выключен — настройки сохраняются, но не применяются',
             ]),
             el('span', {class: 'options__actions'}, [
-                el('button', {type: 'button', class: 'btn btn--ghost', disabled: state.saving}, ['Сбросить']),
+                el('button', {type: 'button', class: 'btn btn--ghost btn--reset', disabled: state.saving}, ['Сбросить']),
                 saveButton(plugin),
             ]),
         ]),
@@ -241,10 +254,13 @@ function renderOptions() {
         event.preventDefault();
         save(plugin);
     });
-    form.querySelector('.btn--ghost').addEventListener('click', () => {
+    // Класс свой, а не .btn--ghost: такой же стиль есть у кнопки «Добавить»
+    // в списке значений, и запрос по классу цеплял её вместо сброса.
+    // И сообщать о сбросе нечем — изменения сразу видны в полях.
+    form.querySelector('.btn--reset').addEventListener('click', () => {
         resetValues();
+        state.fieldError = null;
         render();
-        toast('Черновик отменён');
     });
 
     optionsEl.replaceChildren(form);

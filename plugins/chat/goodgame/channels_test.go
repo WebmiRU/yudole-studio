@@ -171,14 +171,32 @@ func TestApplyResolvesChannels(t *testing.T) {
 			"53029",
 			"DemoChannel",
 			map[string]any{"value": "12", "label": "DemoChannel"},
+			// Ссылка не равна своему названию: если помнить только результат,
+			// по ссылке потом не найти и канал молча выпадет из списка.
+			"https://goodgame.ru/E.Wolf",
 		},
 	}
-	if err := apply(context.Background(), values); err != nil {
+	settled, err := apply(context.Background(), values)
+	if err != nil {
 		t.Fatalf("apply: %v", err)
 	}
 
 	if got := strings.Join(channelLabels(currentChannels()), ","); got != "E.Wolf,DemoChannel" {
 		t.Errorf("channels = %q, want E.Wolf,DemoChannel", got)
+	}
+
+	// Ядру отдаём «номер — название», а не то, что человек набрал: «DemoChannel»
+	// и «12» — один канал, в конфиг он должен лечь один раз, а ссылка — уже
+	// как 53029/E.Wolf.
+	got, ok := settled["channels"].([]protocol.ChoiceValue)
+	if !ok {
+		t.Fatalf("settled channels = %#v, want a list", settled["channels"])
+	}
+	if len(got) != 2 {
+		t.Fatalf("settled channels = %v, want 2", channelLabels(got))
+	}
+	if got[0].Value != "53029" || got[0].Label != "E.Wolf" {
+		t.Errorf("первый канал = %+v, want 53029/E.Wolf", got[0])
 	}
 }
 
@@ -194,9 +212,12 @@ func TestApplyRefusesUnknownChannels(t *testing.T) {
 
 	values := map[string]any{"channels": []any{"53029", "nosuchuser"}}
 
-	err := apply(context.Background(), values)
+	settled, err := apply(context.Background(), values)
 	if err == nil {
 		t.Fatal("ожидался отказ: канала nosuchuser не существует")
+	}
+	if settled != nil {
+		t.Errorf("при отказе итог возвращаться не должен: %v", settled)
 	}
 
 	var rejected *optionError
@@ -235,5 +256,44 @@ func TestPluralPicksTheRightForm(t *testing.T) {
 		if got := plural(n, "канал", "канала", "каналов"); got != want {
 			t.Errorf("plural(%d) = %q, want %q", n, got, want)
 		}
+	}
+}
+
+// Канал, уже сохранённый как «номер — название», повторно не спрашивается:
+// иначе на каждом запуске GoodGame отвечает по-разному и название в конфиге
+// начинает мигать.
+func TestApplyKeepsResolvedPairsAsTheyAre(t *testing.T) {
+	var hits int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hits++
+		w.Write([]byte(`{}`))
+	}))
+	defer server.Close()
+
+	previous := currentChannels()
+	t.Cleanup(func() { setChannels(previous) })
+
+	apiBase = server.URL
+	setChannels(nil)
+
+	values := map[string]any{"channels": []any{
+		map[string]any{"value": "53029", "label": "E.Wolf"},
+		map[string]any{"value": "5", "label": "miker"},
+	}}
+
+	settled, err := apply(context.Background(), values)
+	if err != nil {
+		t.Fatalf("apply: %v", err)
+	}
+	if hits != 0 {
+		t.Errorf("GoodGame спросили %d раз, а каналы уже были известны", hits)
+	}
+
+	got := settled["channels"].([]protocol.ChoiceValue)
+	if len(got) != 2 {
+		t.Fatalf("settled = %v, want 2", channelLabels(got))
+	}
+	if got[1].Label != "miker" {
+		t.Errorf("название = %q, want miker — его не должны менять", got[1].Label)
 	}
 }

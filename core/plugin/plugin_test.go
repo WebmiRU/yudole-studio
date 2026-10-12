@@ -110,11 +110,88 @@ func TestPluginDescribeAndConfigure(t *testing.T) {
 		t.Errorf("first option = %+v", info.Options[0])
 	}
 
-	if err := p.Configure(map[string]any{"nick": "vasya", "words": []any{"a"}}); err != nil {
+	if _, err := p.Configure(map[string]any{"nick": "vasya", "words": []any{"a"}}); err != nil {
 		t.Fatalf("Configure: %v", err)
 	}
 	if err := waitForLog(t, logs, "Hello from fake plugin"); err != nil {
 		t.Error(err)
+	}
+}
+
+// A plugin may answer an ack with the values it settled on: it turns a nickname
+// or a link into a channel id, and the config has to keep that, not the text
+// the user typed.
+const normalizePlugin = `#!/bin/sh
+echo '{"kind":"plugin.chat","payload":{"title":"Fake","version":"0.1.0","options":[{"key":"channels","type":"select/multiple","label":"Channels"}]}}'
+while IFS= read -r line; do
+  case "$line" in
+    *get_info*)
+      echo '{"kind":"plugin.chat","payload":{"title":"Fake","version":"0.1.0","options":[{"key":"channels","type":"select/multiple","label":"Channels"}]}}'
+      ;;
+    *set_options*) echo '{"kind":"ack","payload":{"values":{"channels":[{"value":"53029","label":"E.Wolf"}]}}}' ;;
+    *quit*)        echo '{"kind":"ack"}'; exit 0 ;;
+  esac
+done
+`
+
+func TestConfigureReturnsWhatThePluginSettledOn(t *testing.T) {
+	captureLog(t)
+
+	p, err := Start(context.Background(), "fake", fakePlugin(t, normalizePlugin))
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Stop() })
+
+	if _, err := p.Describe(); err != nil {
+		t.Fatalf("Describe: %v", err)
+	}
+
+	accepted, err := p.Configure(map[string]any{
+		"channels": []any{"https://goodgame.ru/E.Wolf"},
+	})
+	if err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+
+	got, ok := accepted["channels"].([]any)
+	if !ok || len(got) != 1 {
+		t.Fatalf("accepted channels = %#v, want one", accepted["channels"])
+	}
+	entry, ok := got[0].(map[string]any)
+	if !ok {
+		t.Fatalf("accepted entry = %#v, want a pair", got[0])
+	}
+	if entry["value"] != "53029" || entry["label"] != "E.Wolf" {
+		t.Errorf("accepted entry = %v, want 53029/E.Wolf", entry)
+	}
+}
+
+// A plugin that does not bother normalizing just confirms: the kernel keeps what
+// the user sent.
+func TestConfigureKeepsValuesWhenThePluginSendsNone(t *testing.T) {
+	captureLog(t)
+
+	p, err := Start(context.Background(), "fake", fakePlugin(t, echoPlugin))
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Stop() })
+
+	if _, err := p.Describe(); err != nil {
+		t.Fatalf("Describe: %v", err)
+	}
+
+	sent := map[string]any{"nick": "vasya"}
+	accepted, err := p.Configure(sent)
+	if err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if accepted != nil {
+		t.Errorf("accepted = %v, want nil", accepted)
+	}
+	if merged(sent, accepted)["nick"] != "vasya" {
+		t.Errorf("merged lost the value the user sent: %v", merged(sent, accepted))
 	}
 }
 

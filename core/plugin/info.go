@@ -77,44 +77,52 @@ func (e *ValidationError) Error() string {
 	return "the plugin rejected the options"
 }
 
-// Configure sends the options to the plugin. Unknown keys are kept: they belong
-// to a plugin version that knows more than the current schema.
-func (p *Plugin) Configure(values map[string]any) error {
+// Configure sends the options to the plugin and returns the values the plugin
+// ended up with. A plugin may normalize them — turn a nickname or a link into a
+// channel id — and then the returned map is what belongs in the config.
+// Unknown keys are kept: they belong to a plugin version that knows more than
+// the current schema.
+func (p *Plugin) Configure(values map[string]any) (map[string]any, error) {
 	// Ответ снимет ожидание: и подтверждение, и отказ означают, что работа
 	// закончена.
 	defer p.setWaiting(false, "")
 
 	message, err := protocol.New(protocol.KindSetOptions, protocol.SetOptionsPayload{Values: values})
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if err := p.Send(message); err != nil {
-		return err
+		return nil, err
 	}
 
 	select {
 	case reply := <-p.repliesTo():
 		switch reply.Kind {
 		case protocol.KindAck:
-			return nil
+			var payload protocol.AckPayload
+			if err := reply.PayloadInto(&payload); err != nil {
+				// Подтверждение без читаемого содержимого — просто подтверждение.
+				return nil, nil
+			}
+			return payload.Values, nil
 		case protocol.KindError:
 			var payload protocol.ErrorPayload
 			if err := reply.PayloadInto(&payload); err != nil {
-				return fmt.Errorf("plugin %q refused the options and sent an unreadable reason", p.Name)
+				return nil, fmt.Errorf("plugin %q refused the options and sent an unreadable reason", p.Name)
 			}
 			if len(payload.Fields) > 0 {
-				return &ValidationError{
+				return nil, &ValidationError{
 					Message: payload.Message,
 					Fields:  payload.Fields,
 					Items:   payload.Items,
 				}
 			}
-			return fmt.Errorf("plugin %q refused the options: %s", p.Name, payload.Message)
+			return nil, fmt.Errorf("plugin %q refused the options: %s", p.Name, payload.Message)
 		default:
-			return fmt.Errorf("plugin %q answered set_options with %q", p.Name, reply.Kind)
+			return nil, fmt.Errorf("plugin %q answered set_options with %q", p.Name, reply.Kind)
 		}
 	case <-time.After(configureTimeout):
-		return fmt.Errorf("plugin %q did not confirm the options within %s", p.Name, configureTimeout)
+		return nil, fmt.Errorf("plugin %q did not confirm the options within %s", p.Name, configureTimeout)
 	}
 }
 

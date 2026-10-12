@@ -139,7 +139,8 @@ func handle(ctx context.Context, line string) bool {
 			sayError("cannot read the options: " + err.Error())
 			return false
 		}
-		if err := apply(ctx, payload.Values); err != nil {
+		settled, err := apply(ctx, payload.Values)
+		if err != nil {
 			// Настройки не приняты: ядро их не сохранит, а страница
 			// подсветит поля, на которые указывает Fields.
 			var rejected *optionError
@@ -150,10 +151,10 @@ func handle(ctx context.Context, line string) bool {
 			}
 			return false
 		}
-		sendAck()
+		sendAck(settled)
 
 	case protocol.KindQuit:
-		sendAck()
+		sendAck(nil)
 		return true
 
 	default:
@@ -163,22 +164,25 @@ func handle(ctx context.Context, line string) bool {
 }
 
 // apply проверяет настройки и, только если всё в порядке, берёт их в работу.
+// Возвращает то, с чем плагин работает на самом деле: человек мог ввести ник
+// или ссылку, а в конфиг должно лечь «номер — название», иначе при следующем
+// запуске придётся разрешать то же самое заново.
 //
 // Каналы, которые уже проверены и не менялись, повторно не спрашиваем у
 // GoodGame: это и медленно, и результат всё равно тот же.
-func apply(ctx context.Context, values map[string]any) error {
+func apply(ctx context.Context, values map[string]any) (map[string]any, error) {
 	if values == nil {
-		return nil
+		return nil, nil
 	}
 
 	raw, ok := values["channels"]
 	if !ok {
-		return nil
+		return nil, nil
 	}
 
 	list, ok := raw.([]any)
 	if !ok {
-		return &optionError{fields: map[string]string{
+		return nil, &optionError{fields: map[string]string{
 			"channels": "ожидался список каналов",
 		}}
 	}
@@ -199,6 +203,10 @@ func apply(ctx context.Context, values map[string]any) error {
 				continue
 			}
 			entry := protocol.ChoiceValue{Value: value, Label: label}
+			// Ключи — и результат, и то, что человек ввёл: ссылка
+			// «https://goodgame.ru/E.Wolf» сама в себя не превращается,
+			// и по одному только результату её потом не найти.
+			resolved[input] = entry
 			resolved[value] = entry
 			resolved[label] = entry
 		}
@@ -207,7 +215,7 @@ func apply(ctx context.Context, values map[string]any) error {
 	if len(bad) > 0 {
 		// Каждая проблемная запись подписана своим текстом — повторять их
 		// здесь списком незачем, хватит самого количества.
-		return &optionError{
+		return nil, &optionError{
 			fields: map[string]string{
 				"channels": fmt.Sprintf("Не удалось добавить %s", plural(len(bad), "канал", "канала", "каналов")),
 			},
@@ -237,7 +245,10 @@ func apply(ctx context.Context, values map[string]any) error {
 		sayLog(fmt.Sprintf("каналов без изменений: %d, проверено заново: %d", reused, len(todo)))
 	}
 	sayLog(fmt.Sprintf("following %d channels: %s", len(next), strings.Join(channelLabels(next), ", ")))
-	return nil
+
+	// Ядро сохранит именно это: номер канала и его название, а не то, что
+	// человек набрал в поле.
+	return map[string]any{"channels": next}, nil
 }
 
 // resolveKnown раскладывает вход по полам: то, что уже знаем, берём из
@@ -261,9 +272,46 @@ func resolveKnown(list []any) (resolved map[string]protocol.ChoiceValue, reused 
 			reused++
 			continue
 		}
+
+		// Пара «номер — название» — это уже проверенный канал: он приходит
+		// из конфига, куда его положил сам плагин. Спрашивать GoodGame
+		// заново незачем, а его название может в любой момент сменить
+		// написание — и конфиг начнёт дёргаться на каждом запуске.
+		if entry, ok := knownPair(item); ok {
+			resolved[entry.Value] = entry
+			resolved[entry.Label] = entry
+			resolved[input] = entry
+			reused++
+			continue
+		}
+
 		todo = append(todo, input)
 	}
 	return resolved, reused, todo
+}
+
+// knownPair достаёт канал из пары, которую когда-то уже разрешили: номер
+// канала плюс его название. Голое число или строка — это то, что человек ввёл
+// сам, такие проверять надо.
+func knownPair(item any) (protocol.ChoiceValue, bool) {
+	entry, ok := item.(map[string]any)
+	if !ok {
+		choice, isPair := item.(protocol.ChoiceValue)
+		if !isPair {
+			return protocol.ChoiceValue{}, false
+		}
+		entry = map[string]any{"value": choice.Value, "label": choice.Label}
+	}
+
+	value, _ := entry["value"].(string)
+	label, _ := entry["label"].(string)
+	value = strings.TrimSpace(value)
+	label = strings.TrimSpace(label)
+
+	if label == "" || label == value || !isChannelID(value) {
+		return protocol.ChoiceValue{}, false
+	}
+	return protocol.ChoiceValue{Value: value, Label: label}, true
 }
 
 // lookupResolved находит уже проверенный канал по тому, что прислали.
@@ -393,8 +441,10 @@ func send(kind string, payload any) {
 	os.Stdout.Write(line)
 }
 
-func sendAck() {
-	send(protocol.KindAck, protocol.AckPayload{})
+// sendAck подтверждает, что настройки приняты. Если плагин что-то привёл к
+// своему виду, он кладёт итог в values — ядро сохранит именно его.
+func sendAck(values map[string]any) {
+	send(protocol.KindAck, protocol.AckPayload{Values: values})
 }
 
 func sayLog(text string) {

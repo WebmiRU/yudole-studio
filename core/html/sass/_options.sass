@@ -513,10 +513,12 @@ select.input--invalid
   text-align: center
   color: tokens.$text-faint
 
+// Снизу справа живут кнопки формы, поэтому тост показываем сверху: сообщение
+// не должно закрывать то, ради чего человек нажал «Сохранить».
 .toast
   position: fixed
+  top: 24px
   right: 24px
-  bottom: 24px
   padding: 11px 16px
   border: 1px solid tokens.$border-hi
   border-radius: tokens.$radius-sm
