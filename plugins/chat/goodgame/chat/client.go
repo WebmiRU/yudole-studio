@@ -42,8 +42,6 @@ type Client struct {
 	endpoint string
 
 	writeMu sync.Mutex
-	// unjoinMu держит выходы по одному: ответ на них не называет канал.
-	unjoinMu sync.Mutex
 
 	mu      sync.Mutex
 	waiters []*waiter
@@ -329,35 +327,21 @@ func (c *Client) Join(ctx context.Context, id ID) (*Join, error) {
 	return &joined, nil
 }
 
-// Unjoin leaves a channel.
+// Unjoin leaves a channel. It counts as done the moment the message is sent.
 //
-// Ответ на выход приходит совсем без номера канала:
+// Подтверждения тут нет, и ждать его нельзя: сервер отвечает на выход
+// «{"success":true}» вообще без номера канала, так что ответ невозможно
+// отнести к нашему запросу. Поэтому успех — это отправка, а что скажет сервер
+// потом, придёт отдельным сообщением и никого не касается.
 //
-//	{"type":"unjoin","data":{"success":true}}
-//
-// так что опознать его можно только по типу, и два выхода одновременно стали бы
-// неразличимы. Поэтому выходы идут по одному — ответы по соединению всё равно
-// приходят по порядку.
+// Возвращается ошибка только если отправить не вышло: тогда мы остались в
+// канале и вызывающий вправе считать уход неудавшимся.
 func (c *Client) Unjoin(ctx context.Context, id ID) error {
-	c.unjoinMu.Lock()
-	defer c.unjoinMu.Unlock()
-
 	request, err := New("unjoin", UnjoinRequest{ChannelID: id})
 	if err != nil {
 		return err
 	}
-
-	reply, err := c.Do(ctx, request, func(m *Message) bool {
-		return m.Type == TypeUnjoin || m.Type == TypeError
-	})
-	if err != nil {
-		return err
-	}
-	if reply.Type == TypeError {
-		// Канал не повторяем: о выходе из какого и так известно вызывающему.
-		return serviceError(reply)
-	}
-	return nil
+	return c.Send(ctx, request)
 }
 
 // Channels asks for the list of channels, the busiest first.

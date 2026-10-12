@@ -25,6 +25,10 @@ type fakeChat struct {
 	refuse map[ID]bool
 	// greet is sent before the welcome, to check we do not read too early.
 	greet bool
+	// holdWelcome delays the welcome, to check we send nothing before it.
+	holdWelcome time.Duration
+	// order records what the service did and what it was sent, in order.
+	order *[]string
 	// UnjoinWithoutChannel makes the service answer the way it really does:
 	// without the channel id.
 	UnjoinWithoutChannel bool
@@ -59,61 +63,100 @@ func (f *fakeChat) serve(w http.ResponseWriter, r *http.Request) {
 		return conn.Write(r.Context(), websocket.MessageText, line) == nil
 	}
 
+	// Читать начинаем сразу, а приветствие шлём с задержкой. Иначе отправленное
+	// рано сообщение просто лежало бы в буфере до приветствия и проверка ничего
+	// не заметила бы.
+	greeted := make(chan struct{})
+	var greetedOnce sync.Once
+	markWelcomed := func() {
+		f.mu.Lock()
+		if f.order != nil {
+			*f.order = append(*f.order, "welcome")
+		}
+		f.mu.Unlock()
+		greetedOnce.Do(func() { close(greeted) })
+	}
+
+	reading := make(chan struct{})
+	go func() {
+		defer close(reading)
+		for {
+			_, data, err := conn.Read(r.Context())
+			if err != nil {
+				return
+			}
+			message, err := Decode(data)
+			if err != nil {
+				continue
+			}
+
+			f.mu.Lock()
+			f.received = append(f.received, message)
+			if f.order != nil {
+				*f.order = append(*f.order, "recv:"+message.Type)
+			}
+			f.mu.Unlock()
+
+			// До приветствия ничего не отвечаем: так и должно быть.
+			select {
+			case <-greeted:
+			case <-time.After(2 * time.Second):
+				return
+			}
+
+			f.mu.Lock()
+			refuse := f.refuse
+			f.mu.Unlock()
+
+			switch message.Type {
+			case "join":
+				var request JoinRequest
+				message.Into(&request)
+				if refuse[request.ChannelID] {
+					write(TypeError, Error{Channel: request.ChannelID, ErrorMsg: "канал закрыт"})
+					continue
+				}
+				write(TypeSuccessJoin, Join{
+					ChannelID:   request.ChannelID,
+					ChannelName: "канал " + string(request.ChannelID),
+					ChannelKey:  "streamer",
+					Clients:     12,
+					Users:       7,
+				})
+			case "unjoin":
+				f.mu.Lock()
+				bare := f.UnjoinWithoutChannel
+				f.mu.Unlock()
+				if bare {
+					// Именно так отвечает настоящий сервер: {"success":true}.
+					write(TypeUnjoin, map[string]any{"success": true})
+					continue
+				}
+				write(TypeUnjoin, Unjoined{Channel: ChannelOf(message), Success: true})
+			case "get_channels_list":
+				write(TypeChannelsList, ChannelsList{Channels: []Channel{
+					{ID: "53029", Name: "E.Wolf", Clients: 5, Users: 2},
+				}})
+			}
+		}
+	}()
+
 	f.mu.Lock()
 	greet := f.greet
+	hold := f.holdWelcome
 	f.mu.Unlock()
 
 	if greet {
 		write(TypeChannelInfo, ChannelInfo{Channel: "0"})
 	}
+	if hold > 0 {
+		// Задержка специально: успеем ли мы за это время куда-нибудь дёрнуться.
+		time.Sleep(hold)
+	}
+	markWelcomed()
 	write(TypeWelcome, Welcome{ProtocolVersion: 2})
 
-	for {
-		_, data, err := conn.Read(r.Context())
-		if err != nil {
-			return
-		}
-		message, err := Decode(data)
-		if err != nil {
-			continue
-		}
-
-		f.mu.Lock()
-		f.received = append(f.received, message)
-		refuse := f.refuse
-		f.mu.Unlock()
-
-		switch message.Type {
-		case "join":
-			var request JoinRequest
-			message.Into(&request)
-			if refuse[request.ChannelID] {
-				write(TypeError, Error{Channel: request.ChannelID, ErrorMsg: "канал закрыт"})
-				continue
-			}
-			write(TypeSuccessJoin, Join{
-				ChannelID:   request.ChannelID,
-				ChannelName: "канал " + string(request.ChannelID),
-				ChannelKey:  "streamer",
-				Clients:     12,
-				Users:       7,
-			})
-		case "unjoin":
-			f.mu.Lock()
-			bare := f.UnjoinWithoutChannel
-			f.mu.Unlock()
-			if bare {
-				// Именно так отвечает настоящий сервер: {"success":true}.
-				write(TypeUnjoin, map[string]any{"success": true})
-				continue
-			}
-			write(TypeUnjoin, Unjoined{Channel: ChannelOf(message), Success: true})
-		case "get_channels_list":
-			write(TypeChannelsList, ChannelsList{Channels: []Channel{
-				{ID: "53029", Name: "E.Wolf", Clients: 5, Users: 2},
-			}})
-		}
-	}
+	<-reading
 }
 
 // Refuse makes the service turn the channel down.
@@ -427,4 +470,52 @@ func TestUnjoinAcceptsReplyWithoutChannel(t *testing.T) {
 	if elapsed := time.Since(start); elapsed > 2*time.Second {
 		t.Errorf("выход занял %v — значит, ответ не узнали и ждали таймаут", elapsed)
 	}
+}
+
+// До приветствия не отправляем в сокет ничего: сервер ещё не сказал, что он
+// готов и какой версии протокол, а мы бы уже лезли со своими командами.
+//
+// Проверяем порядком у сервиса: приветствие он шлёт с задержкой, так что всё,
+// что пришло бы раньше, оказалось бы в списке до пометки "welcome".
+func TestNothingIsSentBeforeWelcome(t *testing.T) {
+	fake := newFakeChat(t)
+
+	var order []string
+	fake.mu.Lock()
+	fake.holdWelcome = 250 * time.Millisecond
+	fake.order = &order
+	fake.mu.Unlock()
+
+	client := openFake(t, fake)
+
+	// Сразу после приветствия шлём команду — как это делает плагин.
+	if _, err := client.Join(context.Background(), "53029"); err != nil {
+		t.Fatalf("Join: %v", err)
+	}
+	if !waitFor(2*time.Second, func() bool {
+		fake.mu.Lock()
+		defer fake.mu.Unlock()
+		return len(fake.received) > 0
+	}) {
+		t.Fatal("сервис ничего не получил")
+	}
+
+	fake.mu.Lock()
+	got := append([]string(nil), order...)
+	fake.mu.Unlock()
+
+	if len(got) == 0 || got[0] != "welcome" {
+		t.Fatalf("порядок = %v, want сначала welcome", got)
+	}
+}
+
+func waitFor(timeout time.Duration, condition func() bool) bool {
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		if condition() {
+			return true
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+	return false
 }

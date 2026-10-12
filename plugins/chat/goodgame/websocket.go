@@ -214,6 +214,8 @@ func (s *socket) sync(ctx context.Context, client *chat.Client, live map[chat.ID
 		return out
 	}
 
+	// Выход засчитывается по отправке: подтверждения сервер не даёт. Не
+	// отправилось — значит, мы в канале остались, и это уже неудача.
 	for _, id := range ready(unjoin) {
 		if err := client.Unjoin(ctx, id); err != nil {
 			s.say(fmt.Sprintf("канал %s: %v", id, err))
@@ -311,6 +313,12 @@ func (s *socket) forward(message *chat.Message) {
 			MessageID: string(removed.MessageID),
 			By:        removed.AdminName,
 		})
+
+	case chat.TypeUnjoin:
+		// Ответ на наш выход. Номера канала в нём нет, так что отнести его к
+		// конкретному запросу нельзя: выход уже засчитан по отправке, и это
+		// сообщение ничего не меняет.
+		s.say("GoodGame: подтвердил выход из канала")
 
 	// Сервер шлёт счётчики в каждый наш канал каждые секунд двадцать. Сами по
 	// себе они сейчас никому не нужны — но разбирать их мы уже умеем, чтобы
