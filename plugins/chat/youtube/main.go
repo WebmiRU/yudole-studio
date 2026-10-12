@@ -537,12 +537,30 @@ func waitForChange(ctx context.Context) {
 
 func runConfiguration(ctx context.Context, config settings) error {
 	emitConnection(protocol.ConnectionConnecting, "Проверяю канал YouTube", 0)
-	channelID, channelTitle, err := resolveChannel(ctx, config.APIKey, config.Channel)
-	if err != nil {
+	var channelID, channelTitle string
+	var err error
+	for resolveAttempt := 0; resolveAttempt < 4; resolveAttempt++ {
+		channelID, channelTitle, err = resolveChannel(ctx, config.APIKey, config.Channel)
+		if err == nil {
+			break
+		}
 		if ctx.Err() != nil {
 			return errSettingsChanged
 		}
-		return err
+		if errors.Is(err, errChannelNotFound) {
+			return err
+		}
+		var apiErr *apiError
+		if errors.As(err, &apiErr) && apiErr.Permanent() {
+			return err
+		}
+		if resolveAttempt == 3 {
+			return fmt.Errorf("не удалось разрешить YouTube-канал после нескольких попыток: %w", err)
+		}
+		logInfo(fmt.Sprintf("Не удалось получить ID канала (попытка %d/4): %v", resolveAttempt+1, err))
+		if !waitInterval(ctx, searchInterval) {
+			return errSettingsChanged
+		}
 	}
 	if channelTitle == "" {
 		channelTitle = config.Channel
@@ -732,6 +750,7 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 				}
 				if permanentGRPCError(recvErr) {
 					if status.Code(recvErr) == codes.NotFound ||
+						status.Code(recvErr) == codes.FailedPrecondition ||
 						strings.Contains(strings.ToLower(recvErr.Error()), "ended") ||
 						strings.Contains(strings.ToLower(recvErr.Error()), "disabled") {
 						return errChatEnded
@@ -745,11 +764,9 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			if response.GetOfflineAt() != "" {
 				return errChatEnded
 			}
-			// Keep the latest non-empty token for recovery after a network break.
-			// An empty token is not a reason to close the live stream.
-			if next := response.GetNextPageToken(); next != "" {
-				pageToken = next
-			}
+			// Save the continuation token so the stream can resume after a break.
+			// The official client reconnects when the server has no nextPageToken.
+			pageToken = response.GetNextPageToken()
 			for _, item := range response.GetItems() {
 				if item == nil || !remember(item.GetId()) {
 					continue
@@ -761,6 +778,9 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 					item.GetSnippet().GetType() == ytproto.LiveChatMessageSnippet_TypeWrapper_CHAT_ENDED_EVENT {
 					return errChatEnded
 				}
+			}
+			if pageToken == "" {
+				break
 			}
 		}
 
@@ -863,7 +883,7 @@ func emitChatMessage(channel string, message *ytproto.LiveChatMessage) error {
 
 func permanentGRPCError(err error) bool {
 	switch status.Code(err) {
-	case codes.InvalidArgument, codes.Unauthenticated, codes.PermissionDenied, codes.NotFound, codes.ResourceExhausted:
+	case codes.InvalidArgument, codes.Unauthenticated, codes.PermissionDenied, codes.NotFound, codes.FailedPrecondition:
 		return true
 	default:
 		return false
