@@ -74,20 +74,91 @@ func TestParseChannelRef(t *testing.T) {
 	}
 }
 
+// Ссылка на канал и ссылка на стрим — разные вещи, и плагин обязан их различать:
+// канал надо искать, а к стриму идут сразу.
+func TestParseChannelRefTellsChannelFromVideo(t *testing.T) {
+	videos := []string{
+		"https://www.youtube.com/watch?v=l00tBimYE0U",
+		"https://youtube.com/watch?v=l00tBimYE0U&t=42s",
+		"https://m.youtube.com/watch?v=l00tBimYE0U",
+		"https://youtu.be/l00tBimYE0U",
+		"l00tBimYE0U",
+	}
+	for _, input := range videos {
+		ref, err := parseChannelRef(input)
+		if err != nil {
+			t.Errorf("разбор %q: %v", input, err)
+			continue
+		}
+		if ref.Video != "l00tBimYE0U" {
+			t.Errorf("%q распознан не как стрим: %#v", input, ref)
+		}
+	}
+
+	channels := []string{
+		"https://www.youtube.com/@digitalmediacorp",
+		"@digitalmediacorp",
+		"https://www.youtube.com/channel/UCho7zQ31MRzmku1VmXYT_4Q",
+		"UCho7zQ31MRzmku1VmXYT_4Q",
+	}
+	for _, input := range channels {
+		ref, err := parseChannelRef(input)
+		if err != nil {
+			t.Errorf("разбор %q: %v", input, err)
+			continue
+		}
+		if ref.Video != "" {
+			t.Errorf("%q принят за стрим: %#v", input, ref)
+		}
+	}
+}
+
+// Каналов и стримов может быть сколько угодно: эфир иногда идёт двумя
+// трансляциями сразу — обычно короткой и обычной.
+func TestParseSettingsKeepsEveryTarget(t *testing.T) {
+	got, fields := parseSettings(map[string]any{
+		"api_key": "",
+		"channel": []any{
+			"https://www.youtube.com/@digitalmediacorp",
+			"https://www.youtube.com/watch?v=l00tBimYE0U",
+			"@digitalmediacorp", // повтор — должен отсеяться
+		},
+	})
+	if len(fields) != 0 {
+		t.Fatalf("ошибки: %#v", fields)
+	}
+	if len(got.Targets) != 2 {
+		t.Fatalf("целей %d, want 2: %#v", len(got.Targets), got.Targets)
+	}
+	if got.Targets[0].video != "" {
+		t.Error("первая цель должна быть каналом")
+	}
+	if got.Targets[1].video != "l00tBimYE0U" {
+		t.Errorf("вторая цель должна быть стримом: %#v", got.Targets[1])
+	}
+
+	if got := directVideos(got.Targets); len(got) != 1 || got[0] != "l00tBimYE0U" {
+		t.Errorf("directVideos = %v", got)
+	}
+}
+
 func TestParseSettingsDoesNotRequireFutureAPIKey(t *testing.T) {
-	got, fields := parseSettings(map[string]any{"api_key": "", "channel": ""})
+	got, fields := parseSettings(map[string]any{"api_key": "", "channel": []any{}})
 	if len(fields) != 0 {
 		t.Fatalf("unexpected validation errors: %#v", fields)
 	}
-	if got.APIKey != "" || got.Channel != "" {
+	if got.APIKey != "" || len(got.Targets) != 0 {
 		t.Fatalf("blank settings changed unexpectedly: %#v", got)
+	}
+	if !got.Fallback {
+		t.Error("резервное чтение должно быть включено по умолчанию")
 	}
 }
 
 func TestParseSettingsNormalizesChannelAndAPIKey(t *testing.T) {
 	got, fields := parseSettings(map[string]any{
 		"api_key": "  test-key  ",
-		"channel": "https://www.youtube.com/@Paradoxlivechannel/live",
+		"channel": []any{"https://www.youtube.com/@Paradoxlivechannel/live"},
 	})
 	if len(fields) != 0 {
 		t.Fatalf("unexpected validation errors: %#v", fields)
@@ -95,8 +166,8 @@ func TestParseSettingsNormalizesChannelAndAPIKey(t *testing.T) {
 	if got.APIKey != "test-key" {
 		t.Fatalf("API key was not trimmed: %q", got.APIKey)
 	}
-	if got.Channel != "@Paradoxlivechannel" {
-		t.Fatalf("channel was not normalized: %q", got.Channel)
+	if len(got.Targets) != 1 || got.Targets[0].label != "@Paradoxlivechannel" {
+		t.Fatalf("channel was not normalized: %#v", got.Targets)
 	}
 }
 
@@ -160,7 +231,7 @@ func TestResolveChannelAndFindActiveLives(t *testing.T) {
 			}
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"items": []any{map[string]any{
-					"id": channelID,
+					"id":      channelID,
 					"snippet": map[string]any{"title": "Paradox Live"},
 				}},
 			})
@@ -173,11 +244,11 @@ func TestResolveChannelAndFindActiveLives(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"items": []any{
 					map[string]any{
-						"id": map[string]any{"videoId": "video-with-chat"},
+						"id":      map[string]any{"videoId": "video-with-chat"},
 						"snippet": map[string]any{"title": "Live now"},
 					},
 					map[string]any{
-						"id": map[string]any{"videoId": "video-without-chat"},
+						"id":      map[string]any{"videoId": "video-without-chat"},
 						"snippet": map[string]any{"title": "Chat disabled"},
 					},
 				},
@@ -186,13 +257,13 @@ func TestResolveChannelAndFindActiveLives(t *testing.T) {
 			_ = json.NewEncoder(w).Encode(map[string]any{
 				"items": []any{
 					map[string]any{
-						"id": "video-with-chat",
-						"snippet": map[string]any{"title": "Live now"},
+						"id":                   "video-with-chat",
+						"snippet":              map[string]any{"title": "Live now"},
 						"liveStreamingDetails": map[string]any{"activeLiveChatId": "chat-123"},
 					},
 					map[string]any{
-						"id": "video-without-chat",
-						"snippet": map[string]any{"title": "Chat disabled"},
+						"id":                   "video-without-chat",
+						"snippet":              map[string]any{"title": "Chat disabled"},
 						"liveStreamingDetails": map[string]any{},
 					},
 				},

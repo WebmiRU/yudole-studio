@@ -31,21 +31,29 @@ import (
 )
 
 const (
-	grpcTarget       = "dns:///youtube.googleapis.com:443"
-	searchInterval   = time.Minute
-	maxSearchAttempts = 60
-	requestTimeout   = 20 * time.Second
-	maxChatBackoff   = time.Minute
+	grpcTarget     = "dns:///youtube.googleapis.com:443"
+	searchInterval = time.Minute
+	requestTimeout = 20 * time.Second
+	maxChatBackoff = time.Minute
 )
 
 var (
-	apiBase = "https://www.googleapis.com/youtube/v3/"
+	apiBase            = "https://www.googleapis.com/youtube/v3/"
 	errSettingsChanged = errors.New("настройки YouTube изменились")
 	errSearchExhausted = errors.New("активный эфир не найден за час")
-	errChatEnded = errors.New("live chat завершён или недоступен")
+	errChatEnded       = errors.New("live chat завершён или недоступен")
 	errChannelNotFound = errors.New("YouTube не нашёл канал по указанному @handle/ID")
-	channelIDPattern = regexp.MustCompile("^UC[A-Za-z0-9_-]{20,}$")
-	httpClient = &http.Client{Timeout: requestTimeout}
+	// errOfficialReadBroken — официальный поток открывается и тут же умирает,
+	// не отдав ни одного сообщения. Ключ тут ни при чём: чинить это можно
+	// только сменой пути чтения, и для этого есть резервный.
+	errOfficialReadBroken = errors.New("официальный поток live chat не отдаёт сообщений")
+
+	// maxStreamRestarts — сколько обрывов подряд терпим, прежде чем признать
+	// официальный путь нерабочим. Три попытки за полторы минуты: мигание сети
+	// обрывы дают, а вот «открылся и сразу умер» — это уже не сеть.
+	maxStreamRestarts = 3
+	channelIDPattern  = regexp.MustCompile("^UC[A-Za-z0-9_-]{20,}$")
+	httpClient        = &http.Client{Timeout: requestTimeout}
 )
 
 var options = []protocol.Option{
@@ -59,17 +67,43 @@ var options = []protocol.Option{
 	},
 	{
 		Key:         "channel",
-		Type:        protocol.OptionText,
-		Label:       "Канал YouTube",
+		Type:        protocol.OptionTextMultiple,
+		Label:       "Каналы и стримы YouTube",
 		Section:     "Канал",
-		Placeholder: "https://www.youtube.com/@Paradoxlivechannel",
-		Hint:        "Ссылка на канал, @handle или ID UC… Проверка эфира выполняется раз в минуту, максимум 60 раз.",
+		Placeholder: "https://www.youtube.com/@digitalmediacorp",
+		Hint:        "По строке: ссылка на канал, @handle, ID UC… или ссылка на конкретный стрим. Их может быть несколько — каналов и стримов поровну.",
+		Default:     []any{},
+	},
+	{
+		Key:     "fallback",
+		Type:    protocol.OptionBool,
+		Label:   "Резервное чтение без ключа",
+		Section: "Канал",
+		Hint:    "Если включено: работает без ключа и квоты — через внутренний API самого YouTube.",
+		Default: true,
 	},
 }
 
 type settings struct {
-	APIKey  string
-	Channel string
+	APIKey string
+	// Targets — всё, на что человек подписал плагин: каналы, которые надо
+	// ждать, и стримы, к которым надо идти сразу. Порядок сохраняется: он
+	// виден человеку в форме и должен совпадать с тем, что он написал.
+	Targets []target
+	// Fallback разрешает читать без ключа, когда официальный путь недоступен:
+	// ключ не введён, отозван или кончилась квота.
+	Fallback bool
+}
+
+// target is one line of the settings: либо канал, либо конкретный стрим.
+//
+// Разница не косметическая. Канал надо искать: он «очнётся» когда-нибудь сам,
+// и ждать приходится. Стрим уже известен — и искать нечего, к нему идут сразу,
+// хоть он и не в эфире: человек дал адрес и ждёт именно его.
+type target struct {
+	ref   channelRef
+	video string
+	label string
 }
 
 var (
@@ -85,8 +119,8 @@ func main() {
 
 	send(protocol.KindPluginChat, protocol.InfoPayload{
 		Title:       "YouTube",
-		Description: "Чат YouTube Live через официальный Data API и потоковый liveChatMessages.streamList.",
-		Version:     "0.1.0",
+		Description: "Чат YouTube Live: официальный Data API, а без ключа — внутренний API самого YouTube.",
+		Version:     "0.2.0",
 		Options:     options,
 	})
 
@@ -149,10 +183,15 @@ func handle(line string) bool {
 			return false
 		}
 		setSettings(next)
+		labels := make([]any, 0, len(next.Targets))
+		for _, t := range next.Targets {
+			labels = append(labels, t.label)
+		}
 		send(protocol.KindAck, protocol.AckPayload{
 			Values: map[string]any{
-				"api_key": next.APIKey,
-				"channel": next.Channel,
+				"api_key":  next.APIKey,
+				"channel":  labels,
+				"fallback": next.Fallback,
 			},
 		})
 
@@ -176,15 +215,48 @@ func parseSettings(values map[string]any) (settings, map[string]string) {
 		fields["api_key"] = "API key не должен содержать пробелы"
 	}
 
-	rawChannel, _ := values["channel"].(string)
-	rawChannel = strings.TrimSpace(rawChannel)
-	if rawChannel != "" {
-		channel, err := normalizeChannelInput(rawChannel)
+	// Список целей: в строке может быть и канал, и стрим — разбираем каждую
+	// строку отдельно, потому что ведут они себя по-разному.
+	rawList, _ := values["channel"].([]any)
+	seen := map[string]bool{}
+	for _, item := range rawList {
+		text := ""
+		switch entry := item.(type) {
+		case string:
+			text = entry
+		case map[string]any:
+			text, _ = entry["value"].(string)
+		case protocol.ChoiceValue:
+			text = entry.Value
+		}
+		text = strings.TrimSpace(text)
+		if text == "" {
+			continue
+		}
+
+		ref, err := parseChannelRef(text)
 		if err != nil {
 			fields["channel"] = err.Error()
-		} else {
-			next.Channel = channel
+			continue
 		}
+		if seen[ref.Normalized] {
+			continue
+		}
+		seen[ref.Normalized] = true
+
+		next.Targets = append(next.Targets, target{
+			ref:   ref,
+			video: ref.Video,
+			label: ref.Normalized,
+		})
+	}
+
+	// Резервное чтение — по умолчанию включено: без него плагин умирал бы
+	// вместе с ключом, а читать чат нужно всегда.
+	if flag, ok := values["fallback"].(bool); ok {
+		next.Fallback = flag
+	} else {
+		next.Fallback = true
 	}
 	return next, fields
 }
@@ -209,7 +281,14 @@ type channelRef struct {
 	Normalized string
 	Handle     string
 	ID         string
+	// Video is set when the address points at one concrete stream rather than a
+	// channel. Такой адрес не ищется: у него и так всё известно, и ждать, пока
+	// канал окажется в эфире, незачем.
+	Video string
 }
+
+// videoIDPattern узнаёт id трансляции в голом виде и в ссылке.
+var videoIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{11}$`)
 
 func validHandle(value string) bool {
 	length := utf8.RuneCountInString(value)
@@ -235,7 +314,12 @@ func normalizeChannelInput(raw string) (string, error) {
 func parseChannelRef(raw string) (channelRef, error) {
 	value := strings.TrimSpace(raw)
 	if value == "" {
-		return channelRef{}, errors.New("укажите ссылку на канал, @handle или ID канала UC…")
+		return channelRef{}, errors.New("укажите ссылку на канал или на стрим, @handle или ID канала UC…")
+	}
+
+	// Голый id видео — частый случай: его копируют из адресной строки.
+	if videoIDPattern.MatchString(value) {
+		return channelRef{Normalized: "https://www.youtube.com/watch?v=" + value, Video: value}, nil
 	}
 
 	if !strings.Contains(value, "://") &&
@@ -250,9 +334,17 @@ func parseChannelRef(raw string) (channelRef, error) {
 			return channelRef{}, errors.New("не удалось разобрать ссылку на канал")
 		}
 		host := strings.ToLower(parsed.Hostname())
-		if host != "youtube.com" && host != "www.youtube.com" && host != "m.youtube.com" {
+		if host != "youtube.com" && host != "www.youtube.com" && host != "m.youtube.com" &&
+			host != "youtu.be" && host != "www.youtu.be" {
 			return channelRef{}, errors.New("ожидалась ссылка на youtube.com")
 		}
+
+		// Ссылка на конкретный стрим. Такой адрес — не канал, а готовое видео:
+		// искать по нему нечего, к нему идут сразу.
+		if id := videoFromURL(parsed); id != "" {
+			return channelRef{Normalized: "https://www.youtube.com/watch?v=" + id, Video: id}, nil
+		}
+
 		parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
 		if len(parts) == 0 || parts[0] == "" {
 			return channelRef{}, errors.New("в ссылке не найден канал")
@@ -267,7 +359,10 @@ func parseChannelRef(raw string) (channelRef, error) {
 			}
 			return channelRef{Normalized: "@" + handle, Handle: handle}, nil
 		}
-		return channelRef{}, errors.New("используйте ссылку вида youtube.com/@handle или youtube.com/channel/UC…")
+		// Псевдонимы /c/имя и /user/имя намеренно не принимаем: это не @handle, и
+		// канал по такому имени может быть совсем другим. Считать их одним и тем
+		// же — значит тихо подписаться не на то.
+		return channelRef{}, errors.New("используйте ссылку на канал (@handle) или на стрим (watch?v=…)")
 	}
 
 	if channelIDPattern.MatchString(value) {
@@ -278,6 +373,29 @@ func parseChannelRef(raw string) (channelRef, error) {
 		return channelRef{}, errors.New("укажите корректный @handle YouTube или ID канала UC…")
 	}
 	return channelRef{Normalized: "@" + value, Handle: value}, nil
+}
+
+// videoFromURL достаёт id трансляции из адреса: и из youtube.com/watch?v=…, и из
+// короткого youtu.be/….
+func videoFromURL(u *url.URL) string {
+	host := strings.ToLower(u.Hostname())
+
+	if host == "youtu.be" || host == "www.youtu.be" {
+		id := strings.Trim(u.Path, "/")
+		if videoIDPattern.MatchString(id) {
+			return id
+		}
+		return ""
+	}
+
+	if u.Path != "/watch" && u.Path != "/watch/" {
+		return ""
+	}
+	id := u.Query().Get("v")
+	if !videoIDPattern.MatchString(id) {
+		return ""
+	}
+	return id
 }
 
 type apiError struct {
@@ -405,8 +523,8 @@ func findActiveLives(ctx context.Context, apiKey, channelID string) ([]liveVideo
 				VideoID string `json:"videoId"`
 			} `json:"id"`
 			Snippet struct {
-				Title       string `json:"title"`
-				ChannelID   string `json:"channelId"`
+				Title        string `json:"title"`
+				ChannelID    string `json:"channelId"`
 				ChannelTitle string `json:"channelTitle"`
 			} `json:"snippet"`
 		} `json:"items"`
@@ -437,7 +555,7 @@ func findActiveLives(ctx context.Context, apiKey, channelID string) ([]liveVideo
 	}
 	var videoResponse struct {
 		Items []struct {
-			ID string `json:"id"`
+			ID      string `json:"id"`
 			Snippet struct {
 				Title string `json:"title"`
 			} `json:"snippet"`
@@ -475,13 +593,11 @@ func supervise(ctx context.Context) {
 		drainChanges()
 		config := getSettings()
 
-		if config.APIKey == "" {
-			emitConnection(protocol.ConnectionOffline, "Укажите YouTube API key", 0)
-			waitForChange(ctx)
-			continue
-		}
-		if config.Channel == "" {
-			emitConnection(protocol.ConnectionOffline, "Укажите канал YouTube", 0)
+		// Ключ теперь необязателен: без него плагин читает резервным путём,
+		// и останавливать его незачем. Раньше здесь был просто выход с
+		// требованием ключа, и резервный путь был недостижим вовсе.
+		if len(config.Targets) == 0 {
+			emitConnection(protocol.ConnectionOffline, "Укажите канал или стрим YouTube", 0)
 			waitForChange(ctx)
 			continue
 		}
@@ -507,7 +623,12 @@ func supervise(ctx context.Context) {
 		// The configuration update may race with a completed search/stream
 		// and be consumed by the cancellation watcher. Compare the snapshot
 		// as well, so we never sleep waiting for an already-consumed signal.
-		if getSettings() != config {
+		// Список целей сравнить нельзя — это слайс, и структура с ним не сравнивается.
+		// Поэтому своё состояние сравниваем по ключу и по подпискам: того, что на
+		// самом деле решает, читаем ли мы то же самое, достаточно.
+		if sameTargets(getSettings(), config) {
+			// Ничего не изменилось: продолжаем ждать следующего эфира.
+		} else {
 			continue
 		}
 		if errors.Is(err, errSettingsChanged) {
@@ -547,80 +668,90 @@ func waitForChange(ctx context.Context) {
 }
 
 func runConfiguration(ctx context.Context, config settings) error {
-	emitConnection(protocol.ConnectionConnecting, "Проверяю канал YouTube", 0)
-	var channelID, channelTitle string
-	var err error
-	for resolveAttempt := 0; resolveAttempt < 4; resolveAttempt++ {
-		channelID, channelTitle, err = resolveChannel(ctx, config.APIKey, config.Channel)
+	// Ключ может быть не вписан, отозван или исчерпал квота — во всех трёх
+	// случаях работаем, просто без него. Решает watcher, а не этот код.
+	w := newWatcher(config.APIKey, "")
+	w.allowFallback = config.Fallback
+
+	// Стримы, указанные адресом, читаем сразу: искать по адресу нечего, человек
+	// уже сказал, какой именно. Каналы — ждём, пока проснутся.
+	direct := directVideos(config.Targets)
+	if len(direct) > 0 {
+		logInfo("Стримы указаны адресом, иду сразу без поиска: " + strings.Join(direct, ", "))
+		w.channel = direct[0]
+		w.title = "YouTube"
+		return w.watchDirect(ctx, direct)
+	}
+
+	if len(config.Targets) == 0 {
+		return errChannelNotFound
+	}
+
+	channelID, channelTitle, err := w.resolveAll(ctx, config.Targets)
+	if err != nil {
+		return err
+	}
+	w.title = channelTitle
+	if channelTitle == "" {
+		w.title = firstLabel(config.Targets)
+	}
+	logInfo(fmt.Sprintf("Канал YouTube разрешён: %s (%s), чтение: %s", w.title, channelID, w))
+
+	// Поиск ведёт watcher: он сам решит, официальным способом или резервным, и
+	// переключится, если с ключом что-то не так.
+	for {
+		lives, err := w.searchLoop(ctx)
 		if err == nil {
-			break
+			logInfo(fmt.Sprintf("Найдено активных чатов YouTube: %d (чтение: %s)", len(lives), w))
+			return w.watch(ctx, lives)
 		}
-		if ctx.Err() != nil {
+		if errors.Is(err, errSettingsChanged) || ctx.Err() != nil {
 			return errSettingsChanged
+		}
+		if errors.Is(err, errNoLive) {
+			emitConnection(protocol.ConnectionOffline,
+				"Эфир не найден. Канал молчит — поиск продолжится автоматически.", 0)
+			return errSearchExhausted
 		}
 		if errors.Is(err, errChannelNotFound) {
 			return err
 		}
-		var apiErr *apiError
-		if errors.As(err, &apiErr) && apiErr.Permanent() {
-			return err
-		}
-		if resolveAttempt == 3 {
-			return fmt.Errorf("не удалось разрешить YouTube-канал после нескольких попыток: %w", err)
-		}
-		logInfo(fmt.Sprintf("Не удалось получить ID канала (попытка %d/4): %v", resolveAttempt+1, err))
+		logInfo("Поиск эфира не удался: " + err.Error())
 		if !waitInterval(ctx, searchInterval) {
 			return errSettingsChanged
 		}
 	}
-	if channelTitle == "" {
-		channelTitle = config.Channel
-	}
-	logInfo(fmt.Sprintf("Канал YouTube разрешён: %s (%s)", channelTitle, channelID))
+}
 
-	searchStarted := time.Now()
-	for attempt := 1; attempt <= maxSearchAttempts; attempt++ {
-		if ctx.Err() != nil {
-			return errSettingsChanged
-		}
-		if attempt > 1 && time.Since(searchStarted) >= time.Hour {
-			break
-		}
-
-		lives, err := findActiveLives(ctx, config.APIKey, channelID)
-		if err != nil {
-			if ctx.Err() != nil {
-				return errSettingsChanged
-			}
-			var apiErr *apiError
-			if errors.As(err, &apiErr) && apiErr.Permanent() {
-				return err
-			}
-			logInfo(fmt.Sprintf("Проверка эфира %d/%d не удалась: %v", attempt, maxSearchAttempts, err))
-		} else if len(lives) > 0 {
-			logInfo(fmt.Sprintf("Найдено активных чатов YouTube: %d", len(lives)))
-			return watchLiveChats(ctx, config.APIKey, config.Channel, channelTitle, lives)
-		} else {
-			logInfo(fmt.Sprintf("Активный эфир не найден: проверка %d/%d", attempt, maxSearchAttempts))
-		}
-
-		if attempt == maxSearchAttempts || time.Since(searchStarted) >= time.Hour {
-			emitConnection(protocol.ConnectionOffline, "Эфир не найден за час поиска. Поиск остановлен до изменения настроек.", attempt)
-			return errSearchExhausted
-		}
-		// Start subsequent searches on minute boundaries, rather than one full
-		// minute after each HTTP response, so the search window stays near an hour.
-		nextSearchAt := searchStarted.Add(time.Duration(attempt) * searchInterval)
-		delay := time.Until(nextSearchAt)
-		if delay < 0 {
-			delay = 0
-		}
-		if !waitInterval(ctx, delay) {
-			return errSettingsChanged
+// directVideos — из списка целей те, что оказались ссылками на стрим.
+func directVideos(targets []target) []string {
+	var out []string
+	for _, t := range targets {
+		if t.video != "" {
+			out = append(out, t.video)
 		}
 	}
-	emitConnection(protocol.ConnectionOffline, "Эфир не найден за час поиска. Поиск остановлен до изменения настроек.", maxSearchAttempts)
-	return errSearchExhausted
+	return out
+}
+
+func firstLabel(targets []target) string {
+	if len(targets) == 0 {
+		return ""
+	}
+	return targets[0].label
+}
+
+// sameTargets сравнивает настройки по тому, что на самом деле влияет на чтение.
+func sameTargets(a, b settings) bool {
+	if a.APIKey != b.APIKey || a.Fallback != b.Fallback || len(a.Targets) != len(b.Targets) {
+		return false
+	}
+	for i := range a.Targets {
+		if a.Targets[i].label != b.Targets[i].label || a.Targets[i].video != b.Targets[i].video {
+			return false
+		}
+	}
+	return true
 }
 
 func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, lives []liveVideo) error {
@@ -734,6 +865,16 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 		return true
 	}
 
+	// restarts считает обрывы подряд, а gotAny — отдал ли поток хоть что-то.
+	// Вместе они отличают «поток мигнул и умер» от обычных переподключений:
+	// второе чинится повтором, первое — только сменой пути чтения.
+	restarts := 0
+	gotAny := false
+
+	// brokeTooOften — поток рвался много раз и не отдал ни одного сообщения.
+	// Ключ и квота тут ни при чём: дальше повторять бессмысленно.
+	brokeTooOften := func() bool { return !gotAny && restarts >= maxStreamRestarts }
+
 	for {
 		if ctx.Err() != nil {
 			return errSettingsChanged
@@ -764,6 +905,10 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 				return errSettingsChanged
 			}
 			attempt++
+			restarts++
+			if brokeTooOften() {
+				return fmt.Errorf("%w: %v", errOfficialReadBroken, err)
+			}
 			continue
 		}
 
@@ -786,8 +931,13 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 				}
 				logInfo("Соединение с чатом потеряно, восстанавливаю поток: " + recvErr.Error())
 				emitConnection(protocol.ConnectionReconnecting, "Восстанавливаю поток YouTube live chat", attempt+1)
+				restarts++
+				if brokeTooOften() {
+					return fmt.Errorf("%w: обрыв %v", errOfficialReadBroken, recvErr)
+				}
 				break
 			}
+			gotAny = true
 			received = true
 			if !connectedReported {
 				onConnected()
