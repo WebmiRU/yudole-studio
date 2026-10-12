@@ -36,6 +36,14 @@ func TestParseChannelRef(t *testing.T) {
 			normalized: "@Paradoxlivechannel", handle: "Paradoxlivechannel",
 		},
 		{
+			name: "URL without scheme", input: "www.youtube.com/@Paradoxlivechannel",
+			normalized: "@Paradoxlivechannel", handle: "Paradoxlivechannel",
+		},
+		{
+			name: "Unicode handle", input: "@ТестовыйКанал",
+			normalized: "@ТестовыйКанал", handle: "ТестовыйКанал",
+		},
+		{
 			name: "channel ID", input: "UC1234567890123456789012",
 			normalized: "UC1234567890123456789012", id: "UC1234567890123456789012",
 		},
