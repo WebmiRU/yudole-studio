@@ -330,12 +330,20 @@ function renderBody(plugin) {
 // renderButton is an action: нажали — ядро отдало команду плагину. Пока плагин
 // занят, кнопка не нажимается ещё раз.
 function renderButton(plugin, button) {
+    // Занятость берём и у себя (наш клик), и у плагина: он сам сообщает через
+    // waiting, пока занят. Иначе обновление, начатое не этой страницей —
+    // curl'ом или со второй вкладки — кнопку бы не погасила.
+    const busy = state.running === button.kind || Boolean(plugin.waiting);
+    const children = busy
+        ? [el('span', {class: 'spinner', 'aria-hidden': 'true'}), button.title]
+        : [button.title];
+
     const node = el('button', {
         type: 'button',
         class: 'btn btn--action',
         'data-action': button.kind,
-        disabled: !plugin.enabled || state.running === button.kind,
-    }, [button.title]);
+        disabled: !plugin.enabled || busy,
+    }, children);
 
     node.addEventListener('click', () => runAction(plugin, button));
 
@@ -343,17 +351,25 @@ function renderButton(plugin, button) {
     if (button.hint) {
         row.append(el('p', {class: 'action__hint'}, [button.hint]));
     }
+    if (plugin.waiting && plugin.waitingText) {
+        row.append(el('p', {class: 'action__busy'}, [plugin.waitingText]));
+    }
     return row;
 }
 
 // runAction asks the kernel to forward the command to the plugin. Ждём ответа:
 // команда может быть долгой, и страница должна показать, что идёт дело.
 async function runAction(plugin, button) {
-    if (state.running) {
+    if (state.running || selected()?.waiting) {
         return;
     }
     state.running = button.kind;
     render();
+
+    // Плагин сам говорит, пока занят, но страница должна его спрашивать: вне
+    // сохранения она этого не делает, и без опроса кнопка погасла бы только
+    // по нашему клику.
+    const poll = setInterval(refreshWaiting, 700);
 
     try {
         await api(`${API}/${plugin.id}/actions`, {
@@ -368,6 +384,7 @@ async function runAction(plugin, button) {
     } catch (error) {
         toast(error.message);
     } finally {
+        clearInterval(poll);
         state.running = '';
         render();
     }
@@ -716,6 +733,13 @@ async function refreshWaiting() {
     if (!plugin) {
         return;
     }
+    // Два опроса не должны наезжать друг на друга: второй всё равно увидит
+    // устаревшее.
+    if (state.polling) {
+        return;
+    }
+    state.polling = true;
+
     try {
         const view = await api(`${API}/${plugin.id}`);
         replacePlugin(view);
@@ -723,7 +747,20 @@ async function refreshWaiting() {
         render();
     } catch {
         // Ядро не ответило: молча продолжаем ждать.
+    } finally {
+        state.polling = false;
     }
+}
+
+// keepWatching asks the kernel how the plugin is, so the page sees it get busy
+// even when the work was started elsewhere: второй страницей или из консоли.
+// Тихо и нечасто — чаще незачем.
+function keepWatching() {
+    setInterval(() => {
+        if (selected()) {
+            refreshWaiting();
+        }
+    }, 2000);
 }
 
 // showFieldErrors помечает поля, которые плагин не принял. Если плагин сказал,
@@ -866,6 +903,8 @@ function el(tag, attrs = {}, children = []) {
     node.append(...children);
     return node;
 }
+
+keepWatching();
 
 loadPlugins().then(render).catch((error) => {
     countEl.textContent = '0';
