@@ -380,9 +380,9 @@ async function runAction(plugin, button) {
         // его свежий вид.
         const view = await api(`${API}/${plugin.id}`);
         replacePlugin(view);
-        toast(`${plugin.title || plugin.id}: готово`);
+        toast(`${plugin.title || plugin.id}: готово`, 'success');
     } catch (error) {
-        toast(error.message);
+        toast(error.message, 'error');
     } finally {
         clearInterval(poll);
         state.running = '';
@@ -656,12 +656,12 @@ async function toggle(plugin, enabled) {
         replacePlugin(view);
 
         if (view.state === 'failed') {
-            toast(`${name}: ${view.problem ?? 'не запустился'}`);
+            toast(`${name}: ${view.problem ?? 'не запустился'}`, 'error');
         } else {
-            toast(`${name}: ${enabled ? 'включён' : 'выключен'}`);
+            toast(`${name}: ${enabled ? 'включён' : 'выключен'}`, 'success');
         }
     } catch (error) {
-        toast(`${name}: ${error.message}`);
+        toast(`${name}: ${error.message}`, 'error');
     } finally {
         state.busy.delete(plugin.id);
         render();
@@ -691,7 +691,7 @@ function save(plugin) {
     const invalid = validate(plugin);
     if (invalid) {
         invalid.querySelector('input, select, .tags__input')?.focus();
-        toast('Заполните обязательные поля');
+        toast('Заполните обязательные поля', 'warning');
         return;
     }
 
@@ -710,7 +710,7 @@ function save(plugin) {
         replacePlugin(view);
         state.fieldError = null;
         clearFieldErrors(plugin);
-        toast(`${plugin.title || plugin.id}: настройки сохранены`);
+        toast(`${plugin.title || plugin.id}: настройки сохранены`, 'success');
     }).catch((error) => {
         // Плагин сказал, что не так: помечаем сами поля и конкретные записи в
         // них. Всплывашку не показываем — она бы только отвлекла от сути.
@@ -719,7 +719,7 @@ function save(plugin) {
             showFieldErrors(plugin, error.fields, error.items);
             return;
         }
-        toast(error.message);
+        toast(error.message, 'error');
     }).finally(() => {
         clearInterval(poll);
         state.saving = false;
@@ -883,13 +883,30 @@ function pluginIdFromHash() {
 
 // --- Вспомогательное -------------------------------------------------------
 
-function toast(text) {
-    toastEl.textContent = text;
+// toast is a short-lived notice, and it looks like a message from the chat:
+// тот же блок, та же рамка слева, тот же текст. Вид и время жизни задаёт
+// вызывающий — «сохранилось» это не то же самое, что «не вышло».
+//
+// По умолчанию пять секунд: дольше — уже мешает, короче — не успевают прочесть.
+function toast(text, severity = 'info', seconds = 5) {
+    toastEl.dataset.severity = severity;
+    toastEl.replaceChildren(
+        el('span', {class: 'toast__text'}, [text]),
+        el('span', {class: 'toast__life', style: `--life: ${seconds}s`}),
+    );
+
     toastEl.hidden = false;
     clearTimeout(toastTimer);
+
+    // Полоску надо начинать заново, иначе анимация не перезапустится: без
+    // этого второй тост покажет остаток от предыдущего.
+    toastEl.classList.remove('is-shown');
+    void toastEl.offsetWidth;
+    toastEl.classList.add('is-shown');
+
     toastTimer = setTimeout(() => {
         toastEl.hidden = true;
-    }, 3000);
+    }, seconds * 1000);
 }
 
 function el(tag, attrs = {}, children = []) {
