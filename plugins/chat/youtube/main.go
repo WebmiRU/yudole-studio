@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"net"
 	"net/http"
 	"net/url"
 	"os"
@@ -30,7 +29,6 @@ import (
 )
 
 const (
-	apiBase          = "https://www.googleapis.com/youtube/v3/"
 	grpcTarget       = "dns:///youtube.googleapis.com:443"
 	searchInterval   = time.Minute
 	maxSearchAttempts = 60
@@ -39,6 +37,7 @@ const (
 )
 
 var (
+	apiBase = "https://www.googleapis.com/youtube/v3/"
 	errSettingsChanged = errors.New("настройки YouTube изменились")
 	errSearchExhausted = errors.New("активный эфир не найден за час")
 	errChatEnded       = errors.New("live chat завершён или недоступен")
