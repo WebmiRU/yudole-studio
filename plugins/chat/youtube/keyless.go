@@ -177,19 +177,41 @@ func keylessFindLives(ctx context.Context, channelID string) ([]liveVideo, error
 		order = order[:4]
 	}
 
+	// Проверяем несколько свежих видео параллельно. Последовательная проверка
+	// четырёх страниц добавляла задержки друг к другу: при медленном ответе
+	// YouTube первые сообщения могли ждать суммарное время всех запросов.
+	type pageResult struct {
+		page watchPage
+		err  error
+	}
+	pages := make([]pageResult, len(order))
+	var wg sync.WaitGroup
+	for i, id := range order {
+		i, id := i, id
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			pages[i].page, pages[i].err = keylessWatchPage(ctx, id)
+		}()
+	}
+	wg.Wait()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	lives := make([]liveVideo, 0, len(order))
-	for _, id := range order {
-		page, err := keylessWatchPage(ctx, id)
-		if err != nil {
-			logInfo(fmt.Sprintf("Страница %s не открылась: %v", id, err))
+	for i, id := range order {
+		result := pages[i]
+		if result.err != nil {
+			logInfo(fmt.Sprintf("Страница %s не открылась: %v", id, result.err))
 			continue
 		}
-		if !page.isLive {
+		if !result.page.isLive {
 			continue
 		}
 		title := titles[id]
 		if title == "" {
-			title = page.title
+			title = result.page.title
 		}
 		lives = append(lives, liveVideo{ID: id, Title: title})
 	}
