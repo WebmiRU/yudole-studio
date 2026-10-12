@@ -9,158 +9,233 @@ import (
 )
 
 type ircMessage struct {
-	Tags map[string]string
-	Prefix string
-	Command string
-	Params []string
+	Tags     map[string]string
+	Prefix   string
+	Command  string
+	Params   []string
 	Trailing string
 }
 
 func parseIRC(line string) (ircMessage, error) {
-	var m ircMessage
-	s := line
-	if strings.HasPrefix(s, "@") {
-		i := strings.IndexByte(s, ' ')
-		if i < 0 { return m, fmt.Errorf("IRC tags without command") }
-		m.Tags = parseTags(s[1:i])
-		s = strings.TrimLeft(s[i+1:], " ")
+	var message ircMessage
+	rest := line
+
+	if strings.HasPrefix(rest, "@") {
+		end := strings.IndexByte(rest, ' ')
+		if end < 0 {
+			return message, fmt.Errorf("IRC tags without command")
+		}
+		message.Tags = parseTags(rest[1:end])
+		rest = strings.TrimLeft(rest[end+1:], " ")
 	}
-	if strings.HasPrefix(s, ":") {
-		i := strings.IndexByte(s, ' ')
-		if i < 0 { return m, fmt.Errorf("IRC prefix without command") }
-		m.Prefix = s[1:i]
-		s = strings.TrimLeft(s[i+1:], " ")
+
+	if strings.HasPrefix(rest, ":") {
+		end := strings.IndexByte(rest, ' ')
+		if end < 0 {
+			return message, fmt.Errorf("IRC prefix without command")
+		}
+		message.Prefix = rest[1:end]
+		rest = strings.TrimLeft(rest[end+1:], " ")
 	}
-	if i := strings.Index(s, " :"); i >= 0 {
-		m.Trailing = s[i+2:]
-		s = s[:i]
+
+	if end := strings.Index(rest, " :"); end >= 0 {
+		message.Trailing = rest[end+2:]
+		rest = rest[:end]
 	}
-	fields := strings.Fields(s)
-	if len(fields) == 0 { return m, fmt.Errorf("empty IRC command") }
-	m.Command = strings.ToUpper(fields[0])
-	if len(fields) > 1 { m.Params = fields[1:] }
-	return m, nil
+
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return message, fmt.Errorf("empty IRC command")
+	}
+	message.Command = strings.ToUpper(fields[0])
+	if len(fields) > 1 {
+		message.Params = fields[1:]
+	}
+	return message, nil
 }
 
 func parseTags(raw string) map[string]string {
-	out := make(map[string]string)
+	tags := make(map[string]string)
 	for _, item := range strings.Split(raw, ";") {
-		k, v, ok := strings.Cut(item, "=")
-		if !ok { out[k] = ""; continue }
-		out[k] = unescapeTag(v)
+		key, value, found := strings.Cut(item, "=")
+		if !found {
+			tags[key] = ""
+			continue
+		}
+		tags[key] = unescapeTag(value)
 	}
-	return out
+	return tags
 }
 
-func unescapeTag(s string) string {
-	var b strings.Builder
-	for i := 0; i < len(s); i++ {
-		if s[i] != '\\' || i+1 >= len(s) { b.WriteByte(s[i]); continue }
+func unescapeTag(value string) string {
+	var out strings.Builder
+	for i := 0; i < len(value); i++ {
+		if value[i] != '\\' || i+1 >= len(value) {
+			out.WriteByte(value[i])
+			continue
+		}
+
 		i++
-		switch s[i] {
-		case 's': b.WriteByte(' ')
-		case ':': b.WriteByte(';')
-		case '\\': b.WriteByte('\\')
-		case 'r': b.WriteByte('\r')
-		case 'n': b.WriteByte('\n')
-		default: b.WriteByte(s[i])
+		switch value[i] {
+		case 's':
+			out.WriteByte(' ')
+		case ':':
+			out.WriteByte(';')
+		case '\\':
+			out.WriteByte('\\')
+		case 'r':
+			out.WriteByte('\r')
+		case 'n':
+			out.WriteByte('\n')
+		default:
+			out.WriteByte(value[i])
 		}
 	}
-	return b.String()
+	return out.String()
 }
 
 func userLogin(prefix string) string {
-	if i := strings.IndexByte(prefix, '!'); i >= 0 { return strings.ToLower(prefix[:i]) }
+	if end := strings.IndexByte(prefix, '!'); end >= 0 {
+		return strings.ToLower(prefix[:end])
+	}
 	return strings.ToLower(prefix)
 }
 
-func channelName(s string) string {
-	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(s), "#"))
+func channelName(value string) string {
+	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(value), "#"))
 }
 
-func validLogin(s string) bool {
-	if len(s) < 1 || len(s) > 25 { return false }
-	for _, r := range strings.ToLower(s) {
-		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_') { return false }
+func validLogin(value string) bool {
+	if len(value) < 1 || len(value) > 25 {
+		return false
+	}
+	for _, r := range strings.ToLower(value) {
+		if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '_') {
+			return false
+		}
 	}
 	return true
 }
 
 type emoteRange struct {
-	ID string
+	ID         string
 	Start, End int
 }
 
 // parseEmoteRanges parses Twitch's "emotes" IRCv3 tag. Offsets are inclusive
 // UTF-16 code-unit indexes; malformed ranges are ignored.
 func parseEmoteRanges(tag string) []emoteRange {
-	var out []emoteRange
+	var ranges []emoteRange
+
 	for _, group := range strings.Split(tag, "/") {
-		id, positions, ok := strings.Cut(group, ":")
-		if !ok || id == "" || !digitsOnly(id) { continue }
-		for _, pos := range strings.Split(positions, ",") {
-			a, b, ok := strings.Cut(pos, "-")
-			if !ok { continue }
-			start, e1 := strconv.Atoi(a)
-			end, e2 := strconv.Atoi(b)
-			if e1 == nil && e2 == nil && start >= 0 && end >= start {
-				out = append(out, emoteRange{ID:id, Start:start, End:end})
+		id, positions, found := strings.Cut(group, ":")
+		if !found || !digitsOnly(id) {
+			continue
+		}
+		for _, position := range strings.Split(positions, ",") {
+			startText, endText, found := strings.Cut(position, "-")
+			if !found {
+				continue
+			}
+			start, startErr := strconv.Atoi(startText)
+			end, endErr := strconv.Atoi(endText)
+			if startErr == nil && endErr == nil && start >= 0 && end >= start {
+				ranges = append(ranges, emoteRange{ID: id, Start: start, End: end})
 			}
 		}
 	}
-	return out
+
+	return ranges
 }
 
-func digitsOnly(s string) bool {
-	if s == "" { return false }
-	for _, r := range s {
-		if r < '0' || r > '9' { return false }
+func digitsOnly(value string) bool {
+	if value == "" {
+		return false
+	}
+	for _, r := range value {
+		if r < '0' || r > '9' {
+			return false
+		}
 	}
 	return true
 }
 
 // utf16Offset converts a UTF-16 code-unit offset into a UTF-8 byte offset.
 // Offsets splitting a surrogate pair are rejected rather than corrupting text.
-func utf16Offset(s string, target int) (int, bool) {
-	if target < 0 { return 0, false }
+func utf16Offset(value string, target int) (int, bool) {
+	if target < 0 {
+		return 0, false
+	}
+
 	units, bytes := 0, 0
-	if target == 0 { return 0, true }
-	for _, r := range s {
-		n := 1
-		if r > 0xffff { n = 2 }
-		if units == target { return bytes, true }
-		if units+n > target { return 0, false }
-		units += n
+	if target == 0 {
+		return 0, true
+	}
+
+	for _, r := range value {
+		width := 1
+		if r > 0xffff {
+			width = 2
+		}
+		if units == target {
+			return bytes, true
+		}
+		if units+width > target {
+			return 0, false
+		}
+		units += width
 		bytes += len(string(r))
 	}
+
 	return bytes, units == target
 }
 
 func renderEmotes(text, emotesTag string) string {
-	ranges := parseEmoteRanges(emotesTag)
-	type replacement struct { start, end int; markup string }
-	var rs []replacement
-	for _, r := range ranges {
-		start, ok1 := utf16Offset(text, r.Start)
-		end, ok2 := utf16Offset(text, r.End+1)
-		if !ok1 || !ok2 || end <= start { continue }
+	type replacement struct {
+		start  int
+		end    int
+		markup string
+	}
+
+	var replacements []replacement
+	for _, emote := range parseEmoteRanges(emotesTag) {
+		start, startOK := utf16Offset(text, emote.Start)
+		end, endOK := utf16Offset(text, emote.End+1)
+		if !startOK || !endOK || end <= start {
+			continue
+		}
+
 		alt := html.EscapeString(text[start:end])
-		url := "https://static-cdn.jtvnw.net/emoticons/v2/" + r.ID + "/default/dark/3.0"
-		rs = append(rs, replacement{start, end, "<img class=\"chat-emote\" alt=\"" + alt + "\" src=\"" + url + "\" loading=\"lazy\">"})
+		url := "https://static-cdn.jtvnw.net/emoticons/v2/" + emote.ID + "/default/dark/3.0"
+		markup := "<img class=\"chat-emote\" alt=\"" + alt + "\" src=\"" + url + "\" loading=\"lazy\">"
+		replacements = append(replacements, replacement{
+			start: start,
+			end: end,
+			markup: markup,
+		})
 	}
-	if len(rs) == 0 { return "" }
-	sort.Slice(rs, func(i, j int) bool {
-		if rs[i].start == rs[j].start { return rs[i].end < rs[j].end }
-		return rs[i].start < rs[j].start
+
+	if len(replacements) == 0 {
+		return ""
+	}
+
+	sort.Slice(replacements, func(i, j int) bool {
+		if replacements[i].start == replacements[j].start {
+			return replacements[i].end < replacements[j].end
+		}
+		return replacements[i].start < replacements[j].start
 	})
-	var b strings.Builder
-	at := 0
-	for _, r := range rs {
-		if r.start < at || r.start < 0 || r.end > len(text) { continue }
-		b.WriteString(html.EscapeString(text[at:r.start]))
-		b.WriteString(r.markup)
-		at = r.end
+
+	var output strings.Builder
+	offset := 0
+	for _, item := range replacements {
+		if item.start < offset || item.start < 0 || item.end > len(text) {
+			continue
+		}
+		output.WriteString(html.EscapeString(text[offset:item.start]))
+		output.WriteString(item.markup)
+		offset = item.end
 	}
-	b.WriteString(html.EscapeString(text[at:]))
-	return b.String()
+	output.WriteString(html.EscapeString(text[offset:]))
+	return output.String()
 }
