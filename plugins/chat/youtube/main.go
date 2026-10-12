@@ -42,54 +42,9 @@ var (
 	apiBase = "https://www.googleapis.com/youtube/v3/"
 	errSettingsChanged = errors.New("настройки YouTube изменились")
 	errSearchExhausted = errors.New("активный эфир не найден за час")
-	errChatEnded       = errors.New("live chat завершён или недоступен")
-	channelIDPattern = regexp.MustCompile(`^UC[A-Za-z0-9_-]{20,}package main
-
-import (
-	"bufio"
-	"context"
-	"crypto/tls"
-	"encoding/json"
-	"errors"
-	"fmt"
-	"io"
-	"net/http"
-	"net/url"
-	"os"
-	"os/signal"
-	"regexp"
-	"strings"
-	"sync"
-	"syscall"
-	"time"
-	"unicode"
-	"unicode/utf8"
-
-	"studio/core/protocol"
-	"studio/plugins/chat/youtube/internal/ytproto"
-
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/codes"
-	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/metadata"
-	"google.golang.org/grpc/status"
-)
-
-const (
-	grpcTarget       = "dns:///youtube.googleapis.com:443"
-	searchInterval   = time.Minute
-	maxSearchAttempts = 60
-	requestTimeout   = 20 * time.Second
-	maxChatBackoff   = time.Minute
-)
-
-var (
-	apiBase = "https://www.googleapis.com/youtube/v3/"
-	errSettingsChanged = errors.New("настройки YouTube изменились")
-	errSearchExhausted = errors.New("активный эфир не найден за час")
-	errChatEnded       = errors.New("live chat завершён или недоступен")
-)
-	httpClient         = &http.Client{Timeout: requestTimeout}
+	errChatEnded = errors.New("live chat завершён или недоступен")
+	channelIDPattern = regexp.MustCompile("^UC[A-Za-z0-9_-]{20,}$")
+	httpClient = &http.Client{Timeout: requestTimeout}
 )
 
 var options = []protocol.Option{
