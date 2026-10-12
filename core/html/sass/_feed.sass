@@ -148,14 +148,13 @@
   padding: 14px 20px 22px
   scroll-behavior: auto
 
-  // Сообщения выглядят как плавающие панели тактического HUD из X-COM:
-  // тонкий бирюзовый контур, срезанные углы и затемнённое стекло внутри.
-  // Стили ограничены лентой; тосты на странице настроек не меняются.
+  // Компактная панель тактического HUD: один тонкий бирюзовый контур,
+  // асимметричные срезы и очень тёмное стекло. Текст остаётся обычным HTML.
   .msg
     position: relative
     isolation: isolate
-    margin-bottom: 24px
-    padding: 17px 22px 19px
+    margin-bottom: 18px
+    padding: 12px 18px 14px
     border: 0
     background: transparent
     --xcom-accent: #69e7f2
@@ -167,39 +166,40 @@
       pointer-events: none
       clip-path: polygon(0 12px, 13px 12px, 13px 0, calc(100% - 30px) 0, calc(100% - 17px) 13px, 100% 13px, 100% calc(100% - 20px), calc(100% - 13px) calc(100% - 20px), calc(100% - 13px) 100%, 26px 100%, 13px calc(100% - 13px), 0 calc(100% - 13px))
 
-    // Контур и слабое свечение по краям панели.
+    // Внешний слой отвечает только за тонкий неоновый контур.
     &::before
       inset: 0
       z-index: -2
       background: var(--xcom-accent)
-      filter: drop-shadow(0 0 3px rgba(83, 227, 243, .18))
+      filter: drop-shadow(0 0 2px rgba(83, 227, 243, .2))
 
-    // Второй, чуть меньший силуэт образует тонкую рамку без обычного border.
+    // Внутренняя геометрия почти повторяет внешний силуэт: линия получается
+    // одинаковой толщины и не превращается в толстые бирюзовые ступени.
     &::after
-      inset: 1.5px
+      inset: 1px
       z-index: -1
-      clip-path: polygon(0 11px, 11.5px 11px, 11.5px 0, calc(100% - 29px) 0, calc(100% - 16.5px) 12px, 100% 12px, 100% calc(100% - 19px), calc(100% - 12px) calc(100% - 19px), calc(100% - 12px) 100%, 25px 100%, 12px calc(100% - 12px), 0 calc(100% - 12px))
-      background: rgba(3, 11, 15, .86)
+      clip-path: polygon(0 11px, 12px 11px, 12px 0, calc(100% - 29px) 0, calc(100% - 17px) 12px, 100% 12px, 100% calc(100% - 19px), calc(100% - 12px) calc(100% - 19px), calc(100% - 12px) 100%, 26px 100%, 12px calc(100% - 12px), 0 calc(100% - 12px))
+      background: rgba(3, 8, 11, .96)
 
     > *
       position: relative
 
     .msg__head
-      min-height: 21px
+      min-height: 20px
 
     .msg__author
       color: var(--xcom-accent)
-      letter-spacing: .025em
-      text-shadow: 0 0 8px rgba(75, 222, 238, .12)
+      letter-spacing: .02em
+      text-shadow: 0 0 6px rgba(75, 222, 238, .1)
 
     .msg__rule
       height: 1px
-      margin: 9px 0 11px
-      background: linear-gradient(90deg, var(--xcom-accent), rgba(105, 231, 242, .12))
+      margin: 7px 0 8px
+      background: linear-gradient(90deg, rgba(105, 231, 242, .82), rgba(105, 231, 242, .08))
 
     .msg__text
       color: #e0f0f2
-      line-height: 1.55
+      line-height: 1.5
 
     &[data-severity="neutral"],
     &[data-severity="info"]
@@ -215,7 +215,7 @@
       --xcom-accent: #ff7778
 
     &.is-notice
-      opacity: .86
+      opacity: .9
 
     &:last-child
       margin-bottom: 0
