@@ -976,7 +976,6 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 	restarts := 0
 	gotAny := false
 	connectedReported := false
-	missingPageToken := 0
 
 	// Поток, который несколько раз подряд не смог вернуть даже ответ, не
 	// держим на экспоненциальных паузах бесконечно: пора попробовать резерв.
@@ -1087,16 +1086,7 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			// Храним последний непустой continuation token. Пустое поле в одном
 			// ответе не должно сбрасывать курсор: иначе при следующем соединении
 			// чтение стартует заново и сообщения между попытками можно потерять.
-			var hasNextToken bool
-			pageToken, hasNextToken = updateContinuationToken(pageToken, response.GetNextPageToken())
-			if hasNextToken {
-				missingPageToken = 0
-			} else {
-				missingPageToken++
-				if missingPageToken >= maxStreamRestarts {
-					return fmt.Errorf("%w: YouTube не прислал nextPageToken", errOfficialReadBroken)
-				}
-			}
+			pageToken, _ = updateContinuationToken(pageToken, response.GetNextPageToken())
 			for _, item := range response.GetItems() {
 				if item == nil || !remember(item.GetId()) {
 					continue
