@@ -157,7 +157,7 @@
   // должна быть заметной. Сине-серый, а не серый: в палитре серый уходил в
   // фон и читался как граница блока.
   &[data-severity="neutral"]
-    --rule: #6e83a6
+    --rule: #{tokens.$rule}
 
   &[data-severity="info"]
     border-left-color: tokens.$info
