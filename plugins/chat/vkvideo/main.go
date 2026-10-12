@@ -30,9 +30,6 @@ const (
 	maxBackoff    = 60 * time.Second
 	maxMessageIDs = 4096
 	userAgent     = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
-	// viewersReportInterval — как часто можно показывать счётчик зрителей.
-	// VK шлёт его на каждое изменение, а лента от этого только засоряется.
-	viewersReportInterval = time.Minute
 )
 
 var (
@@ -869,24 +866,24 @@ type vkBlock struct {
 
 // channelState помнит, что мы уже показывали по каналу.
 //
-// Счётчик зрителей VK шлёт постоянно, и на каждое изменение лента получала
-// строку вида «HardPlay — название трансляции, 1941 в канале». Три таких строки
-// подряд — и человек перестаёт читать ленту вовсе. Поэтому наружу отдаём
-// только то, что действительно изменилось, а зрителей — не чаще раза в минуту.
+// Сведения о канале нужны в ленте один раз — сразу после подключения, чтобы
+// было видно, что за трансляция и сколько зрителей. Дальше они не нужны:
+// VK шлёт их на каждое изменение счётчика, и через минуту лента превращалась в
+// перечень «HardPlay — название трансляции, 1941 в канале». Смотреть на такое
+// невозможно, а изменить это в интерфейсе нельзя. Статистику, если она
+// понадобится, лучше вынести в отдельное место, а не в ленту сообщений.
 type channelState struct {
 	started   int64
-	title     string
-	viewers   int
-	sentAt    time.Time
 	announced bool
 }
 
-// shouldReport решает, стоит ли показывать канал в ленке снова.
-func (st *channelState) shouldReport(title string, viewers int) bool {
-	if st.announced && st.title != title {
-		return true
+// shouldReport решает, показывать ли канал в ленке. Показываем один раз.
+func (st *channelState) shouldReport() bool {
+	if st.announced {
+		return false
 	}
-	return time.Since(st.sentAt) >= viewersReportInterval
+	st.announced = true
+	return true
 }
 
 func processPush(raw json.RawMessage, byID map[string]vkChannel, seen *seenIDs, states map[string]*channelState) {
@@ -948,13 +945,9 @@ func processPush(raw json.RawMessage, byID map[string]vkChannel, seen *seenIDs, 
 		if !event.IsOnline {
 			state.started = 0
 		}
-		if !state.shouldReport(event.Title, event.Viewers) {
+		if !state.shouldReport() {
 			return
 		}
-		state.title = event.Title
-		state.viewers = event.Viewers
-		state.sentAt = time.Now()
-		state.announced = true
 		send(protocol.KindChannelInfo, protocol.ChannelInfoPayload{
 			Channel:  channel.Slug,
 			Name:     event.Title,
@@ -973,7 +966,6 @@ func processPush(raw json.RawMessage, byID map[string]vkChannel, seen *seenIDs, 
 			state.started = time.Now().Unix()
 		}
 		state.announced = true
-		state.sentAt = time.Now()
 		send(protocol.KindChannelInfo, protocol.ChannelInfoPayload{
 			Channel:  channel.Slug,
 			Streamer: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick),

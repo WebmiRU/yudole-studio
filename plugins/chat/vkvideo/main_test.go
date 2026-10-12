@@ -8,7 +8,6 @@ import (
 	"reflect"
 	"strconv"
 	"testing"
-	"time"
 
 	"studio/core/protocol"
 )
@@ -376,26 +375,18 @@ func TestMessageTextCollapsesSmilesAcrossBlocks(t *testing.T) {
 	}
 }
 
-// Счётчик зрителей VK меняется постоянно. Если слать его как есть, лента
-// засоряется одинаковыми строками несколько раз в минуту, и человек перестаёт
-// её читать вовсе.
-func TestChannelStateThrottlesViewerReports(t *testing.T) {
-	state := &channelState{sentAt: time.Now(), announced: true, title: "Эфир"}
-
-	if state.shouldReport("Эфир", 2000) {
-		t.Error("сразу после отправки повторять нельзя")
+// Сведения о канале нужны в ленте один раз — сразу после подключения.
+// VK шлёт их на каждое изменение счётчика, и без ограничения лента через
+// минуту превращалась в перечень «HardPlay — название трансляции, 1941 в канале».
+func TestChannelStateReportsOnlyOnce(t *testing.T) {
+	state := &channelState{}
+	if !state.shouldReport() {
+		t.Fatal("сразу после подключения показать канал надо")
 	}
-	if !state.shouldReport("Другое название", 2000) {
-		t.Error("смена названия трансляции должна показываться сразу")
+	if state.shouldReport() {
+		t.Error("повторно показывать канал в ленте нельзя")
 	}
-
-	old := &channelState{sentAt: time.Now().Add(-2 * viewersReportInterval), announced: true, title: "Эфир"}
-	if !old.shouldReport("Эфир", 2100) {
-		t.Error("через минуту счётчик обновить надо")
-	}
-
-	fresh := &channelState{}
-	if !fresh.shouldReport("Эфир", 10) {
-		t.Error("первый раз показать канал надо")
+	if state.shouldReport() {
+		t.Error("и третий раз тоже нельзя")
 	}
 }
