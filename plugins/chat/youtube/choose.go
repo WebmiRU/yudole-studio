@@ -202,7 +202,8 @@ func (w *watcher) nameLives(ctx context.Context, lives []liveVideo) ([]liveVideo
 		Items []struct {
 			ID      string `json:"id"`
 			Snippet struct {
-				Title string `json:"title"`
+				Title        string `json:"title"`
+				ChannelTitle string `json:"channelTitle"`
 			} `json:"snippet"`
 			Streaming struct {
 				ChatID string `json:"activeLiveChatId"`
@@ -213,19 +214,24 @@ func (w *watcher) nameLives(ctx context.Context, lives []liveVideo) ([]liveVideo
 		return nil, err
 	}
 	byID := make(map[string]struct {
-		title string
-		chat  string
+		title   string
+		channel string
+		chat    string
 	}, len(response.Items))
 	for _, item := range response.Items {
 		byID[item.ID] = struct {
-			title string
-			chat  string
-		}{item.Snippet.Title, item.Streaming.ChatID}
+			title   string
+			channel string
+			chat    string
+		}{item.Snippet.Title, item.Snippet.ChannelTitle, item.Streaming.ChatID}
 	}
 	for i := range lives {
 		if got, ok := byID[lives[i].ID]; ok {
 			if got.title != "" {
 				lives[i].Title = got.title
+			}
+			if got.channel != "" {
+				lives[i].Channel = got.channel
 			}
 			if got.chat != "" {
 				lives[i].Chat = got.chat
@@ -238,20 +244,14 @@ func (w *watcher) nameLives(ctx context.Context, lives []liveVideo) ([]liveVideo
 // findLives ищет живые эфиры.
 //
 // В официальном режиме это search.list, и вот он-то и стоит квоты: своя
-// корзина в сто вызовов на сутки на весь проект. Поэтому, когда резервный путь
-// разрешён, ищем эфир через него — фид канала бесплатен и ничем не ограничен.
-// Так ключ тратится только на чтение, а не на поиск.
+// корзина в сто вызовов на сутки на весь проект. Поэтому официальным поиском
+// мы идём недолго — maxOfficialChecks попыток, а потом searchLoop переводит
+// плагин на фид канала, который бесплатен и ждать умеет сколько угодно.
 func (w *watcher) findLives(ctx context.Context) ([]liveVideo, error) {
 	if w.keyless {
 		return keylessFindLives(ctx, w.channelID)
 	}
-	if !w.allowFallback {
-		return w.findLivesOfficial(ctx)
-	}
-
-	// Резерв разрешён: ищем эфир без ключа, потому что search.list стоит
-	// отдельную квоту в сто вызовов на сутки, а фид канала бесплатен.
-	return keylessFindLives(ctx, w.channelID)
+	return w.findLivesOfficial(ctx)
 }
 
 func (w *watcher) findLivesOfficial(ctx context.Context) ([]liveVideo, error) {
@@ -282,6 +282,22 @@ func (w *watcher) watch(ctx context.Context, lives []liveVideo) error {
 		return keylessWatchChats(ctx, w.channel, w.title, lives)
 	}
 
+	// Эфир мог быть найден фидом канала, а там id чата нет: фид отдаёт только
+	// адрес трансляции. Официально читать без него нельзя — streamList получает
+	// пустоту и отвечает InvalidArgument, а выглядит это так, будто ключ сломан.
+	// Одна videos.list (одна единица квоты) — и чат снова читается.
+	if anyWithoutChat(lives) {
+		if named, err := w.nameLives(ctx, lives); err == nil {
+			lives = named
+		} else {
+			logInfo("Не удалось узнать id чата, читаю резервным путём: " + err.Error())
+			if !w.useKeyless(err.Error()) {
+				return err
+			}
+			return keylessWatchChats(ctx, w.channel, w.title, lives)
+		}
+	}
+
 	err := watchLiveChats(ctx, w.apiKey, w.channel, w.title, lives)
 	if err == nil {
 		return nil
@@ -305,13 +321,22 @@ func (w *watcher) watch(ctx context.Context, lives []liveVideo) error {
 	return keylessWatchChats(ctx, w.channel, w.title, lives)
 }
 
+// anyWithoutChat сообщает, что хоть одному эфиру не хватает id чата.
+func anyWithoutChat(lives []liveVideo) bool {
+	for _, v := range lives {
+		if v.Chat == "" {
+			return true
+		}
+	}
+	return false
+}
+
 // searchLoop ищет эфир, пока не найдёт.
 //
 // Официальный поиск стоит отдельную квоту — сто вызовов search.list на сутки на
-// весь проект, а это примерно час ожидания. Дальше поиск официальным способом
-// бессмыслен: он либо упрётся в сутки, либо потратит чужую квоту. Поэтому после
-// maxOfficialChecks переходим на фид канала — он бесплатен и ничем не ограничен,
-// а ждать он умеет сколько угодно.
+// весь проект. Дальше искать официальным способом бессмысленно: либо упрёмся
+// в сутки, либо потратим чужую квоту. Поэтому после maxOfficialChecks переходим
+// на фид канала — он бесплатен и ничем не ограничен.
 func (w *watcher) searchLoop(ctx context.Context) ([]liveVideo, error) {
 	for attempt := 1; ; attempt++ {
 		if ctx.Err() != nil {
@@ -343,24 +368,25 @@ func (w *watcher) searchLoop(ctx context.Context) ([]liveVideo, error) {
 }
 
 // maxOfficialChecks — сколько раз ищем эфир официальным search.list, прежде чем
-// перейти на фид. Пятнадцать минут ожидания: эфир либо уже идёт и находится с
-// первой попытки, либо человек его ещё не запустил и ждать незачем.
-const maxOfficialChecks = 15
+// перейти на фид.
+//
+// Пять минут ожидания: эфир либо уже идёт и находится с первой попытки, либо
+// человек его ещё не запустил. Ждать дольше официальным поиском незачем —
+// квота у поиска отдельная и копеечная, а фид канала бесплатен и ждать умеет
+// сколько угодно.
+const maxOfficialChecks = 5
 
 // searchWindow остаётся для совместимости с прежним поведением: по нему
 // решаем, что канал действительно молчит.
 const searchWindow = time.Hour
 
+// String описывает выбранный путь для журнала.
+//
+// Ключа здесь быть не должно: журнал плагина видно в интерфейсе и он уезжает в
+// файлы, а хвоста ключа достаточно, чтобы ключ не угадывали.
 func (w *watcher) String() string {
 	if w.keyless {
 		return "без ключа"
 	}
-	return fmt.Sprintf("с ключом %s…", lastFour(w.apiKey))
-}
-
-func lastFour(s string) string {
-	if len(s) <= 4 {
-		return s
-	}
-	return s[len(s)-4:]
+	return "с ключом"
 }

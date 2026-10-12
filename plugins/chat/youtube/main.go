@@ -57,8 +57,13 @@ var (
 	// превращается в тысячу одинаковых попыток за час, а это уже не чтение,
 	// а долбёжка чужого сервиса.
 	chatEndedInterval = 30 * time.Second
-	channelIDPattern  = regexp.MustCompile("^UC[A-Za-z0-9_-]{20,}$")
-	httpClient        = &http.Client{Timeout: requestTimeout}
+
+	// errorRetryInterval — пауза перед новой попыткой после неожиданной ошибки.
+	// Секунд пять: сеть обычно возвращается быстро, а вот долбить YouTube
+	// после каждой неудачи нельзя.
+	errorRetryInterval = 5 * time.Second
+	channelIDPattern   = regexp.MustCompile("^UC[A-Za-z0-9_-]{20,}$")
+	httpClient         = &http.Client{Timeout: requestTimeout}
 )
 
 var options = []protocol.Option{
@@ -511,6 +516,10 @@ type liveVideo struct {
 	ID    string
 	Title string
 	Chat  string
+	// Channel — канал, который вещает эту трансляцию. В ленте подписываться
+	// надо на него, а не на id видео: человек в ленте видит названия каналов, и
+	// одиннадцать символов вместо названия там неуместны.
+	Channel string
 }
 
 func findActiveLives(ctx context.Context, apiKey, channelID string) ([]liveVideo, error) {
@@ -562,7 +571,8 @@ func findActiveLives(ctx context.Context, apiKey, channelID string) ([]liveVideo
 		Items []struct {
 			ID      string `json:"id"`
 			Snippet struct {
-				Title string `json:"title"`
+				Title        string `json:"title"`
+				ChannelTitle string `json:"channelTitle"`
 			} `json:"snippet"`
 			LiveStreamingDetails struct {
 				ActiveLiveChatID string `json:"activeLiveChatId"`
@@ -585,7 +595,12 @@ func findActiveLives(ctx context.Context, apiKey, channelID string) ([]liveVideo
 		if title == "" {
 			title = titles[item.ID]
 		}
-		lives = append(lives, liveVideo{ID: item.ID, Title: title, Chat: chatID})
+		lives = append(lives, liveVideo{
+			ID:      item.ID,
+			Title:   title,
+			Chat:    chatID,
+			Channel: item.Snippet.ChannelTitle,
+		})
 	}
 	return lives, nil
 }
@@ -656,7 +671,18 @@ func supervise(ctx context.Context) {
 		if err != nil {
 			logInfo(err.Error())
 			emitConnection(protocol.ConnectionOffline, err.Error(), 0)
-			waitForChange(ctx)
+			if keyUnusable(err) {
+				// Ключ без смены настроек не починится: ни новый не придёт,
+				// ни отозванный не оживёт. Стучаться каждые пять секунд
+				// бессмысленно — это только расход квоты и шум в журнале.
+				waitForChange(ctx)
+				continue
+			}
+			// А вот сетевые обрывы и смену формы ответа ждать нельзя: плагин
+			// обязан вернуться сам. Поэтому ждём и настройки, и подсказку времени.
+			if !waitChangeOrTimeout(ctx, errorRetryInterval) {
+				return
+			}
 		}
 	}
 }
@@ -675,6 +701,22 @@ func waitForChange(ctx context.Context) {
 	select {
 	case <-ctx.Done():
 	case <-changed:
+	}
+}
+
+// waitChangeOrTimeout — ждём либо смены настроек, либо подсказки времени.
+// Вернуться по часам нужно всегда: сетевые ошибки и обрывы приходят без
+// участия человека, и ждать его реакции тут не на что.
+func waitChangeOrTimeout(ctx context.Context, wait time.Duration) bool {
+	timer := time.NewTimer(wait)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return false
+	case <-changed:
+		return true
+	case <-timer.C:
+		return true
 	}
 }
 
@@ -830,11 +872,21 @@ func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, l
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			err := readOneChat(childCtx, client, apiKey, channel, video, func() {
+			// Подписываемся на тот канал, который вещает именно эту трансляцию.
+			// Когда в списке смешаны каналы и стримы, общее имя на всех было бы
+			// враньём: под одной подписью оказывались бы разные каналы.
+			label := video.Channel
+			if label == "" {
+				label = channelTitle
+			}
+			if label == "" {
+				label = channel
+			}
+			err := readOneChat(childCtx, client, apiKey, label, video, func() {
 				joinedOnce.Do(func() {
 					send(protocol.KindChannelJoinSuccess, protocol.ChannelPayload{
-						Channel: channel,
-						Name:    channelTitle,
+						Channel: label,
+						Name:    label,
 					})
 				})
 				emitConnection(protocol.ConnectionOnline, "Читаю live chat YouTube", 0)
@@ -907,6 +959,16 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 	// Ключ и квота тут ни при чём: дальше повторять бессмысленно.
 	brokeTooOften := func() bool { return !gotAny && restarts >= maxStreamRestarts }
 
+	// Логируем, с чем именно идём в официальный API. Пустой id чата — самая
+	// вероятная причина того, что поток открывается и сразу умирает, а по
+	// сообщению об ошибке это не разглядеть.
+	chatHint := video.Chat
+	if len(chatHint) > 12 {
+		chatHint = chatHint[:12] + "…"
+	}
+	logInfo(fmt.Sprintf("Читаю официально: видео %s, id чата %q, страница %q",
+		video.ID, chatHint, pageToken))
+
 	for {
 		if ctx.Err() != nil {
 			return errSettingsChanged
@@ -962,10 +1024,18 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 					return fmt.Errorf("YouTube live chat %q: %w", video.Title, recvErr)
 				}
 				logInfo("Соединение с чатом потеряно, восстанавливаю поток: " + recvErr.Error())
-				emitConnection(protocol.ConnectionReconnecting, "Восстанавливаю поток YouTube live chat", attempt+1)
 				restarts++
 				if brokeTooOften() {
 					return fmt.Errorf("%w: обрыв %v", errOfficialReadBroken, recvErr)
+				}
+				// Пока не пришло ни одного сообщения, молчание с перезаходом —
+				// ещё может быть поломкой, и человек должен её видеть. А вот
+				// после сообщений перезаход обычен: в тихом чате сервер закрывает
+				// опрос каждые несколько секунд, и пугать «переподключением»
+				// там, где всё работает, — враньё в интерфейсе.
+				if !gotAny {
+					emitConnection(protocol.ConnectionReconnecting,
+						"Восстанавливаю поток YouTube live chat", attempt+1)
 				}
 				break
 			}
@@ -995,7 +1065,8 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 				return errChatEnded
 			}
 			if pageToken == "" {
-				emitConnection(protocol.ConnectionReconnecting, "Возобновляю поток YouTube live chat", attempt+1)
+				// Токен следующей страницы не выдан — ждать больше нечего, надо
+				// просто спросить заново. Это обычный опрос, а не поломка.
 				break
 			}
 		}

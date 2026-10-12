@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -102,6 +103,36 @@ func TestPathBrokenCoversKeyAndDeadStream(t *testing.T) {
 	}
 	if pathBroken(nil) {
 		t.Error("без ошибки путь не сломан")
+	}
+}
+
+// Эфир, найденный фидом канала, идёт дальше без id чата: там его и быть не
+// может. Если не заметить этого и позвать официальное чтение, streamList
+// получит пустоту и откажет — а выглядит это так, будто сломан ключ.
+func TestAnyWithoutChat(t *testing.T) {
+	if anyWithoutChat([]liveVideo{{ID: "a", Chat: "c"}, {ID: "b", Chat: "d"}}) {
+		t.Error("у всех эфиров есть id чата")
+	}
+	if !anyWithoutChat([]liveVideo{{ID: "a", Chat: "c"}, {ID: "b"}}) {
+		t.Error("пустой id чата должен замечаться")
+	}
+	if anyWithoutChat(nil) {
+		t.Error("пустой список нечего проверять")
+	}
+}
+
+// Путь чтения не должен светить ключ в журнале: журнал видно в интерфейсе и он
+// уезжает в файлы.
+func TestWatcherStringKeepsKeySecret(t *testing.T) {
+	withKey := &watcher{apiKey: "AIzaSyDhv7eykPRiszrRtgF0iN8lzj6_bpIiFl8"}
+	if got := withKey.String(); strings.Contains(got, "Fl8") || strings.Contains(got, "AIza") {
+		t.Errorf("ключ утёк в описание пути: %q", got)
+	}
+	if !strings.Contains(withKey.String(), "с ключом") {
+		t.Errorf("не сказано, что путь официальный: %q", withKey.String())
+	}
+	if got := (&watcher{keyless: true}).String(); got != "без ключа" {
+		t.Errorf("резервный путь назван неверно: %q", got)
 	}
 }
 
