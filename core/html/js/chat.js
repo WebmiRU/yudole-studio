@@ -206,19 +206,12 @@ function serviceTitle(entry) {
 function richBlock(entry, severity, head, html, notice = false) {
     const text = el('div', {class: 'msg__text'});
     text.innerHTML = html;
-
-    return el('article', noticeAttrs(notice), [
-        el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
-        el('div', {class: 'msg__rule'}),
-        text,
-    ]);
+    return messagePanel(notice, head, text);
 }
 
-// block is the shape of every message: who wrote it, a rule under the name, and
-// then the text itself.
+// block is the shape of every message: a HUD frame, a separate header,
+// message content and a small technical footer.
 function block(entry, severity, head, text, notice = false) {
-    // Текст собирается из кусков, а куски лежат в массивах: расплющиваем
-    // насколько угодно глубоко, иначе в блок попадёт сам массив.
     const body = [...[text].flat(Infinity)].filter(
         (piece) => piece !== null && piece !== undefined && piece !== '',
     );
@@ -226,14 +219,41 @@ function block(entry, severity, head, text, notice = false) {
         return null;
     }
 
+    const content = el('div', {class: 'msg__text'}, body.map((piece) => (
+        typeof piece === 'string' ? document.createTextNode(piece) : piece
+    )));
+    return messagePanel(notice, head, content);
+}
+
+// messagePanel keeps the message's content flow natural while the frame,
+// header ticks and footer hardware remain independent decorative layers.
+function messagePanel(notice, head, content) {
+    const frame = el('div', {class: 'msg__frame', 'aria-hidden': 'true'}, [
+        el('span', {class: 'msg__frame-rail msg__frame-rail--top'}),
+        el('span', {class: 'msg__frame-rail msg__frame-rail--bottom'}),
+        el('span', {class: 'msg__frame-joint msg__frame-joint--right'}),
+        el('span', {class: 'msg__frame-joint msg__frame-joint--left'}),
+        el('span', {class: 'msg__frame-light'}),
+    ]);
+
+    const header = el('header', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]);
+    const rule = el('div', {class: 'msg__rule', 'aria-hidden': 'true'}, [
+        el('span', {class: 'msg__rule-signal'}),
+    ]);
+    const footer = el('footer', {class: 'msg__foot', 'aria-hidden': 'true'}, [
+        el('span', {class: 'msg__foot-mark'}),
+        el('span', {class: 'msg__foot-line'}),
+        el('span', {class: 'msg__foot-tick'}),
+    ]);
+
     return el('article', noticeAttrs(notice), [
-        // Полоска стоит между автором и текстом, а не рядом с автором: шапка
-        // выстроена в строку, и внутри неё полоска легла бы вбок.
-        el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
-        el('div', {class: 'msg__rule'}),
-        el('div', {class: 'msg__text'}, body.map((piece) => (
-            typeof piece === 'string' ? document.createTextNode(piece) : piece
-        ))),
+        frame,
+        el('div', {class: 'msg__panel'}, [
+            header,
+            rule,
+            el('div', {class: 'msg__content'}, [content]),
+            footer,
+        ]),
     ]);
 }
 
