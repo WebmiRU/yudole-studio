@@ -26,3 +26,7 @@ go.work.sum
 # бинарники чат-плагина VK Видео Live
 /plugins/chat/vkvideo/vkvideo
 /plugins/chat/vkvideo/vkvideo.exe
+
+# Сборки для раздачи тестировщикам.
+/release/.stage/
+/release/out/
