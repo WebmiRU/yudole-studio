@@ -148,13 +148,61 @@
   padding: 14px 20px 22px
   scroll-behavior: auto
 
-  // Между сообщениями двадцать пикселей. В общий блок это не годится: там же
-  // живут тосты, у которых промежуток задаёт раскладка стопки.
+  // У сообщений рваный внешний силуэт, как у выбранного референса.
+  // Шумовой SVG-фильтр применяется только к фоновым слоям — текст, ссылки,
+  // значки и смайлы остаются резкими и полностью интерактивными.
   .msg
+    position: relative
+    isolation: isolate
     margin-bottom: 20px
+    border-left-color: transparent
+    background: transparent
+    --message-accent: transparent
+
+    &::before,
+    &::after
+      content: ""
+      position: absolute
+      pointer-events: none
+      filter: url("#chat-torn-edge")
+
+    // Тёмно-зелёный неровный край виден на фоне ленты, но не перекрашивает
+    // сами сообщения: внутри остаётся привычная чёрная карточка.
+    &::before
+      inset: 0
+      z-index: -2
+      background: #19351f
+
+    &::after
+      inset: 3px
+      z-index: -1
+      background: #000
+      box-shadow: inset 4px 0 var(--message-accent)
+
+    > *
+      position: relative
+
+    &[data-severity="info"]
+      --message-accent: #{tokens.$info}
+
+    &[data-severity="success"]
+      --message-accent: #{tokens.$success}
+
+    &[data-severity="warning"]
+      --message-accent: #{tokens.$warning}
+
+    &[data-severity="error"]
+      --message-accent: #{tokens.$danger}
 
     &:last-child
       margin-bottom: 0
+
+// Сам фильтр живёт в SVG в chat.html. Нулевой размер не влияет на раскладку.
+.chat-filters
+  position: absolute
+  width: 0
+  height: 0
+  overflow: hidden
 
 // --- Подвал -----------------------------------------------------------------
 
