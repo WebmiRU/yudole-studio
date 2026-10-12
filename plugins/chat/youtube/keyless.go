@@ -668,9 +668,6 @@ func keylessReadOne(ctx context.Context, channelTitle string, video liveVideo, o
 			// не завершает чтение: следующая попытка повторится с backoff.
 			if consecutiveFailures == 3 || consecutiveFailures%5 == 0 {
 				if fresh, refreshErr := keylessWatchPage(ctx, video.ID); refreshErr == nil {
-					if fresh.token == "" && !fresh.isLive {
-						return errNoLive
-					}
 					if fresh.token != "" && fresh.apiKey != "" {
 						page = fresh
 						token = fresh.token
