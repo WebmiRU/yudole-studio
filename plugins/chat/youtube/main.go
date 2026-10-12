@@ -1019,8 +1019,14 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			if ctx.Err() != nil {
 				return errSettingsChanged
 			}
-			if status.Code(err) == codes.NotFound || status.Code(err) == codes.FailedPrecondition {
+			if grpcChatDefinitelyEnded(err) {
 				return errChatEnded
+			}
+			if status.Code(err) == codes.NotFound || status.Code(err) == codes.FailedPrecondition {
+				// В этих случаях внутренний endpoint может не принять текущий
+				// streamList-запрос, даже когда публичный чат ещё жив. Не объявляем
+				// эфир завершённым автоматически: watcher попробует keyless fallback.
+				return fmt.Errorf("%w: StreamList: %v", errOfficialReadBroken, err)
 			}
 			if permanentGRPCError(err) {
 				return fmt.Errorf("YouTube live chat %q: %w", video.Title, err)
@@ -1050,13 +1056,13 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 				if ctx.Err() != nil {
 					return errSettingsChanged
 				}
+				if grpcChatDefinitelyEnded(recvErr) {
+					return errChatEnded
+				}
+				if status.Code(recvErr) == codes.NotFound || status.Code(recvErr) == codes.FailedPrecondition {
+					return fmt.Errorf("%w: Recv: %v", errOfficialReadBroken, recvErr)
+				}
 				if permanentGRPCError(recvErr) {
-					if status.Code(recvErr) == codes.NotFound ||
-						status.Code(recvErr) == codes.FailedPrecondition ||
-						strings.Contains(strings.ToLower(recvErr.Error()), "ended") ||
-						strings.Contains(strings.ToLower(recvErr.Error()), "disabled") {
-						return errChatEnded
-					}
 					return fmt.Errorf("YouTube live chat %q: %w", video.Title, recvErr)
 				}
 				logInfo("Соединение с чатом потеряно, восстанавливаю поток: " + recvErr.Error())
@@ -1223,6 +1229,23 @@ func emitChatMessage(channel string, message *ytproto.LiveChatMessage) error {
 		},
 	})
 	return nil
+}
+
+// grpcChatDefinitelyEnded avoids interpreting every FailedPrecondition as a
+// finished broadcast. The gRPC endpoint also uses that status for unsupported or
+// rejected stream requests; those should activate the public-page fallback.
+func grpcChatDefinitelyEnded(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "chat ended") ||
+		strings.Contains(message, "chat has ended") ||
+		strings.Contains(message, "chat is disabled") ||
+		strings.Contains(message, "chat disabled") ||
+		strings.Contains(message, "broadcast has ended") ||
+		strings.Contains(message, "stream is offline") ||
+		strings.Contains(message, "no longer live")
 }
 
 func permanentGRPCError(err error) bool {
