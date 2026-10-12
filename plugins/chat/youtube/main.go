@@ -34,7 +34,9 @@ const (
 	grpcTarget     = "dns:///youtube.googleapis.com:443"
 	searchInterval = time.Minute
 	requestTimeout = 20 * time.Second
-	maxChatBackoff = time.Minute
+	maxChatBackoff        = time.Minute
+	grpcDialTimeout       = 5 * time.Second
+	streamRestartDelay    = 1 * time.Second
 )
 
 var (
@@ -839,7 +841,7 @@ func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, l
 	var conn *grpc.ClientConn
 	var err error
 	for attempt := 0; ; attempt++ {
-		dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		dialCtx, cancel := context.WithTimeout(ctx, grpcDialTimeout)
 		conn, err = grpc.DialContext(
 			dialCtx,
 			grpcTarget,
@@ -854,7 +856,12 @@ func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, l
 			return errSettingsChanged
 		}
 		logInfo("Не удалось подключиться к YouTube gRPC: " + err.Error())
-		if !waitInterval(ctx, retryDelay(attempt)) {
+		if attempt+1 >= maxStreamRestarts {
+			return fmt.Errorf("%w: gRPC handshake: %v", errOfficialReadBroken, err)
+		}
+		// Дальше API-ключ не поможет: если HTTP(S) работает, но gRPC недоступен,
+		// watcher должен быстро перейти на резервный публичный путь.
+		if !waitInterval(ctx, time.Duration(attempt+1)*time.Second) {
 			return errSettingsChanged
 		}
 	}
@@ -871,6 +878,7 @@ func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, l
 	results := make(chan result, len(lives))
 	var wg sync.WaitGroup
 	var joinedOnce sync.Once
+	var onlineOnce sync.Once
 
 	for _, video := range lives {
 		video := video
@@ -894,7 +902,9 @@ func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, l
 						Name:    label,
 					})
 				})
-				emitConnection(protocol.ConnectionOnline, "Читаю live chat YouTube", 0)
+				onlineOnce.Do(func() {
+					emitConnection(protocol.ConnectionOnline, "Читаю live chat YouTube", 0)
+				})
 			})
 			results <- result{video: video, err: err}
 		}()
@@ -960,15 +970,18 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 	// сообщений, в которых никто уже не участвует.
 	caughtUp := false
 
-	// restarts считает обрывы подряд, а gotAny — отдал ли поток хоть что-то.
-	// Вместе они отличают «поток мигнул и умер» от обычных переподключений:
-	// второе чинится повтором, первое — только сменой пути чтения.
+	// restarts считает подряд идущие попытки, в которых поток не отдал ни
+	// одной порции сообщений. Если здоровый поток возвращает данные, счётчик
+	// сбрасывается: единичный сетевой обрыв не должен включать резерв.
 	restarts := 0
 	gotAny := false
+	connectedReported := false
+	missingPageToken := 0
 
-	// brokeTooOften — поток рвался много раз и не отдал ни одного сообщения.
-	// Ключ и квота тут ни при чём: дальше повторять бессмысленно.
-	brokeTooOften := func() bool { return !gotAny && restarts >= maxStreamRestarts }
+	// Поток, который несколько раз подряд не смог передать ни одной порции,
+	// не держим на экспоненциальных паузах бесконечно: при разрешённом резерве
+	// пусть watcher переключит его на чтение через публичную страницу.
+	brokeTooOften := func() bool { return restarts >= maxStreamRestarts }
 
 	// Логируем, с чем именно идём в официальный API. Пустой id чата — самая
 	// вероятная причина того, что поток открывается и сразу умирает, а по
@@ -1012,21 +1025,26 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			if permanentGRPCError(err) {
 				return fmt.Errorf("YouTube live chat %q: %w", video.Title, err)
 			}
-			logInfo("Поток чата прерван, переподключаюсь: " + err.Error())
-			emitConnection(protocol.ConnectionReconnecting, "Восстанавливаю поток YouTube live chat", attempt+1)
+
+			// Не тратим 5 + 10 + 20 секунд, прежде чем признать, что gRPC
+			// вообще не может открыть поток. Это и есть случай для keyless fallback.
+			restarts++
+			if brokeTooOften() {
+				return fmt.Errorf("%w: StreamList: %v", errOfficialReadBroken, err)
+			}
+			if !gotAny {
+				emitConnection(protocol.ConnectionReconnecting, "Восстанавливаю поток YouTube live chat", attempt+1)
+			}
+			logInfo("Поток чата не открылся, повторяю: " + err.Error())
 			if !waitInterval(ctx, retryDelay(attempt)) {
 				return errSettingsChanged
 			}
 			attempt++
-			restarts++
-			if brokeTooOften() {
-				return fmt.Errorf("%w: %v", errOfficialReadBroken, err)
-			}
 			continue
 		}
 
 		received := false
-		connectedReported := false
+		streamHadItems := false
 		for {
 			response, recvErr := stream.Recv()
 			if recvErr != nil {
@@ -1058,16 +1076,34 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 				}
 				break
 			}
-			gotAny = true
 			received = true
+			// Успешный ответ означает, что канал до сервера живой: сбрасываем
+			// exponential backoff. Он нужен для серии ошибок, но не должен расти
+			// от каждого нормального завершения server-streaming RPC.
+			attempt = 0
+			if len(response.GetItems()) > 0 {
+				gotAny = true
+				streamHadItems = true
+				restarts = 0
+			}
 			if !connectedReported {
 				onConnected()
 				connectedReported = true
 			}
 			offline := response.GetOfflineAt() != ""
-			// Save the continuation token so the stream can resume after a break.
-			// The official client reconnects when the server has no nextPageToken.
-			pageToken = response.GetNextPageToken()
+			// Храним последний непустой continuation token. Пустое поле в одном
+			// ответе не должно сбрасывать курсор: иначе при следующем соединении
+			// чтение стартует заново и сообщения между попытками можно потерять.
+			nextToken := strings.TrimSpace(response.GetNextPageToken())
+			if nextToken != "" {
+				pageToken = nextToken
+				missingPageToken = 0
+			} else {
+				missingPageToken++
+				if missingPageToken >= maxStreamRestarts {
+					return fmt.Errorf("%w: YouTube не прислал nextPageToken", errOfficialReadBroken)
+				}
+			}
 			for _, item := range response.GetItems() {
 				if item == nil || !remember(item.GetId()) {
 					continue
@@ -1105,11 +1141,19 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 		}
 		if !received {
 			logInfo("YouTube завершил поток без данных; пробую возобновить")
+			if !waitInterval(ctx, retryDelay(attempt)) {
+				return errSettingsChanged
+			}
+			attempt++
+			continue
 		}
-		if !waitInterval(ctx, retryDelay(attempt)) {
+
+		// После корректного ответа сервер обычно уже успел выдать текущую
+		// порцию. Повторяем подключение с короткой постоянной паузой, а не с
+		// растущими 5/10/20/40 секундами; иначе новое сообщение ждёт backoff.
+		if !waitInterval(ctx, streamRestartDelay) {
 			return errSettingsChanged
 		}
-		attempt++
 	}
 }
 
