@@ -1036,8 +1036,8 @@ func (l *vkLine) addSmile(node map[string]any) {
 	if image == "" {
 		return
 	}
-	// Every smile node is rendered separately and in input order. Do not
-	// deduplicate by ID or name: the viewer may intentionally send repeats.
+	// Каждый узел смайла выводим отдельно и в исходном порядке.
+	// Не объединяем по ID или имени: одинаковые смайлы могут идти подряд.
 	fmt.Fprintf(&l.html, `<img class="smile" src="%s" alt="%s">`,
 		htmlEscape(image), htmlEscape(asString(node["name"])))
 }
