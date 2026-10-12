@@ -389,7 +389,7 @@ func findActiveLives(ctx context.Context, apiKey, channelID string) ([]liveVideo
 		"channelId":  {channelID},
 		"type":       {"video"},
 		"eventType":  {"live"},
-		"maxResults": {"10"},
+		"maxResults": {"50"},
 	}
 
 	var searchResponse struct {
