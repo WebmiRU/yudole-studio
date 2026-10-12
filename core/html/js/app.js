@@ -290,19 +290,87 @@ function saveButton(plugin) {
     }, children);
 }
 
+// renderBody lays the settings out in sections. Разделы объявляет плагин: у
+// одного плагина поля и кнопки могут тянуться к разным вещам, и в одной куче
+// они неразличимы.
 function renderBody(plugin) {
-    const rows = [];
+    const sections = new Map();
 
-    if (!plugin.enabled && !(plugin.options ?? []).length) {
-        rows.push(el('p', {class: 'empty'},
-            ['Включите плагин: ядро запустит его, и тот расскажет, какие у него настройки']));
-        return rows;
-    }
+    const put = (name, node) => {
+        const title = name || '';
+        if (!sections.has(title)) {
+            sections.set(title, {title, nodes: []});
+        }
+        sections.get(title).nodes.push(node);
+    };
 
     for (const option of plugin.options ?? []) {
-        rows.push(renderRow(plugin, option));
+        put(option.section, renderRow(plugin, option));
+    }
+
+    for (const button of plugin.buttons ?? []) {
+        put(button.section, renderButton(plugin, button));
+    }
+
+    if (!sections.size) {
+        return [el('p', {class: 'empty'},
+            ['Включите плагин: ядро запустит его, и тот расскажет, какие у него настройки'])];
+    }
+
+    const rows = [];
+    for (const {title, nodes} of sections.values()) {
+        if (title) {
+            rows.push(el('h3', {class: 'options__section'}, [title]));
+        }
+        rows.push(...nodes);
     }
     return rows;
+}
+
+// renderButton is an action: нажали — ядро отдало команду плагину. Пока плагин
+// занят, кнопка не нажимается ещё раз.
+function renderButton(plugin, button) {
+    const node = el('button', {
+        type: 'button',
+        class: 'btn btn--action',
+        'data-action': button.kind,
+        disabled: !plugin.enabled || state.running === button.kind,
+    }, [button.title]);
+
+    node.addEventListener('click', () => runAction(plugin, button));
+
+    const row = el('div', {class: 'action'}, [node]);
+    if (button.hint) {
+        row.append(el('p', {class: 'action__hint'}, [button.hint]));
+    }
+    return row;
+}
+
+// runAction asks the kernel to forward the command to the plugin. Ждём ответа:
+// команда может быть долгой, и страница должна показать, что идёт дело.
+async function runAction(plugin, button) {
+    if (state.running) {
+        return;
+    }
+    state.running = button.kind;
+    render();
+
+    try {
+        await api(`${API}/${plugin.id}/actions`, {
+            method: 'POST',
+            body: JSON.stringify({kind: button.kind}),
+        });
+        // Кнопка может изменить то, что плагин показывает, поэтому забираем
+        // его свежий вид.
+        const view = await api(`${API}/${plugin.id}`);
+        replacePlugin(view);
+        toast(`${plugin.title || plugin.id}: готово`);
+    } catch (error) {
+        toast(error.message);
+    } finally {
+        state.running = '';
+        render();
+    }
 }
 
 function renderRow(plugin, option) {

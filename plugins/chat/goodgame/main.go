@@ -31,10 +31,11 @@ type option = protocol.Option
 // Каналы приходят выбором: значение — то, что человек написал, а подпись —
 // название, которое GoodGame знает про этот канал.
 var options = []protocol.Option{{
-	Key:   "channels",
-	Type:  protocol.OptionSelectMultiple,
-	Label: "Каналы",
-	Hint:  "Номер канала, ник или ссылка goodgame.ru — плагин сам найдёт, что это",
+	Key:     "channels",
+	Type:    protocol.OptionSelectMultiple,
+	Label:   "Каналы",
+	Section: "Каналы",
+	Hint:    "Номер канала, ник или ссылка goodgame.ru — плагин сам найдёт, что это",
 	// Что подставить в поле, пока не знаем: у GoodGame нет списка каналов в
 	// одном месте, а лазить по сайту за каждым каналом — дело не ядра.
 	Placeholder: "53029",
@@ -77,6 +78,18 @@ func main() {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
 
+	// База смайлов: открывается при запуске и целиком лежит в памяти. Плагин
+	// должен иметь её всегда, поэтому отсутствие файла — не поломка, а пустая
+	// база: обновить можно кнопкой.
+	book, err := openBook()
+	if err != nil {
+		sayLog("база смайлов не открыта: " + err.Error())
+		book = &smileBook{}
+	} else {
+		defer book.Close()
+		sayLog(fmt.Sprintf("смайлов в базе: %d", len(book.get())))
+	}
+
 	commands := commandsFrom(ctx, os.Stdin)
 
 	// Плагин сам объявляет себя: ядро читает это первым, без запроса.
@@ -103,11 +116,30 @@ func main() {
 				sayLog("stdin closed, exiting")
 				return
 			}
-			if handle(ctx, line) {
+			if handle(ctx, book, line) {
 				return
 			}
 		}
 	}
+}
+
+// updateSmiles переписывает базу смайлов и отвечает ядру. Пока идёт скачивание,
+// плагин считается занятым: страница держит кнопку и ждёт.
+func updateSmiles(ctx context.Context, book *smileBook) {
+	if book.store == nil {
+		sayError(errNoSmilesBase.Error())
+		return
+	}
+
+	sayWaiting("скачиваю смайлы")
+
+	if err := book.Update(ctx); err != nil {
+		sayError("смайлы не обновились: " + err.Error())
+		return
+	}
+
+	sayLog(fmt.Sprintf("смайлов в базе: %d", len(book.get())))
+	sendAck(nil)
 }
 
 // channelList — каналы, к которым надо быть подключены прямо сейчас, вместе с
@@ -132,11 +164,12 @@ func describe() protocol.InfoPayload {
 		Description: "Чат игровой площадки goodgame.ru",
 		Version:     "0.1.0",
 		Options:     options,
+		Buttons:     []protocol.Button{smilesButton},
 	}
 }
 
 // handle processes one command and reports whether the plugin should stop.
-func handle(ctx context.Context, line string) bool {
+func handle(ctx context.Context, book *smileBook, line string) bool {
 	message, err := protocol.Decode([]byte(line))
 	if err != nil {
 		sayError(fmt.Sprintf("cannot parse %q: %v", line, err))
@@ -163,6 +196,9 @@ func handle(ctx context.Context, line string) bool {
 			return false
 		}
 		sendAck(settled)
+
+	case protocol.KindSmilesUpdate:
+		updateSmiles(ctx, book)
 
 	case protocol.KindQuit:
 		sendAck(nil)

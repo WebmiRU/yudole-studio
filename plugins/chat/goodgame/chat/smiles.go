@@ -1,5 +1,10 @@
 package chat
 
+import (
+	"encoding/json/jsontext"
+	"encoding/json/v2"
+)
+
 // Смайлы GoodGame приезжают отдельным файлом, а не в чате:
 //
 //	https://goodgame.ru/js/minified/global.json
@@ -18,11 +23,35 @@ const SmilesURL = "https://goodgame.ru/js/minified/global.json"
 // SmilesURLLegacy is the older address, still mentioned in the paper.
 const SmilesURLLegacy = "http://goodgame.ru/js/minified/global.js"
 
+// Text is a string that the service sometimes sends as null: у общих смайлов
+// поле channel приходит именно так.
+type Text string
+
+func (t *Text) UnmarshalJSONFrom(dec *jsontext.Decoder) error {
+	if dec.PeekKind() == 'n' {
+		if _, err := dec.ReadValue(); err != nil {
+			return err
+		}
+		*t = ""
+		return nil
+	}
+
+	var text string
+	if err := json.UnmarshalDecode(dec, &text); err != nil {
+		return err
+	}
+	*t = Text(text)
+	return nil
+}
+
 // Smiley is one smiley.
+//
+// Типы — по настоящему файлу, а не по документе: там id и bind приходят
+// числами, animated — булевым, а не строкой "1", как обещает описание.
 type Smiley struct {
-	ID string `json:"id"`
+	ID ID `json:"id"`
 	// Bind is for the service's own bookkeeping; we do not know what it means.
-	Bind string `json:"bind"`
+	Bind ID `json:"bind"`
 	// Name is the code written in a message, without the colons.
 	Name string `json:"name"`
 	// Donat means the smiley is one of those unlocked by a donation.
@@ -33,8 +62,8 @@ type Smiley struct {
 	Paid int `json:"paid"`
 	// InternalID is for the service's own bookkeeping.
 	InternalID int `json:"internal_id"`
-	// Animated is "1" for those that have a gif; anything else means no.
-	Animated string `json:"animated"`
+	// Animated says whether the smiley has a gif.
+	Animated Flag `json:"animated"`
 	// Tag is the template the code is built from, for example "?tuvney".
 	Tag string `json:"tag"`
 
@@ -43,21 +72,32 @@ type Smiley struct {
 	ImgGif string `json:"img_gif"`
 
 	// Channel is the name of the channel the smiley belongs to, empty for the
-	// ones available everywhere.
-	Channel string `json:"channel"`
+	// ones available everywhere. Бывает и null.
+	Channel Text `json:"channel"`
+	// Tags are the words the site's search finds this smiley by. Нам не
+	// нужны, но в базу кладём: файл должен лежать целиком.
+	Tags string `json:"tags"`
 	// ChannelID is the same by number. Здесь он приходит то строкой, то
 	// числом — как и channel_id в чате, поэтому берём тот же тип.
 	ChannelID ID `json:"channel_id"`
 }
 
 // IsAnimated reports whether the smiley has a gif.
-func (s Smiley) IsAnimated() bool { return s.Animated == "1" }
+func (s Smiley) IsAnimated() bool { return s.Animated.True() }
 
 // Smiles is the whole file: the smileys everyone has, and the ones bound to
 // particular channels.
 type Smiles struct {
 	Common  []Smiley            `json:"Smiles"`
 	Channel map[string][]Smiley `json:"Channel_Smiles"`
+
+	// Packed is every smiley name in one line through a comma — дубль того,
+	// что мы и так храним поимённо.
+	Packed string `json:"SmilesPacked"`
+	// CompiledAt and TimezoneOffset are the file's own words: когда GoodGame
+	// его собрал и с каким часовым поясом считал.
+	CompiledAt     Text `json:"_compiled_at_"`
+	TimezoneOffset Text `json:"timezone_offset"`
 }
 
 // Set is the smileys we know, by the code they are written by. Собирать его

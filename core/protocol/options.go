@@ -59,6 +59,10 @@ type Option struct {
 	Type string `json:"type"`
 	// Label is what the user sees.
 	Label string `json:"label"`
+	// Section groups related fields under a heading. Плагин, у которого есть
+	// поля и кнопки, разносит их по разделам — иначе всё в одной куче, и
+	// непонятно, что с чем связано.
+	Section string `json:"section,omitempty"`
 	// Hint is a short explanation under the label.
 	Hint string `json:"hint,omitempty"`
 	// Placeholder is empty-field text for text and password inputs.

@@ -5,3 +5,9 @@
 
 # windows-сборки любых плагинов
 /chat/*/*.exe
+
+# Базы, которые плагины заводят рядом с собой: база смайлов GoodGame
+/chat/*/*.db
+/chat/*/*.db-journal
+/chat/*/*.db-wal
+/chat/*/*.db-shm

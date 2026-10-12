@@ -1,6 +1,7 @@
 package plugin
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -15,6 +16,7 @@ type Info struct {
 	Version     string
 	Description string
 	Options     []protocol.Option
+	Buttons     []protocol.Button
 }
 
 // OptionKeys lists the settings the plugin understands.
@@ -31,6 +33,9 @@ func (i Info) OptionKeys() []string {
 const (
 	describeTimeout  = 5 * time.Second
 	configureTimeout = 20 * time.Second
+	// actionTimeout is for the commands that reach out to the network: обновить
+	// базу смайлов — это скачать файл и переписать таблицу.
+	actionTimeout = 90 * time.Second
 )
 
 // Describe waits for the plugin to introduce itself: a plugin announces on
@@ -54,6 +59,7 @@ func (p *Plugin) Describe() (Info, error) {
 			Version:     payload.Version,
 			Description: payload.Description,
 			Options:     payload.Options,
+			Buttons:     payload.Buttons,
 		}, nil
 
 	case <-time.After(describeTimeout):
@@ -123,6 +129,51 @@ func (p *Plugin) Configure(values map[string]any) (map[string]any, error) {
 		}
 	case <-time.After(configureTimeout):
 		return nil, fmt.Errorf("plugin %q did not confirm the options within %s", p.Name, configureTimeout)
+	}
+}
+
+// Run asks the plugin to do something that is not about its options: refresh its
+// base of smileys, rebuild a cache. Ядро ничего в команде не понимает — оно
+// только пересылает вид и ждёт ответа.
+//
+// Команда может быть долгой, поэтому ждём дольше, чем обычный ответ на
+// set_options: скачивание и переписывание базы занимают секунды, а не
+// миллисекунды.
+func (p *Plugin) Run(ctx context.Context, kind string) error {
+	// Ответ снимет ожидание: и подтверждение, и отказ означают, что работа
+	// закончена.
+	defer p.setWaiting(false, "")
+
+	if kind == "" {
+		return fmt.Errorf("plugin %q: команда без вида", p.Name)
+	}
+
+	message, err := protocol.New(kind, struct{}{})
+	if err != nil {
+		return err
+	}
+	if err := p.Send(message); err != nil {
+		return err
+	}
+
+	select {
+	case reply := <-p.repliesTo():
+		switch reply.Kind {
+		case protocol.KindAck:
+			return nil
+		case protocol.KindError:
+			var payload protocol.ErrorPayload
+			if err := reply.PayloadInto(&payload); err != nil || payload.Message == "" {
+				return fmt.Errorf("plugin %q refused %s without saying why", p.Name, kind)
+			}
+			return fmt.Errorf("%s", payload.Message)
+		default:
+			return fmt.Errorf("plugin %q answered %s with %q", p.Name, kind, reply.Kind)
+		}
+	case <-time.After(actionTimeout):
+		return fmt.Errorf("plugin %q did not finish %s within %s", p.Name, kind, actionTimeout)
+	case <-ctx.Done():
+		return ctx.Err()
 	}
 }
 

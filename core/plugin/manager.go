@@ -35,6 +35,7 @@ type PluginView struct {
 	Waiting     bool                         `json:"waiting,omitempty"`
 	WaitingText string                       `json:"waitingText,omitempty"`
 	Options     []protocol.Option            `json:"options,omitempty"`
+	Buttons     []protocol.Button            `json:"buttons,omitempty"`
 	Values      map[string]any               `json:"values,omitempty"`
 }
 
@@ -216,6 +217,7 @@ func (m *Manager) view(name string) PluginView {
 		view.Description = info.Description
 		view.Version = info.Version
 		view.Options = info.Options
+		view.Buttons = info.Buttons
 		view.Values = ValuesFor(info, stored)
 		if view.State != StateFailed {
 			view.State = StateRunning
@@ -457,6 +459,24 @@ func (m *Manager) SaveOptions(id string, values map[string]any) (PluginView, err
 	}
 	view, _ := m.Get(id)
 	return view, nil
+}
+
+// Run asks a running plugin to do something that is not about its options.
+func (m *Manager) Run(ctx context.Context, id, kind string) error {
+	m.mu.Lock()
+	process := m.running[id]
+	_, known := m.descriptors[id]
+	m.mu.Unlock()
+
+	if !known {
+		return fmt.Errorf("plugin %q is not installed", id)
+	}
+	if process == nil {
+		// Нет процесса — некому выполнять. Проще сказать прямо, чем вернуть
+		// ошибку из ниоткуда.
+		return fmt.Errorf("plugin %q is not running", id)
+	}
+	return process.Run(ctx, kind)
 }
 
 // remember puts the values a plugin settled on into the config. Until the file

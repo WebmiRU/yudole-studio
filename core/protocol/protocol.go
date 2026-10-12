@@ -36,6 +36,11 @@ const (
 	// The kernel asks the plugin to finish.
 	KindQuit = "quit"
 
+	// The kernel asks a plugin to do something that is not about its options:
+	// refresh its base of smileys. Начинается с system., потому что команда
+	// общая для всех чатов и смысла в имени плагина не несёт.
+	KindSmilesUpdate = "system.chat.smiles.update"
+
 	// A line of chat: public goes to the rooms everyone can see, private to a
 	// direct conversation.
 	KindMessagePublic  = "chat.message.public"
@@ -147,6 +152,22 @@ type InfoPayload struct {
 	Description string   `json:"description,omitempty"`
 	Version     string   `json:"version,omitempty"`
 	Options     []Option `json:"options,omitempty"`
+	// Buttons are the actions the page offers: the kernel knows only how to
+	// forward a kind to the plugin, and nothing about what it means.
+	Buttons []Button `json:"buttons,omitempty"`
+}
+
+// Button is an action on the options page: not a field, а то, что нужно
+// сделать — обновить базу, пересобрать кеш.
+type Button struct {
+	// Title is what is written on the button.
+	Title string `json:"title"`
+	// Kind is the command the kernel sends the plugin when it is pressed.
+	Kind string `json:"kind"`
+	// Hint is a short explanation under the button.
+	Hint string `json:"hint,omitempty"`
+	// Section is the heading it belongs to, the same as an option's.
+	Section string `json:"section,omitempty"`
 }
 
 // SetOptionsPayload carries the values the user filled in.

@@ -169,6 +169,38 @@
   flex-direction: column
   padding: 6px 20px 18px
 
+// Заголовок раздела: поля плагина разложены по разделам, и раздел должен
+// выглядеть отдельным, а не ещё одним полем.
+.options__section
+  margin: 22px 0 2px
+  padding-bottom: 7px
+  border-bottom: 1px solid tokens.$border-hi
+  color: tokens.$text-faint
+  font-size: 11px
+  font-weight: 600
+  letter-spacing: 0.08em
+  text-transform: uppercase
+
+  &:first-child
+    margin-top: 10px
+
+// Действие под разделом: кнопка и пояснение под ней.
+.action
+  padding: 14px 0
+
+.action__hint
+  margin-top: 7px
+  color: tokens.$text-faint
+  font-size: 12px
+
+.btn--action
+  background: tokens.$surface-hi
+  border-color: tokens.$border-hi
+
+  &:hover:not(:disabled)
+    background: tokens.$surface-max
+    border-color: tokens.$accent
+
 .field
   display: grid
   grid-template-columns: 210px minmax(0, 1fr)

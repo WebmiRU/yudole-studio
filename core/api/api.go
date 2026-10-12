@@ -5,6 +5,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"errors"
@@ -22,6 +23,7 @@ type Manager interface {
 	Enable(id string) (plugin.PluginView, error)
 	Disable(id string) (plugin.PluginView, error)
 	SaveOptions(id string, values map[string]any) (plugin.PluginView, error)
+	Run(ctx context.Context, id, kind string) error
 }
 
 // Handler builds the routes of the options page.
@@ -74,6 +76,33 @@ func Handler(manager Manager) http.Handler {
 			slog.Warn("api: saving options failed", "plugin", r.PathValue("id"), "err", err)
 		}
 		write(w, view)
+	})
+
+	// Кнопка на странице настроек: «обновить базу смайлов» и всё прочее, что
+	// плагин умеет делать по команде. Ядро в команде ничего не понимает: оно
+	// пересылает вид и ждёт ответа.
+	mux.HandleFunc("POST /api/plugins/chat/{id}/actions", func(w http.ResponseWriter, r *http.Request) {
+		var body struct {
+			Kind string `json:"kind"`
+		}
+		if err := json.UnmarshalRead(r.Body, &body); err != nil {
+			writeError(w, http.StatusBadRequest, "cannot read the action: "+err.Error())
+			return
+		}
+		if body.Kind == "" {
+			writeError(w, http.StatusBadRequest, "no kind in the action")
+			return
+		}
+
+		id := r.PathValue("id")
+		slog.Info("api: action", "plugin", id, "kind", body.Kind)
+
+		if err := manager.Run(r.Context(), id, body.Kind); err != nil {
+			slog.Warn("api: action failed", "plugin", id, "kind", body.Kind, "err", err)
+			writeError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
+		write(w, map[string]any{"kind": body.Kind, "done": true})
 	})
 
 	mux.HandleFunc("POST /api/plugins/chat/{id}/enable", func(w http.ResponseWriter, r *http.Request) {
