@@ -53,6 +53,11 @@ var (
 	// обрывы дают, а вот «открылся и сразу умер» — это уже не сеть.
 	maxStreamRestarts = 3
 
+	// backlogWindow — сколько истории показывать при первом подключении.
+	// Эфир идёт часами, и без этого окна плагин при каждом старте выкладывал в
+	// ленту всё, что было сказано за последние сорок минут.
+	backlogWindow = 2 * time.Minute
+
 	// chatEndedInterval — пауза после завершившегося чата. Раунд без паузы
 	// превращается в тысячу одинаковых попыток за час, а это уже не чтение,
 	// а долбёжка чужого сервиса.
@@ -949,6 +954,12 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 		return true
 	}
 
+	// caughtUp означает, что мы дочитали историю и стоим на живом краю. Пока
+	// он не установлен, всё, что старше backlogWindow, — это хвост прошлого:
+	// эфир идёт часами, и при каждом старте плагин получал сорок минутых
+	// сообщений, в которых никто уже не участвует.
+	caughtUp := false
+
 	// restarts считает обрывы подряд, а gotAny — отдал ли поток хоть что-то.
 	// Вместе они отличают «поток мигнул и умер» от обычных переподключений:
 	// второе чинится повтором, первое — только сменой пути чтения.
@@ -1052,6 +1063,16 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			for _, item := range response.GetItems() {
 				if item == nil || !remember(item.GetId()) {
 					continue
+				}
+				// Пока мы не дочитали историю, всё старше окна — прошлое. В ленте
+				// этому не место: человек открывает чат и видит сорок минутых
+				// сообщений, в которых он уже не участвовал.
+				if !caughtUp {
+					published, err := time.Parse(time.RFC3339Nano, item.GetSnippet().GetPublishedAt())
+					if err == nil && time.Since(published) > backlogWindow {
+						continue
+					}
+					caughtUp = true
 				}
 				if err := emitChatMessage(channel, item); err != nil {
 					logInfo("Не удалось обработать сообщение YouTube: " + err.Error())

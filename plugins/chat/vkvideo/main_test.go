@@ -15,8 +15,8 @@ import (
 func TestNormalizeChannel(t *testing.T) {
 	tests := []struct {
 		input string
-		want string
-		bad bool
+		want  string
+		bad   bool
 	}{
 		{input: "streamer", want: "streamer"},
 		{input: "@streamer", want: "streamer"},
@@ -164,5 +164,155 @@ func TestProtocolAckRemainsValidJSON(t *testing.T) {
 	}
 	if string(envelope["kind"]) != "\"ack\"" {
 		t.Fatalf("unexpected protocol envelope: %s", line)
+	}
+}
+
+// Текст реплики приходит закодированным дважды. Печатать его как есть нельзя:
+// в ленте появляется мусор вида ["привет","unstyled",[]], и читать нечего.
+func TestMessageTextDecodesDoubleEncodedContent(t *testing.T) {
+	cases := []struct {
+		name   string
+		blocks []vkBlock
+		want   string
+	}{
+		{
+			name: "простой текст",
+			blocks: []vkBlock{{
+				Type:    "text",
+				Content: `["дискорд не работает((","unstyled",[]]`,
+			}},
+			want: "дискорд не работает((",
+		},
+		{
+			name: "упоминание перед текстом",
+			blocks: []vkBlock{
+				{Type: "mention", DisplayName: "Dank1n", Nick: "Dank1n", Name: "Dank1n"},
+				{Type: "text", Content: `[" привет","unstyled",[]]`},
+			},
+			want: "@Dank1n привет",
+		},
+		{
+			name: "оформление не попадает в текст",
+			blocks: []vkBlock{{
+				Type:    "text",
+				Content: `["жирный","bold",[]]`,
+			}},
+			want: "жирный",
+		},
+		{
+			name: "обычная строка без разметки остаётся как есть",
+			blocks: []vkBlock{{
+				Type:    "text",
+				Content: `просто текст`,
+			}},
+			want: "просто текст",
+		},
+		{
+			name: "смайли и ссылка",
+			blocks: []vkBlock{
+				{Type: "smile", Name: "🔥"},
+				{Type: "text", Content: `[" привет","unstyled",[]]`},
+			},
+			want: "🔥 привет",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := messageText(tc.blocks); got != tc.want {
+				t.Fatalf("messageText() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Сообщения приходят и по двум топикам сразу, поэтому одно и то же реплика
+// должна отсеиваться по её id.
+func TestChannelNameFromPush(t *testing.T) {
+	cases := map[string]string{
+		"public-chat:17758307":         "17758307",
+		"channel-chat:17758307":        "17758307",
+		"channel-chat:17758307@356786": "17758307",
+		"channel-info:17758307":        "17758307",
+		"broken":                       "",
+	}
+	for topic, want := range cases {
+		if got := channelNameFromPush(topic); got != want {
+			t.Errorf("channelNameFromPush(%q) = %q, want %q", topic, got, want)
+		}
+	}
+}
+
+// Смайлы приходят отдельными узлами внутри текста. Без них реплика выглядит
+// обрезанной, и человек по ней не вспомнит, что вообще писал.
+func TestMessageTextKeepsSmilesInsideText(t *testing.T) {
+	cases := []struct {
+		name   string
+		blocks []vkBlock
+		want   string
+	}{
+		{
+			name: "смайл внутри текста",
+			blocks: []vkBlock{{
+				Type:    "text",
+				Content: `["привет ",  "unstyled",[{"type":"smile","name":"🔥"}]]`,
+			}},
+			want: "привет 🔥",
+		},
+		{
+			name: "текст со смайлом и упоминанием",
+			blocks: []vkBlock{{
+				Type:    "text",
+				Content: `["привет ","unstyled",[{"type":"smile","name":"🔥"},{"type":"mention","displayName":"Dank1n"}]]`,
+			}},
+			want: "привет 🔥",
+		},
+		{
+			// Узел устроен как [текст, оформление, содержимое], поэтому дети
+			// идут после текста, а не внутрь слова.
+			name: "оформление не печатается, содержимое — да",
+			blocks: []vkBlock{{
+				Type:    "text",
+				Content: `["слово","bold",[{"type":"smile","name":"🎉"}]]`,
+			}},
+			want: "слово🎉",
+		},
+		{
+			name: "смайл отдельным блоком",
+			blocks: []vkBlock{
+				{Type: "smile", Name: "🔥"},
+				{Type: "text", Content: `[" привет","unstyled",[]]`},
+			},
+			want: "🔥 привет",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := messageText(tc.blocks); got != tc.want {
+				t.Fatalf("messageText() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+// Анимированный смайл приходит десятками одинаковых узлов — по одному на кадр.
+// Без отсечки одна реплика превращалась в двадцать одинаковых подписей.
+func TestMessageTextCollapsesRepeatedSmiles(t *testing.T) {
+	blocks := []vkBlock{{
+		Type:    "text",
+		Content: `["", "unstyled", [{"type":"smile","name":"CptCheer7"},{"type":"smile","name":"CptCheer7"},{"type":"smile","name":"CptCheer7"}]]`,
+	}}
+	if got := messageText(blocks); got != "CptCheer7" {
+		t.Fatalf("messageText() = %q, want %q", got, "CptCheer7")
+	}
+
+	// Разные смайлы в одной реплике остаются все: человек мог послать и то и то.
+	mixed := []vkBlock{{
+		Type:    "text",
+		Content: `["", "unstyled", [{"type":"smile","name":"🔥"},{"type":"smile","name":"🎉"}]]`,
+	}}
+	if got := messageText(mixed); got != "🔥🎉" {
+		t.Fatalf("messageText() = %q, want %q", got, "🔥🎉")
 	}
 }

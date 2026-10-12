@@ -28,17 +28,17 @@ const (
 	requestLimit  = 20 * time.Second
 	maxBackoff    = 60 * time.Second
 	maxMessageIDs = 4096
-	userAgent      = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
+	userAgent     = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36"
 )
 
 var (
-	httpClient = &http.Client{Timeout: requestLimit}
-	errSettingsChanged = errors.New("настройки VK Видео Live изменились")
+	httpClient          = &http.Client{Timeout: requestLimit}
+	errSettingsChanged  = errors.New("настройки VK Видео Live изменились")
 	errNoUsableChannels = errors.New("не удалось подключиться ни к одному каналу")
-	sendMu sync.Mutex
-	cfgMu sync.RWMutex
-	cfg settings
-	changed = make(chan struct{}, 1)
+	sendMu              sync.Mutex
+	cfgMu               sync.RWMutex
+	cfg                 settings
+	changed             = make(chan struct{}, 1)
 )
 
 type settings struct {
@@ -46,23 +46,23 @@ type settings struct {
 }
 
 type vkChannel struct {
-	Input string
-	Slug string
-	ID string
+	Input       string
+	Slug        string
+	ID          string
 	DisplayName string
-	OwnerName string
-	OwnerNick string
+	OwnerName   string
+	OwnerNick   string
 }
 
 var options = []protocol.Option{
 	{
-		Key: "channels",
-		Type: protocol.OptionTextMultiple,
-		Label: "Каналы",
-		Section: "Каналы",
+		Key:         "channels",
+		Type:        protocol.OptionTextMultiple,
+		Label:       "Каналы",
+		Section:     "Каналы",
 		Placeholder: "имя_канала или https://live.vkvideo.ru/имя_канала",
-		Hint: "Ссылки или имена каналов VK Видео Live, по одному на строку. Авторизация и API-ключ не нужны",
-		Default: []any{},
+		Hint:        "Ссылки или имена каналов VK Видео Live, по одному на строку. Авторизация и API-ключ не нужны",
+		Default:     []any{},
 	},
 }
 
@@ -71,10 +71,10 @@ func main() {
 	defer stop()
 
 	send(protocol.KindPluginChat, protocol.InfoPayload{
-		Title: "VK Видео Live",
+		Title:       "VK Видео Live",
 		Description: "Чтение публичных чатов трансляций VK Видео Live — без авторизации и API-ключа.",
-		Version: "0.1.0",
-		Options: options,
+		Version:     "0.1.0",
+		Options:     options,
 	})
 
 	commands := make(chan string)
@@ -130,8 +130,8 @@ func handle(line string) bool {
 		if len(fields) != 0 {
 			send(protocol.KindError, protocol.ErrorPayload{
 				Message: "Проверьте настройки VK Видео Live",
-				Fields: fields,
-				Items: items,
+				Fields:  fields,
+				Items:   items,
 			})
 			return false
 		}
@@ -309,10 +309,12 @@ func supervise(ctx context.Context) {
 		}
 
 		state := protocol.ConnectionConnecting
+		reason := "Подключаюсь к чату VK Видео Live"
 		if attempt > 0 {
 			state = protocol.ConnectionReconnecting
+			reason = "Восстанавливаю связь с VK Видео Live"
 		}
-		emitConnection(state, "", attempt)
+		emitConnection(state, reason, attempt)
 
 		err := runSession(ctx, current)
 		if ctx.Err() != nil {
@@ -334,9 +336,10 @@ func supervise(ctx context.Context) {
 		}
 
 		attempt++
-		reason := "соединение закрыто"
 		if err != nil {
 			reason = err.Error()
+		} else {
+			reason = "соединение закрыто"
 		}
 		emitConnection(protocol.ConnectionReconnecting, reason, attempt)
 		delay := time.Second * time.Duration(1<<min(attempt-1, 6))
@@ -472,18 +475,42 @@ func runSession(parent context.Context, current settings) error {
 		if ctx.Err() != nil {
 			return errSettingsChanged
 		}
-		chatChannel := "public-chat:" + channel.ID
-		nextID++
-		if err := invoke(ctx, conn, nextID, map[string]any{
-			"subscribe": map[string]any{"channel": chatChannel},
-		}, &pending); err != nil {
-			if ctx.Err() != nil && parent.Err() == nil {
-				return errSettingsChanged
+
+		// Подписываться надо не на один канал, а на оба, и вот почему.
+		//
+		// Адрес блога всегда называется public-chat:{id} — он не меняется никогда.
+		// Но как только начинается эфир, сообщения идут по другому адресу:
+		// channel-chat:{id}. Подписавшись только на public-chat, плагин сидит в
+		// тишине на живом канале и честно показывает «на связи» — хуже некуда:
+		// вроде всё работает, а реплик нет.
+		//
+		// Какой из двух сработает — зависит от состояния канала, поэтому
+		// берём оба и считаем канал подключённым, если жив хотя бы один.
+		chatChannels := []string{"public-chat:" + channel.ID, "channel-chat:" + channel.ID}
+		chatOK := false
+		var chatErrors []string
+		for _, name := range chatChannels {
+			nextID++
+			if err := invoke(ctx, conn, nextID, map[string]any{
+				"subscribe": map[string]any{"channel": name},
+			}, &pending); err != nil {
+				if ctx.Err() != nil && parent.Err() == nil {
+					return errSettingsChanged
+				}
+				chatErrors = append(chatErrors, name+": "+err.Error())
+				continue
+			}
+			chatOK = true
+		}
+		if !chatOK {
+			reason := "подписка на чат не удалась"
+			if len(chatErrors) > 0 {
+				reason += " (" + strings.Join(chatErrors, "; ") + ")"
 			}
 			send(protocol.KindChannelJoinFailed, protocol.ChannelPayload{
-				Channel: channel.Slug, Name: channelName(channel), Reason: "подписка на чат: " + err.Error(),
+				Channel: channel.Slug, Name: channelName(channel), Reason: reason,
 			})
-			logInfo(fmt.Sprintf("VK Видео Live: подписка на чат %q не удалась: %v", channel.Slug, err))
+			logInfo(fmt.Sprintf("VK Видео Live: подписка на чат %q не удалась: %s", channel.Slug, reason))
 			delete(byID, channel.ID)
 			continue
 		}
@@ -507,7 +534,7 @@ func runSession(parent context.Context, current settings) error {
 	if joined == 0 {
 		return errNoUsableChannels
 	}
-	emitConnection(protocol.ConnectionOnline, "", 0)
+	emitConnection(protocol.ConnectionOnline, "Читаю чат VK Видео Live", 0)
 
 	seen := newSeenIDs()
 	streamStart := make(map[string]int64)
@@ -531,7 +558,7 @@ func runSession(parent context.Context, current settings) error {
 }
 
 type httpStatusError struct {
-	Status int
+	Status   int
 	Endpoint string
 }
 
@@ -573,17 +600,17 @@ func requestJSON(ctx context.Context, client *http.Client, endpoint string, outp
 }
 
 type vkUser struct {
-	ID int64
+	ID          int64
 	DisplayName string
-	Name string
-	Nick string
+	Name        string
+	Nick        string
 }
 
 type vkBlog struct {
 	PublicWebSocketChannel string
-	BlogURL string
-	Owner vkUser
-	Data *vkBlog
+	BlogURL                string
+	Owner                  vkUser
+	Data                   *vkBlog
 }
 
 func resolveChannel(ctx context.Context, client *http.Client, base, input string) (vkChannel, error) {
@@ -634,7 +661,7 @@ func resolveChannel(ctx context.Context, client *http.Client, base, input string
 func getConnectToken(ctx context.Context, client *http.Client, base string) (string, error) {
 	var response struct {
 		Token string
-		Data struct {
+		Data  struct {
 			Token string
 		}
 	}
@@ -669,10 +696,10 @@ func invoke(ctx context.Context, conn *websocket.Conn, id int64, method map[stri
 			return err
 		}
 		var envelope struct {
-			ID int64
-			Push json.RawMessage
+			ID    int64
+			Push  json.RawMessage
 			Error *struct {
-				Code int
+				Code    int
 				Message string
 			}
 		}
@@ -712,20 +739,20 @@ func readFrame(ctx context.Context, conn *websocket.Conn) (json.RawMessage, erro
 type wsPush struct {
 	Push struct {
 		Channel string
-		Pub struct {
-			Data json.RawMessage
+		Pub     struct {
+			Data   json.RawMessage
 			Offset int64
 		}
 	}
 }
 
 type vkEvent struct {
-	Type string
-	Data json.RawMessage
-	BlogURL string
-	Title string
+	Type     string
+	Data     json.RawMessage
+	BlogURL  string
+	Title    string
 	IsOnline bool
-	Viewers int
+	Viewers  int
 	StreamID string
 	Category struct {
 		Title string
@@ -733,21 +760,21 @@ type vkEvent struct {
 }
 
 type vkMessage struct {
-	ID int64
+	ID        int64
 	CreatedAt int64
-	Author vkUser
-	User vkUser
-	Data []vkBlock
+	Author    vkUser
+	User      vkUser
+	Data      []vkBlock
 	IsPrivate bool
 }
 
 type vkBlock struct {
-	Type string
-	Content string
+	Type        string
+	Content     string
 	DisplayName string
-	Name string
-	Nick string
-	URL string
+	Name        string
+	Nick        string
+	URL         string
 }
 
 func processPush(raw json.RawMessage, byID map[string]vkChannel, seen *seenIDs, streamStart map[string]int64) {
@@ -755,12 +782,8 @@ func processPush(raw json.RawMessage, byID map[string]vkChannel, seen *seenIDs, 
 	if err := json.Unmarshal(raw, &push); err != nil || push.Push.Channel == "" || len(push.Push.Pub.Data) == 0 {
 		return
 	}
-	parts := strings.Split(push.Push.Channel, ":")
-	if len(parts) < 2 {
-		return
-	}
-	channelID := parts[len(parts)-1]
-	channel, ok := byID[channelID]
+
+	channel, ok := byID[channelNameFromPush(push.Push.Channel)]
 	if !ok {
 		return
 	}
@@ -776,7 +799,7 @@ func processPush(raw json.RawMessage, byID map[string]vkChannel, seen *seenIDs, 
 			return
 		}
 		id := strconv.FormatInt(message.ID, 10)
-		if message.ID != 0 && !seen.Add(channel.ID + ":" + id) {
+		if message.ID != 0 && !seen.Add(channel.ID+":"+id) {
 			return
 		}
 		author := message.Author
@@ -798,7 +821,7 @@ func processPush(raw json.RawMessage, byID map[string]vkChannel, seen *seenIDs, 
 		}
 		send(kind, protocol.ChatPayload{
 			Channel: channel.Slug,
-			User: protocol.ChatUser{Name: name, ID: idForUser(author.ID), Login: login},
+			User:    protocol.ChatUser{Name: name, ID: idForUser(author.ID), Login: login},
 			Message: protocol.ChatLine{Src: text, Text: text},
 		})
 	case "stream_online_status":
@@ -812,31 +835,49 @@ func processPush(raw json.RawMessage, byID map[string]vkChannel, seen *seenIDs, 
 			delete(streamStart, channel.ID)
 		}
 		send(protocol.KindChannelInfo, protocol.ChannelInfoPayload{
-			Channel: channel.Slug,
-			Name: event.Title,
+			Channel:  channel.Slug,
+			Name:     event.Title,
 			Streamer: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick),
-			Started: started,
-			Clients: event.Viewers,
-			Users: event.Viewers,
+			Started:  started,
+			Clients:  event.Viewers,
+			Users:    event.Viewers,
 		})
 	case "stream_start":
 		if streamStart[channel.ID] == 0 {
 			streamStart[channel.ID] = time.Now().Unix()
 		}
 		send(protocol.KindChannelInfo, protocol.ChannelInfoPayload{
-			Channel: channel.Slug,
+			Channel:  channel.Slug,
 			Streamer: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick),
-			Started: streamStart[channel.ID],
+			Started:  streamStart[channel.ID],
 		})
 	case "stream_end":
 		delete(streamStart, channel.ID)
 		send(protocol.KindChannelInfo, protocol.ChannelInfoPayload{
-			Channel: channel.Slug,
+			Channel:  channel.Slug,
 			Streamer: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick),
-			Clients: 0,
-			Users: 0,
+			Clients:  0,
+			Users:    0,
 		})
 	}
+}
+
+// channelNameFromPush достаёт id канала из адреса топика.
+//
+// Адреса приходят в двух видах: public-chat:12345 и channel-chat:12345, а ещё
+// бывает channel-chat:12345@67890 — с номером слота. Номер слота к каналу не
+// относится, и если его не отбросить, сообщение не найдёт свой канал и молча
+// потеряется.
+func channelNameFromPush(topic string) string {
+	parts := strings.Split(topic, ":")
+	if len(parts) < 2 {
+		return ""
+	}
+	id := parts[len(parts)-1]
+	if at := strings.Index(id, "@"); at >= 0 {
+		id = id[:at]
+	}
+	return id
 }
 
 func messageText(blocks []vkBlock) string {
@@ -844,7 +885,7 @@ func messageText(blocks []vkBlock) string {
 	for _, block := range blocks {
 		switch block.Type {
 		case "text", "link":
-			out.WriteString(block.Content)
+			out.WriteString(vkPlainText(block.Content))
 		case "mention":
 			name := firstNonEmpty(block.DisplayName, block.Name, block.Nick)
 			if name != "" {
@@ -859,11 +900,96 @@ func messageText(blocks []vkBlock) string {
 			}
 		default:
 			if block.Content != "" {
-				out.WriteString(block.Content)
+				out.WriteString(vkPlainText(block.Content))
 			}
 		}
 	}
+	return strings.TrimSpace(out.String())
+}
+
+// vkPlainText достаёт читаемый текст из содержимого блока.
+//
+// Текст приходит закодированным дважды: в content лежит JSON-строка, а внутри
+// неё — сам текст вместе с оформлением: ["привет","unstyled",[]]. Печатать это
+// как есть нельзя, в ленте появляется мусор вида ["привет","unstyled",[]].
+// Если разобрать не удалось, отдаём как есть: лучше лишние кавычки, чем пустота.
+func vkPlainText(raw string) string {
+	if raw == "" || raw[0] != '[' && raw[0] != '{' {
+		return raw
+	}
+	var decoded any
+	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
+		return raw
+	}
+	var out strings.Builder
+	collectVKTextSeen(&out, decoded, map[string]bool{})
 	return out.String()
+}
+
+// collectVKText обходит разобранный кусок. Узел устроен как
+// [текст, оформление, содержимое]: первый элемент — сам текст, второй — стиль
+// («unstyled», «bold» и подобные), его печатать нельзя, третий — вложенные куски.
+func collectVKText(out *strings.Builder, node any) {
+	collectVKTextSeen(out, node, nil)
+}
+
+// collectVKTextSeen обходит разобранный кусок, помня уже выведенные смайлы.
+//
+// seen передаётся на всё сообщение целиком, а не на отдельный блок: анимированные
+// смайлы приходят сразу десятками одинаковых узлов — по одному на кадр, — и без
+// этого одна реплика превращалась в двадцать одинаковых подписей подряд.
+func collectVKTextSeen(out *strings.Builder, node any, seen map[string]bool) {
+	switch value := node.(type) {
+	case string:
+		out.WriteString(value)
+	case []any:
+		if len(value) == 0 {
+			return
+		}
+		// Формы две, и по длине их не различить: узел это
+		// [текст, оформление, содержимое], а содержимое — снова список узлов.
+		// Различает тип второго элемента: у узла на этом месте строка-стиль
+		// («unstyled», «bold»), у списка узлов — объект или ничего.
+		if len(value) >= 2 {
+			if _, isStyle := value[1].(string); isStyle {
+				collectVKTextSeen(out, value[0], seen)
+				for _, nested := range value[2:] {
+					collectVKTextSeen(out, nested, seen)
+				}
+				return
+			}
+		}
+		for _, nested := range value {
+			collectVKTextSeen(out, nested, seen)
+		}
+	case map[string]any:
+		// Смайлы приходят отдельными узлами прямо внутри текста. Без них
+		// реплика выглядит обрезанной, а человек по ней не вспомнит, что писал.
+		if kind, _ := value["type"].(string); kind == "smile" {
+			name := firstNonEmpty(asString(value["name"]), asString(value["displayName"]))
+			if name != "" {
+				// Один и тот же смайл в одной реплике печатаем один раз.
+				if seen[name] {
+					return
+				}
+				if seen != nil {
+					seen[name] = true
+				}
+				out.WriteString(name)
+				return
+			}
+		}
+		for _, key := range []string{"text", "content", "title"} {
+			if child, ok := value[key]; ok {
+				collectVKTextSeen(out, child, seen)
+			}
+		}
+	}
+}
+
+func asString(v any) string {
+	s, _ := v.(string)
+	return s
 }
 
 func idForUser(id int64) string {
@@ -887,10 +1013,10 @@ func firstNonEmpty(values ...string) string {
 }
 
 type seenIDs struct {
-	mu sync.Mutex
-	set map[string]struct{}
+	mu    sync.Mutex
+	set   map[string]struct{}
 	order []string
-	next int
+	next  int
 }
 
 func newSeenIDs() *seenIDs {
