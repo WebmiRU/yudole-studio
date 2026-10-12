@@ -287,11 +287,7 @@ function messagePanel(notice, head, content) {
         svgElement('path', {class: 'msg__frame-shape', d: MESSAGE_PANEL_OUTLINE}),
         svgElement('path', {
             class: 'msg__frame-highlight',
-            d: 'M 3 3 L 18 3 L 52 12 L 310 40 L 350 44 M 2 356 L 38 398 L 78 418 L 140 422 M 1065 505 L 1082 518 L 1347 518',
-        }),
-        svgElement('path', {
-            class: 'msg__frame-detail',
-            d: 'M 1335 205 L 1335 460',
+            d: 'M 2 2 L 18 2 L 52 11 L 310 40 L 350 44 M 2 356 L 38 398 L 78 418 L 140 422 M 1065 505 L 1347 505',
         }),
     ]);
 
@@ -299,19 +295,12 @@ function messagePanel(notice, head, content) {
     const rule = el('div', {class: 'msg__rule', 'aria-hidden': 'true'}, [
         el('span', {class: 'msg__rule-signal'}),
     ]);
-    const footer = el('footer', {class: 'msg__foot', 'aria-hidden': 'true'}, [
-        el('span', {class: 'msg__foot-mark'}),
-        el('span', {class: 'msg__foot-line'}),
-        el('span', {class: 'msg__foot-tick'}),
-    ]);
-
     return el('article', noticeAttrs(notice), [
         frame,
         el('div', {class: 'msg__panel'}, [
             header,
             rule,
             el('div', {class: 'msg__content'}, [content]),
-            footer,
         ]),
     ]);
 }
