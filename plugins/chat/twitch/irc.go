@@ -10,7 +10,8 @@ import (
 
 type ircMessage struct {
 	Tags map[string]string
-	Prefix, Command string
+	Prefix string
+	Command string
 	Params []string
 	Trailing string
 }
@@ -72,7 +73,11 @@ func userLogin(prefix string) string {
 	if i := strings.IndexByte(prefix, '!'); i >= 0 { return strings.ToLower(prefix[:i]) }
 	return strings.ToLower(prefix)
 }
-func channelName(s string) string { return strings.TrimPrefix(strings.TrimSpace(s), "#") }
+
+func channelName(s string) string {
+	return strings.ToLower(strings.TrimPrefix(strings.TrimSpace(s), "#"))
+}
+
 func validLogin(s string) bool {
 	if len(s) < 1 || len(s) > 25 { return false }
 	for _, r := range strings.ToLower(s) {
@@ -81,16 +86,23 @@ func validLogin(s string) bool {
 	return true
 }
 
-type emoteRange struct { ID string; Start, End int }
+type emoteRange struct {
+	ID string
+	Start, End int
+}
+
+// parseEmoteRanges parses Twitch's "emotes" IRCv3 tag. Offsets are inclusive
+// UTF-16 code-unit indexes; malformed ranges are ignored.
 func parseEmoteRanges(tag string) []emoteRange {
 	var out []emoteRange
 	for _, group := range strings.Split(tag, "/") {
 		id, positions, ok := strings.Cut(group, ":")
-		if !ok || id == "" { continue }
+		if !ok || id == "" || !digitsOnly(id) { continue }
 		for _, pos := range strings.Split(positions, ",") {
 			a, b, ok := strings.Cut(pos, "-")
 			if !ok { continue }
-			start, e1 := strconv.Atoi(a); end, e2 := strconv.Atoi(b)
+			start, e1 := strconv.Atoi(a)
+			end, e2 := strconv.Atoi(b)
 			if e1 == nil && e2 == nil && start >= 0 && end >= start {
 				out = append(out, emoteRange{ID:id, Start:start, End:end})
 			}
@@ -99,8 +111,18 @@ func parseEmoteRanges(tag string) []emoteRange {
 	return out
 }
 
-// Twitch emote offsets are inclusive UTF-16 code-unit positions.
+func digitsOnly(s string) bool {
+	if s == "" { return false }
+	for _, r := range s {
+		if r < '0' || r > '9' { return false }
+	}
+	return true
+}
+
+// utf16Offset converts a UTF-16 code-unit offset into a UTF-8 byte offset.
+// Offsets splitting a surrogate pair are rejected rather than corrupting text.
 func utf16Offset(s string, target int) (int, bool) {
+	if target < 0 { return 0, false }
 	units, bytes := 0, 0
 	if target == 0 { return 0, true }
 	for _, r := range s {
@@ -114,9 +136,9 @@ func utf16Offset(s string, target int) (int, bool) {
 	return bytes, units == target
 }
 
-func renderEmotes(text, emotesTag, gifTag string) string {
-	ranges := append(parseEmoteRanges(emotesTag), parseEmoteRanges(gifTag)...)
-	type replacement struct { start, end int; html string }
+func renderEmotes(text, emotesTag string) string {
+	ranges := parseEmoteRanges(emotesTag)
+	type replacement struct { start, end int; markup string }
 	var rs []replacement
 	for _, r := range ranges {
 		start, ok1 := utf16Offset(text, r.Start)
@@ -127,13 +149,16 @@ func renderEmotes(text, emotesTag, gifTag string) string {
 		rs = append(rs, replacement{start, end, "<img class=\"chat-emote\" alt=\"" + alt + "\" src=\"" + url + "\" loading=\"lazy\">"})
 	}
 	if len(rs) == 0 { return "" }
-	sort.Slice(rs, func(i,j int) bool { return rs[i].start < rs[j].start })
+	sort.Slice(rs, func(i, j int) bool {
+		if rs[i].start == rs[j].start { return rs[i].end < rs[j].end }
+		return rs[i].start < rs[j].start
+	})
 	var b strings.Builder
 	at := 0
 	for _, r := range rs {
 		if r.start < at || r.start < 0 || r.end > len(text) { continue }
 		b.WriteString(html.EscapeString(text[at:r.start]))
-		b.WriteString(r.html)
+		b.WriteString(r.markup)
 		at = r.end
 	}
 	b.WriteString(html.EscapeString(text[at:]))
