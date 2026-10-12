@@ -987,7 +987,15 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 		request := &ytproto.LiveChatMessageListRequest{
 			LiveChatId: stringPtr(video.Chat),
 			Part:       []string{"id", "snippet", "authorDetails"},
-			MaxResults: uint32Ptr(500),
+		}
+		// MaxResults намеренно не задаём. С ним сервер ведёт себя как при
+		// постраничном запросе: выдал порцию и закрыл поток, вместо того чтобы
+		// держать его открытым и доставлять реплики сразу. На практике это
+		// означало задержку в десятки секунд — реплика ждала следующего открытия.
+		if pageToken == "" && !caughtUp {
+			// Первым запросом берём побольше истории: иначе до живого края придётся
+			// дёргаться десятки раз подряд.
+			request.MaxResults = uint32Ptr(500)
 		}
 		if pageToken != "" {
 			request.PageToken = stringPtr(pageToken)

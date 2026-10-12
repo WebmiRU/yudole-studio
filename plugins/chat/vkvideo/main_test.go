@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"strconv"
 	"testing"
+	"time"
 
 	"studio/core/protocol"
 )
@@ -314,5 +315,87 @@ func TestMessageTextCollapsesRepeatedSmiles(t *testing.T) {
 	}}
 	if got := messageText(mixed); got != "🔥🎉" {
 		t.Fatalf("messageText() = %q, want %q", got, "🔥🎉")
+	}
+}
+
+// Адреса чата приходят со страницы вперемешку со слотами и чужими каналами.
+// Сверяться надо по номеру канала, иначе подписка уедет не туда.
+func TestTopicBelongsTo(t *testing.T) {
+	cases := []struct {
+		topic string
+		id    string
+		want  bool
+	}{
+		{"channel-chat:17758307", "17758307", true},
+		{"channel-chat:17758307@0", "17758307", true},
+		{"channel-chat:17758307@356786", "17758307", true},
+		{"channel-chat:18091066", "17758307", false},
+		{"channel-chat:177583070", "17758307", false},
+		{"channel-chat:17758307", "", false},
+	}
+	for _, tc := range cases {
+		if got := topicBelongsTo(tc.topic, tc.id); got != tc.want {
+			t.Errorf("topicBelongsTo(%q, %q) = %v, want %v", tc.topic, tc.id, got, tc.want)
+		}
+	}
+}
+
+// Адреса собираются со страницы один раз и без повторов.
+func TestTopicRegexFindsSlotAddresses(t *testing.T) {
+	page := `{"wsChatChannel":"channel-chat:17758307","wsChatSlotChannel":"channel-chat:17758307@0",` +
+		`"wsChatChannel":"channel-chat:30026162","wsChatSlotChannel":"channel-chat:30026162@358161"}`
+	found := map[string]bool{}
+	for _, match := range topicRe.FindAllStringSubmatch(page, -1) {
+		found[match[1]] = true
+	}
+	want := map[string]bool{
+		"channel-chat:17758307":        true,
+		"channel-chat:17758307@0":      true,
+		"channel-chat:30026162":        true,
+		"channel-chat:30026162@358161": true,
+	}
+	if len(found) != len(want) {
+		t.Fatalf("найдено %d адресов: %v", len(found), found)
+	}
+	for topic := range want {
+		if !found[topic] {
+			t.Errorf("не найден адрес %q", topic)
+		}
+	}
+}
+
+// Повторы между блоками тоже убираются: анимированный смайл приходит и
+// отдельными блоками, и узлами внутри текста.
+func TestMessageTextCollapsesSmilesAcrossBlocks(t *testing.T) {
+	blocks := []vkBlock{
+		{Type: "smile", Name: "hardplayDance"},
+		{Type: "text", Content: `["", "unstyled", [{"type":"smile","name":"hardplayDance"}]]`},
+	}
+	if got := messageText(blocks); got != "hardplayDance" {
+		t.Fatalf("messageText() = %q, want %q", got, "hardplayDance")
+	}
+}
+
+// Счётчик зрителей VK меняется постоянно. Если слать его как есть, лента
+// засоряется одинаковыми строками несколько раз в минуту, и человек перестаёт
+// её читать вовсе.
+func TestChannelStateThrottlesViewerReports(t *testing.T) {
+	state := &channelState{sentAt: time.Now(), announced: true, title: "Эфир"}
+
+	if state.shouldReport("Эфир", 2000) {
+		t.Error("сразу после отправки повторять нельзя")
+	}
+	if !state.shouldReport("Другое название", 2000) {
+		t.Error("смена названия трансляции должна показываться сразу")
+	}
+
+	old := &channelState{sentAt: time.Now().Add(-2 * viewersReportInterval), announced: true, title: "Эфир"}
+	if !old.shouldReport("Эфир", 2100) {
+		t.Error("через минуту счётчик обновить надо")
+	}
+
+	fresh := &channelState{}
+	if !fresh.shouldReport("Эфир", 10) {
+		t.Error("первый раз показать канал надо")
 	}
 }
