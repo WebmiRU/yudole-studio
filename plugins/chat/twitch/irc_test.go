@@ -63,6 +63,14 @@ func TestRenderEmotesEscapesText(t *testing.T) {
 	}
 }
 
+func TestRenderEmotesSupportsModernIDs(t *testing.T) {
+	id := "emotesv2_4c3b4ed516de493bbcd2df2f5d450f49"
+	got := renderEmotes("Kappa", id+":0-4")
+	if !strings.Contains(got, "/"+id+"/") {
+		t.Fatalf("modern Twitch emote ID was not rendered: %s", got)
+	}
+}
+
 func TestRenderEmotesWithoutRanges(t *testing.T) {
 	if got := renderEmotes("plain <text>", ""); got != "" {
 		t.Fatalf("expected empty HTML, got %q", got)
