@@ -39,6 +39,10 @@ const onlyChatsEl = document.getElementById('only-chats');
 const LINE = 'chat.message.public';
 const PRIVATE = 'chat.message.private';
 
+// Each entry gets one random torn-edge profile for this page session. WeakMap
+// keeps it stable while redraw() rebuilds the visible feed repeatedly.
+const edgeVariants = new WeakMap();
+
 // --- Подключение -----------------------------------------------------------
 
 function connect() {
@@ -207,7 +211,7 @@ function richBlock(entry, severity, head, html, notice = false) {
     const text = el('div', {class: 'msg__text'});
     text.innerHTML = html;
 
-    return el('article', noticeAttrs(notice), [
+    return el('article', noticeAttrs(notice, entry), [
         el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
         el('div', {class: 'msg__rule'}),
         text,
@@ -226,7 +230,7 @@ function block(entry, severity, head, text, notice = false) {
         return null;
     }
 
-    return el('article', noticeAttrs(notice), [
+    return el('article', noticeAttrs(notice, entry), [
         // Полоска стоит между автором и текстом, а не рядом с автором: шапка
         // выстроена в строку, и внутри неё полоска легла бы вбок.
         el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
@@ -240,11 +244,26 @@ function block(entry, severity, head, text, notice = false) {
 // noticeAttrs — как выглядит служебное сообщение. Отметка нужна и на блоке,
 // и в атрибутах: по одному цвету полоски не отличить, а тег показывает, что
 // реплику писал сервис, а не человек.
-function noticeAttrs(notice) {
-    if (notice) {
-        return {class: 'msg is-notice', 'data-severity': 'info'};
+function noticeAttrs(notice, entry) {
+    const attrs = notice
+        ? {class: 'msg is-notice', 'data-severity': 'info'}
+        : {class: 'msg', 'data-severity': 'neutral'};
+    attrs['data-rip'] = tornEdgeVariant(entry);
+    return attrs;
+}
+
+// tornEdgeVariant assigns a stable, slightly different rough-edge profile to
+// each message object. The same message keeps its edge when the feed redraws.
+function tornEdgeVariant(entry) {
+    if (!entry || typeof entry !== 'object') {
+        return '1';
     }
-    return {class: 'msg', 'data-severity': 'neutral'};
+    let variant = edgeVariants.get(entry);
+    if (!variant) {
+        variant = 1 + Math.floor(Math.random() * 8);
+        edgeVariants.set(entry, variant);
+    }
+    return String(variant);
 }
 
 // author is who the service message is from: the plugin that sent it, in
