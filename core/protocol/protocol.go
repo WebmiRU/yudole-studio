@@ -229,12 +229,18 @@ type ChatUser struct {
 
 // ChatLine is one line of chat in three forms: as the service sent it, as
 // plain text, and as html for a rich view.
+// ChatLine is one chat line in three forms. Все три — одна и та же реплика,
+// просто каждая приспособлена под свою задачу.
 type ChatLine struct {
-	// Src is the text exactly as it came in, with the service's own markup.
+	// Src is the line exactly as it came in, with the service's own markup.
+	// Ни экранирования, ни вырезания: кто-то захочет увидеть именно то, что
+	// прислал сервис.
 	Src string `json:"src"`
-	// Text is the plain text: no smilies codes, no markup.
+	// Text is the line for reading: без кодов смайлов и без bbcode, только то,
+	// что человек написал сам.
 	Text string `json:"text"`
-	// Html is the same line with the source's formatting, for a rich view.
+	// Html is the same line with the codes turned into pictures. Пустой, если
+	// кодов не было: тогда показывать Text.
 	Html string `json:"html"`
 }
 

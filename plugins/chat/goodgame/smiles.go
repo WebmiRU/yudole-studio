@@ -47,16 +47,18 @@ const (
 // свой сервер подставляется, а вживую — ровно тот адрес, что у GoodGame.
 var smilesURL = chat.SmilesURL
 
-// smile — как смайл пишется в тексте и где его картинки. В базе лежит всё,
+// smile — как смайл пишется в тексте и где его картинка. В базе лежит всё,
 // что прислал GoodGame, а в оперативку берём только это: остальное — служебные
 // поля сайта, и держать их в памяти незачем.
 type smile struct {
-	// Code is the name without the colons: "jokie5".
+	// Code is the name as it is written in a message, with the colons:
+	// ":jokie5:". Ключ в карте — именно он: в разборе строки мы вырезаем кусок
+	// вместе с двоеточиями и идём в карту напрямую. Собирать ключ по кускам на
+	// каждое вхождение — лишняя работа на каждой реплике.
 	Code string
-	// Image is the biggest static picture we have.
+	// Image is what to show: гифка, если она есть, иначе самая большая
+	// статичная. Решено один раз при загрузке, а не на каждое вхождение.
 	Image string
-	// Gif is the animated one, if the smiley has it.
-	Gif string
 }
 
 // smileSet is the base in memory. Common smileys win over channel ones when the
@@ -64,11 +66,112 @@ type smile struct {
 // smiley that most people can see is the better guess.
 type smileSet map[string]smile
 
-// Lookup finds a smiley by the code written in a message, with or without the
-// colons.
+// Lookup finds a smiley by the code as written, with the colons.
 func (s smileSet) Lookup(code string) (smile, bool) {
-	found, ok := s[strings.Trim(code, ":")]
+	found, ok := s[code]
 	return found, ok
+}
+
+// smilesMaxCode is how long a piece between two colons may be. Смайлы GoodGame —
+// латиница, цифры, тире и подчёркивание, и длиннее тридцати они не бывают.
+// Потолок нужен для другого: в обычном тексте двоеточия стоят далеко друг от
+// друга («встреча в 12:30»), и без ограничения мы носились бы за такой парой
+// через всю оставшуюся строку.
+const smilesMaxCode = 64
+
+// Views turns a line into the two the page needs: текст без кодов смайлов и тот
+// же текст с картинками вместо них.
+//
+// Оба получаются за один проход. Идти по строке дважды — значит разбирать её
+// дважды, а на каждую реплику это лишняя работа.
+//
+// Если смайлов не нашлось, вторая строка пустая, а первая — это исходная
+// строка целиком, без единого выделения памяти: это подавляющее большинство
+// реплик. Собирать второй раз то же самое только для того, чтобы его
+// выбросить, — работа на каждое сообщение впустую.
+func (s smileSet) Views(src string) (string, string) {
+	// Пока смайлов не нашли, обе части остаются nil и мы просто идём по строке.
+	var plain, rich []byte
+	mark := 0
+
+	for i := 0; i < len(src); {
+		open := strings.IndexByte(src[i:], ':')
+		if open < 0 {
+			break
+		}
+		open += i
+
+		closing := strings.IndexByte(src[open+1:], ':')
+		if closing < 0 {
+			break
+		}
+		closing += open + 1
+
+		// Кусок вместе с двоеточиями — готовый ключ. Состав кода проверять не
+		// надо: в карте лежат только настоящие смайлы, а всё остальное просто не
+		// найдётся.
+		if closing-open <= smilesMaxCode {
+			if found, ok := s[src[open:closing+1]]; ok {
+				if plain == nil {
+					// Запас на разметку смайла — иначе буфер будет расти в
+					// геометрической прогрессии.
+					plain = make([]byte, 0, len(src))
+					rich = make([]byte, 0, len(src)+128)
+				}
+
+				plain = append(plain, src[mark:open]...)
+				rich = appendEscaped(rich, src[mark:open], false)
+				rich = append(rich, `<img class="smile" src="`...)
+				rich = appendEscaped(rich, found.Image, true)
+				rich = append(rich, `" alt="`...)
+				rich = appendEscaped(rich, found.Code, true)
+				rich = append(rich, `" />`...)
+				mark = closing + 1
+			}
+		}
+
+		// Идём с закрывающего двоеточия: так мы проверяем каждую пару соседних
+		// двоеточий ровно один раз и не возвращаемся назад.
+		i = closing
+	}
+
+	if plain == nil {
+		return src, ""
+	}
+	plain = append(plain, src[mark:]...)
+	rich = appendEscaped(rich, src[mark:], false)
+	return string(plain), string(rich)
+}
+
+// appendEscaped adds text to the buffer, hiding the characters that would
+// otherwise be read as markup. Если экранировать нечего, строка уходит целиком,
+// без побайтовой проверки каждого символа по пути.
+func appendEscaped(out []byte, s string, quotes bool) []byte {
+	start := 0
+	for i := 0; i < len(s); i++ {
+		var replacement string
+		switch s[i] {
+		case '&':
+			replacement = `&amp;`
+		case '<':
+			replacement = `&lt;`
+		case '>':
+			replacement = `&gt;`
+		case '"':
+			// В тексте кавычка не опасна, в значении атрибута — обрывает его.
+			if !quotes {
+				continue
+			}
+			replacement = `&#34;`
+		default:
+			continue
+		}
+
+		out = append(out, s[start:i]...)
+		out = append(out, replacement...)
+		start = i + 1
+	}
+	return append(out, s[start:]...)
 }
 
 // store is the smiley base on disk.
@@ -233,8 +336,12 @@ func (s *store) CompiledAt() string {
 
 // Load reads the whole base into memory.
 func (s *store) Load() (smileSet, error) {
-	// В оперативку берём только то, что нужно для показа: как смайл пишется
-	// и где его картинки. Остальные поля базы — служебные, они тут ни при чём.
+	// В оперативку берём только то, что нужно для показа: как смайл пишется и
+	// где его картинка. Остальные поля базы — служебные, они тут ни при чём.
+	//
+	// Ключ собираем с двоеточиями и сразу решаем, какую картинку показывать.
+	// И то и другое делается здесь, по тысяче с лишним раз за запуск, а не на
+	// каждой реплике.
 	rows, err := s.db.Query(`
 SELECT name, channel, img, img_big, img_gif
 FROM smiles
@@ -247,14 +354,21 @@ ORDER BY channel`)
 	set := smileSet{}
 	for rows.Next() {
 		var item smile
-		var channel, small, big string
-		if err := rows.Scan(&item.Code, &channel, &small, &big, &item.Gif); err != nil {
+		var channel, small, big, gif string
+		if err := rows.Scan(&item.Code, &channel, &small, &big, &gif); err != nil {
 			return nil, fmt.Errorf("прочитать смайл: %w", err)
 		}
-		item.Image = big
+		item.Code = ":" + item.Code + ":"
+
+		// Гифка, если она есть: в GoodGame такой смайл и выглядит живым.
+		item.Image = gif
+		if item.Image == "" {
+			item.Image = big
+		}
 		if item.Image == "" {
 			item.Image = small
 		}
+
 		// Общие идут раньше канальных: при одинаковом коде останется общий.
 		if _, taken := set[item.Code]; taken && channel != "" {
 			continue

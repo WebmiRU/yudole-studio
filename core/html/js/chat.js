@@ -158,11 +158,32 @@ const SEVERITIES = ['neutral', 'info', 'success', 'warning', 'error'];
 // line is one block: a chat line, or a note about a channel.
 function line(entry) {
     if (isLine(entry)) {
-        const text = entry.text ?? entry.payload?.message?.text ?? '';
-        return block(entry, 'neutral', el('span', {class: 'msg__author'}, [entry.user ?? '—']), text);
+        const message = entry.payload?.message ?? {};
+        const head = el('span', {class: 'msg__author'}, [entry.user ?? '—']);
+        // Html приходит только если плагин нашёл в строке смайлы и подставил
+        // картинки; иначе это тот же самый текст без единой разметки, и
+        // разбирать его как html незачем.
+        if (message.html) {
+            return richBlock(entry, 'neutral', head, message.html);
+        }
+        return block(entry, 'neutral', head, message.text ?? '');
     }
 
     return block(entry, severityOf(entry), author(entry), describe(entry));
+}
+
+// richBlock is a block whose text the plugin already turned into markup —
+// смайлы вместо их кодов. Разметку ставим целиком: плагин её собрал сам и
+// экранировал всё, что не разметка.
+function richBlock(entry, severity, head, html) {
+    const text = el('div', {class: 'msg__text'});
+    text.innerHTML = html;
+
+    return el('article', {class: 'msg', 'data-severity': severity}, [
+        el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
+        el('div', {class: 'msg__rule'}),
+        text,
+    ]);
 }
 
 // block is the shape of every message: who wrote it, a rule under the name, and

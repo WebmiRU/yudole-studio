@@ -95,7 +95,7 @@ func main() {
 	// Плагин сам объявляет себя: ядро читает это первым, без запроса.
 	send(protocol.KindPluginChat, describe())
 
-	connection = newSocket()
+	connection = newSocket(book)
 	connection.watch(ctx, channelList)
 
 	for {

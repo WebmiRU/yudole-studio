@@ -132,19 +132,19 @@ FROM smiles WHERE name = 'sing'`).Scan(&name, &channel, &tags, &small, &big, &gi
 	if !ok {
 		t.Fatal(":sing: не нашёлся по написанию с двоеточиями")
 	}
-	if sing.Image != "https://goodgame.ru/images/smiles/sing-big.png?0" {
-		t.Errorf("картинка = %q, want самая большая", sing.Image)
-	}
-	if sing.Gif == "" {
-		t.Error("анимированной картинки нет, хотя она есть в файле")
+	// Гифка есть в файле, и именно она показывается: в GoodGame такой смайл и
+	// выглядит живым.
+	if sing.Image != "https://goodgame.ru/images/anismiles/sing-gif.gif?0" {
+		t.Errorf("картинка = %q, want гифку", sing.Image)
 	}
 
-	jokie, ok := set.Lookup("jokie5")
+	jokie, ok := set.Lookup(":jokie5:")
 	if !ok {
-		t.Fatal("jokie5 не нашёлся без двоеточий")
+		t.Fatal(":jokie5: не нашёлся по написанию с двоеточиями")
 	}
-	if jokie.Gif != "" {
-		t.Errorf("гифка = %q, want пусто — в файле её нет", jokie.Gif)
+	// Гифки нет — берём самую большую статичную.
+	if jokie.Image != "https://goodgame.ru/images/smiles/jokie/jokie5-big.png?0" {
+		t.Errorf("картинка = %q, want самую большую статичную", jokie.Image)
 	}
 }
 

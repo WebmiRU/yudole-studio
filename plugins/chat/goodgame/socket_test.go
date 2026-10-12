@@ -178,7 +178,7 @@ func (f *goodgame) waitAccepted(t *testing.T) {
 func watchSocket(t *testing.T) (*socket, context.CancelFunc) {
 	t.Helper()
 
-	socket := newSocket()
+	socket := newSocket(&smileBook{})
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	socket.watch(ctx, channelList)

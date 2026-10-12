@@ -50,9 +50,14 @@ type socket struct {
 	changed <-chan struct{}
 	// endpoint — адрес чата; в тестах он свой.
 	endpoint string
+
+	// book — смайлы, чтобы подставлять картинки в реплики. Книгу обновляет
+	// человек кнопкой, поэтому читаем её на каждую реплику заново и берём
+	// под замком: гоняться за указателем в конкурентном коде нечего.
+	book *smileBook
 }
 
-func newSocket() *socket {
+func newSocket(book *smileBook) *socket {
 	endpoint := os.Getenv("GOODGAME_CHAT_URL")
 	if endpoint == "" {
 		endpoint = chat.Endpoint
@@ -62,6 +67,7 @@ func newSocket() *socket {
 		logs:     make(chan string, 16),
 		changed:  channelsChanged,
 		endpoint: endpoint,
+		book:     book,
 	}
 }
 
@@ -309,10 +315,7 @@ func (s *socket) forward(message *chat.Message) {
 				Name: line.UserName,
 				ID:   string(line.UserID),
 			},
-			Message: protocol.ChatLine{
-				Src:  line.Text,
-				Text: plainText(line.Text),
-			},
+			Message: s.line(line.Text),
 		})
 
 	case chat.TypePrivateMessage:
@@ -328,10 +331,7 @@ func (s *socket) forward(message *chat.Message) {
 				Name: line.UserName,
 				ID:   string(line.UserID),
 			},
-			Message: protocol.ChatLine{
-				Src:  line.Text,
-				Text: plainText(line.Text),
-			},
+			Message: s.line(line.Text),
 		})
 
 	case chat.TypeError:
@@ -418,9 +418,36 @@ func channelID(value string) (chat.ID, error) {
 	return id, nil
 }
 
+// line turns what came from the service into what the page shows.
+//
+// Разметку вырезаем один раз: и для текста, и для картинок. Если идти по
+// источнику дважды, регулярка сработает дважды, а второй раз она нужна только
+// когда в строке есть смайлы.
+func (s *socket) line(src string) protocol.ChatLine {
+	clean := plainText(src)
+	text, html := s.book.get().Views(clean)
+
+	return protocol.ChatLine{
+		// Src — как пришло, и всегда как пришло. Ни экранирования, ни
+		// вырезания: кто-то захочет увидеть именно то, что прислал GoodGame.
+		Src: src,
+		// Text — только текст: без кодов смайлов и без bbcode.
+		Text: text,
+		// Html — то же, но с картинками вместо смайлов. Пустой, если смайлов не
+		// было: страница покажет Text, и пустая строка скажет ей об этом раньше,
+		// чем разбор html.
+		Html: html,
+	}
+}
+
 // plainText убирает разметку источника: GoodGame присылает коды смайлов и
 // bbcode вперемешку с текстом.
 func plainText(src string) string {
+	// Чаще всего в строке нет ни одного квадратного скобочного тега, и искать
+	// регуляркой значит гонять машину по целой строке впустую.
+	if strings.IndexByte(src, '[') < 0 {
+		return src
+	}
 	return bbcode.ReplaceAllString(src, "")
 }
 
