@@ -1000,15 +1000,9 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			LiveChatId: stringPtr(video.Chat),
 			Part:       []string{"id", "snippet", "authorDetails"},
 		}
-		// MaxResults намеренно не задаём. С ним сервер ведёт себя как при
-		// постраничном запросе: выдал порцию и закрыл поток, вместо того чтобы
-		// держать его открытым и доставлять реплики сразу. На практике это
-		// означало задержку в десятки секунд — реплика ждала следующего открытия.
-		if pageToken == "" && !caughtUp {
-			// Первым запросом берём побольше истории: иначе до живого края придётся
-			// дёргаться десятки раз подряд.
-			request.MaxResults = uint32Ptr(500)
-		}
+		// MaxResults в streaming RPC не используется. Первое подключение без
+		// pageToken получает допустимую серверную порцию истории, которую ниже
+		// ограничиваем по времени, а повторное подключение продолжает с курсора.
 		if pageToken != "" {
 			request.PageToken = stringPtr(pageToken)
 		}
@@ -1289,7 +1283,6 @@ func streamRetryDelay(attempt int, received bool) (time.Duration, int) {
 }
 
 func stringPtr(value string) *string { return &value }
-func uint32Ptr(value uint32) *uint32 { return &value }
 
 func emitConnection(state, reason string, attempt int) {
 	send(protocol.KindConnectionState, protocol.ConnectionPayload{
