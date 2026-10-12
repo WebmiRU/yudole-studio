@@ -31,6 +31,12 @@ fi
 VERSION="$(printf '%s' "$VERSION" | sed 's/[^A-Za-z0-9._-]/-/g')"
 DATE="$(date +%Y-%m-%d)"
 
+# Имя раздаваемого архива: префикс, дата, время, платформа. Час и минута — чтобы
+# две сборки в один день не назывались одинаково и тестировщику было видно,
+# какой архив свежее.
+STAMP="$(date +%Y-%m-%d_%H-%M)"
+ARCHIVE_PREFIX="yudole_studio_light"
+
 say() { printf '\033[1m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[31mОШИБКА:\033[0m %s\n' "$*" >&2; exit 1; }
 
@@ -110,31 +116,37 @@ stage_files() {
 for target in "${TARGETS[@]}"; do
     case "$target" in
         linux)
-            stage="$STAGE/studio-linux-amd64"
+            bundle="linux64"
+            stage="$STAGE/${ARCHIVE_PREFIX}_$bundle"
             say "сборка linux"
             rm -rf "$stage"; mkdir -p "$stage"
             build_core linux studio "$stage"
             for plugin in "${PLUGINS[@]}"; do build_plugin linux "$plugin" "$stage"; done
             stage_files "$stage"
-            archive="$OUT/studio-$VERSION-linux-amd64.zip"
+            archive="$OUT/${ARCHIVE_PREFIX}_${STAMP}_$bundle.zip"
             ;;
         windows)
-            stage="$STAGE/studio-windows-amd64"
+            bundle="win64"
+            stage="$STAGE/${ARCHIVE_PREFIX}_$bundle"
             say "сборка windows"
             rm -rf "$stage"; mkdir -p "$stage"
             build_core windows studio.exe "$stage"
             for plugin in "${PLUGINS[@]}"; do build_plugin windows "$plugin" "$stage"; done
             stage_files "$stage"
-            archive="$OUT/studio-$VERSION-windows-amd64.zip"
+            archive="$OUT/${ARCHIVE_PREFIX}_${STAMP}_$bundle.zip"
             ;;
     esac
 
     command -v zip >/dev/null || die "не найден zip: поставь zip либо используй другую архиваторку"
     rm -f "$archive"
+    # -9 — максимальное сжатие zip, больше некуда: это потолок deflate.
+    # -X убирает из архива лишние метаданные (uid, gid, лишние временные метки):
+    # немного меньше и не тянем в архив мусор, который тестировщику не нужен.
+    #
     # Путь к архиву абсолютный: иначе zip создал бы его внутри staging, а тот
     # удаляется в конце сборки, и скрипт рапортовал бы об успехе с пустым
     # списком архивов.
-    (cd "$STAGE" && zip -q -r -9 "$archive" "$(basename "$stage")") \
+    (cd "$STAGE" && zip -q -r -9 -X "$archive" "$(basename "$stage")") \
         || die "не собрался архив $(basename "$archive")"
     [ -f "$archive" ] || die "архив не появился: $(basename "$archive")"
     say "$(basename "$archive"): $(du -h "$archive" | cut -f1)"
