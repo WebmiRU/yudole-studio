@@ -177,21 +177,43 @@ func keylessFindLives(ctx context.Context, channelID string) ([]liveVideo, error
 		order = order[:4]
 	}
 
+	// Проверяем несколько свежих видео параллельно. Последовательная проверка
+	// четырёх страниц добавляла задержки друг к другу: при медленном ответе
+	// YouTube первые сообщения могли ждать суммарное время всех запросов.
+	type pageResult struct {
+		page watchPage
+		err  error
+	}
+	pages := make([]pageResult, len(order))
+	var wg sync.WaitGroup
+	for i, id := range order {
+		i, id := i, id
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			pages[i].page, pages[i].err = keylessWatchPage(ctx, id)
+		}()
+	}
+	wg.Wait()
+	if ctx.Err() != nil {
+		return nil, ctx.Err()
+	}
+
 	lives := make([]liveVideo, 0, len(order))
-	for _, id := range order {
-		page, err := keylessWatchPage(ctx, id)
-		if err != nil {
-			logInfo(fmt.Sprintf("Страница %s не открылась: %v", id, err))
+	for i, id := range order {
+		result := pages[i]
+		if result.err != nil {
+			logInfo(fmt.Sprintf("Страница %s не открылась: %v", id, result.err))
 			continue
 		}
-		if !page.isLive {
+		if !result.page.isLive {
 			continue
 		}
 		title := titles[id]
 		if title == "" {
-			title = page.title
+			title = result.page.title
 		}
-		lives = append(lives, liveVideo{ID: id, Title: title})
+		lives = append(lives, liveVideo{ID: id, Title: title, Page: &result.page})
 	}
 	return lives, nil
 }
@@ -394,24 +416,54 @@ func keylessChatPage(ctx context.Context, page watchPage, continuation string) (
 		}
 	}
 
-	// continuations — тоже массив, но внутри элементов лежат объекты, поэтому
-	// обходить надо по их значениям, а не по элементам.
-	conts, _ := live["continuations"].([]any)
-	for _, c := range conts {
-		for key, v := range digMapAny(c) {
-			m := digMapAny(v)
-			if tok, _ := m["continuation"].(string); tok != "" {
-				out.continue_ = tok
-			}
-			if ms, ok := numberOf(m["timeoutMs"]); ok && ms > 0 {
-				out.waitMS = int(ms)
-			}
-			_ = key
-		}
-	}
+	out.continue_, out.waitMS = selectChatContinuation(live)
 
 	out.offline = hasOfflineMarker(root)
 	return out, nil
+}
+
+// selectChatContinuation picks one usable cursor in a stable order. YouTube can
+// return several continuation kinds together; choosing the last item (or ranging
+// over a map) can select a seek/reload cursor instead of the live chat cursor,
+// causing gaps, repeated history, or long waits.
+func selectChatContinuation(live map[string]any) (string, int) {
+	const defaultWait = 5000
+	priority := []string{
+		"invalidationContinuationData",
+		"timedContinuationData",
+		"reloadContinuationData",
+		"liveChatReplayContinuationData",
+		"playerSeekContinuationData",
+	}
+	type candidate struct {
+		token string
+		wait  int
+	}
+	found := make(map[string]candidate)
+	continuations, _ := live["continuations"].([]any)
+	for _, item := range continuations {
+		wrapper := digMapAny(item)
+		for _, key := range priority {
+			data := digMapAny(wrapper[key])
+			token, _ := data["continuation"].(string)
+			if token == "" {
+				continue
+			}
+			wait := defaultWait
+			if ms, ok := numberOf(data["timeoutMs"]); ok && ms > 0 {
+				wait = int(ms)
+			}
+			if _, exists := found[key]; !exists {
+				found[key] = candidate{token: token, wait: wait}
+			}
+		}
+	}
+	for _, key := range priority {
+		if selected, ok := found[key]; ok {
+			return selected.token, selected.wait
+		}
+	}
+	return "", defaultWait
 }
 
 // hasOfflineMarker ищет в ответе прямое указание, что трансляция закончилась.
@@ -548,9 +600,15 @@ func keylessWatchChats(ctx context.Context, channel, channelTitle string, lives 
 // server said, ask again.
 // onConnected вызывается именем канала, который выяснился на странице.
 func keylessReadOne(ctx context.Context, channelTitle string, video liveVideo, onConnected func(name string)) error {
-	page, err := keylessWatchPage(ctx, video.ID)
-	if err != nil {
-		return err
+	var page watchPage
+	if video.Page != nil {
+		page = *video.Page
+	} else {
+		var err error
+		page, err = keylessWatchPage(ctx, video.ID)
+		if err != nil {
+			return err
+		}
 	}
 	if page.token == "" || page.apiKey == "" {
 		return errNoLive
@@ -578,6 +636,8 @@ func keylessReadOne(ctx context.Context, channelTitle string, video liveVideo, o
 	// ни о чём не говорит, но бесконечное молчание стоит перепроверить: вдруг
 	// эфир всё-таки закончился, а плагин об этом не узнал.
 	lastMessage := time.Now()
+	consecutiveFailures := 0
+	reportedDegraded := false
 
 	for {
 		if ctx.Err() != nil {
@@ -588,7 +648,45 @@ func keylessReadOne(ctx context.Context, channelTitle string, video liveVideo, o
 			if ctx.Err() != nil {
 				return errSettingsChanged
 			}
-			return err
+
+			// Единичный сбой опроса не должен завершать всю сессию: тогда
+			// supervisor заново искал эфир, а каждый повтор печатал в чате
+			// «Подключились к YouTube». Остаёмся на месте и повторяем тот же
+			// continuation; иначе сообщения между двумя сессиями теряются.
+			consecutiveFailures++
+			if consecutiveFailures == 1 {
+				logInfo("Временная ошибка чтения чата YouTube; повторяю запрос")
+			}
+			if consecutiveFailures >= 2 && !reportedDegraded {
+				emitConnection(protocol.ConnectionReconnecting,
+					"Опрос чата YouTube временно не отвечает", consecutiveFailures)
+				reportedDegraded = true
+			}
+
+			// Если токен протух или формат ответа изменился, периодически
+			// обновляем страницу трансляции и continuation. Ошибка обновления
+			// не завершает чтение: следующая попытка повторится с backoff.
+			if consecutiveFailures == 3 || consecutiveFailures%5 == 0 {
+				if fresh, refreshErr := keylessWatchPage(ctx, video.ID); refreshErr == nil {
+					if fresh.token != "" && fresh.apiKey != "" {
+						page = fresh
+						token = fresh.token
+					}
+				}
+			}
+
+			if !waitInterval(ctx, keylessRetryDelay(consecutiveFailures)) {
+				return errSettingsChanged
+			}
+			continue
+		}
+		if consecutiveFailures > 0 {
+			logInfo("Чтение чата YouTube восстановлено")
+			if reportedDegraded {
+				emitConnection(protocol.ConnectionOnline, "Читаю чат YouTube без ключа", 0)
+			}
+			consecutiveFailures = 0
+			reportedDegraded = false
 		}
 
 		for _, msg := range batch.messages {
@@ -628,6 +726,26 @@ func keylessReadOne(ctx context.Context, channelTitle string, video liveVideo, o
 		if !waitInterval(ctx, time.Duration(batch.waitMS)*time.Millisecond) {
 			return errSettingsChanged
 		}
+	}
+}
+
+// keylessRetryDelay bounds retries for the public chat endpoint. Keep these
+// delays short enough not to lose many messages but long enough to avoid hammering
+// YouTube when its chat endpoint temporarily rejects requests.
+func keylessRetryDelay(failures int) time.Duration {
+	switch {
+	case failures <= 1:
+		return time.Second
+	case failures == 2:
+		return 2 * time.Second
+	case failures == 3:
+		return 5 * time.Second
+	case failures == 4:
+		return 10 * time.Second
+	case failures < 8:
+		return 15 * time.Second
+	default:
+		return 30 * time.Second
 	}
 }
 

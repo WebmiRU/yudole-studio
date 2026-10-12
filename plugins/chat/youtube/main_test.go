@@ -2,12 +2,16 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 	"time"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 )
 
 func TestParseChannelRef(t *testing.T) {
@@ -340,5 +344,80 @@ func TestRetryDelayIsBounded(t *testing.T) {
 	}
 	if got := retryDelay(20); got != maxChatBackoff {
 		t.Fatalf("retryDelay(20) = %s; want %s", got, maxChatBackoff)
+	}
+}
+
+
+func TestUpdateContinuationTokenPreservesCursorWhenMissing(t *testing.T) {
+	const cursor = "cursor-123"
+
+	if got, ok := updateContinuationToken(cursor, ""); got != cursor || ok {
+		t.Fatalf("missing token = %q, %v; want previous cursor %q, false", got, ok, cursor)
+	}
+	if got, ok := updateContinuationToken("old", "  next-456  "); got != "next-456" || !ok {
+		t.Fatalf("new token = %q, %v; want trimmed token, true", got, ok)
+	}
+	if got, ok := updateContinuationToken("", ""); got != "" || ok {
+		t.Fatalf("empty initial token = %q, %v; want empty, false", got, ok)
+	}
+}
+
+func TestStreamRetryDelayDoesNotGrowAfterAValidResponse(t *testing.T) {
+	for _, attempt := range []int{0, 1, 4, 20} {
+		delay, nextAttempt := streamRetryDelay(attempt, true)
+		if delay != streamRestartDelay || nextAttempt != 0 {
+			t.Errorf("streamRetryDelay(%d, true) = (%s, %d); want (%s, 0)",
+				attempt, delay, nextAttempt, streamRestartDelay)
+		}
+	}
+
+	delay, nextAttempt := streamRetryDelay(0, false)
+	if delay != 5*time.Second || nextAttempt != 1 {
+		t.Errorf("first failed attempt = (%s, %d); want (5s, 1)", delay, nextAttempt)
+	}
+	delay, nextAttempt = streamRetryDelay(2, false)
+	if delay != 20*time.Second || nextAttempt != 3 {
+		t.Errorf("third failed attempt = (%s, %d); want (20s, 3)", delay, nextAttempt)
+	}
+}
+
+
+func TestGRPCChatDefinitelyEndedRequiresExplicitSignal(t *testing.T) {
+	for _, message := range []string{
+		"chat ended",
+		"chat has ended",
+		"chat is disabled",
+		"broadcast has ended",
+		"stream is offline",
+		"live chat is no longer live",
+	} {
+		if !grpcChatDefinitelyEnded(errors.New(message)) {
+			t.Errorf("grpcChatDefinitelyEnded(%q) = false; want true", message)
+		}
+	}
+
+	for _, message := range []string{
+		"rpc error: code = FailedPrecondition desc = unsupported request",
+		"rpc error: code = NotFound desc = endpoint unavailable",
+		"connection reset by peer",
+	} {
+		if grpcChatDefinitelyEnded(errors.New(message)) {
+			t.Errorf("grpcChatDefinitelyEnded(%q) = true; want false", message)
+		}
+	}
+}
+
+
+func TestPermanentGRPCErrorIncludesQuotaAndUnsupported(t *testing.T) {
+	for _, code := range []codes.Code{
+		codes.InvalidArgument,
+		codes.Unauthenticated,
+		codes.PermissionDenied,
+		codes.ResourceExhausted,
+		codes.Unimplemented,
+	} {
+		if !permanentGRPCError(status.Error(code, "test")) {
+			t.Errorf("permanentGRPCError(%s) = false; want true", code)
+		}
 	}
 }

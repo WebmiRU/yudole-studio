@@ -34,7 +34,9 @@ const (
 	grpcTarget     = "dns:///youtube.googleapis.com:443"
 	searchInterval = time.Minute
 	requestTimeout = 20 * time.Second
-	maxChatBackoff = time.Minute
+	maxChatBackoff        = time.Minute
+	grpcDialTimeout       = 5 * time.Second
+	streamRestartDelay    = 1 * time.Second
 )
 
 var (
@@ -126,6 +128,11 @@ var (
 	current    settings
 	changed    = make(chan struct{}, 1)
 	stdoutMu   sync.Mutex
+
+	// Не допускаем дублирующихся событий «Подключились к YouTube», если
+	// несколько потоков одновременно подтверждают одно и то же состояние.
+	connectionStateMu sync.Mutex
+	lastConnectionState string
 )
 
 func main() {
@@ -525,6 +532,9 @@ type liveVideo struct {
 	// надо на него, а не на id видео: человек в ленте видит названия каналов, и
 	// одиннадцать символов вместо названия там неуместны.
 	Channel string
+	// Page кеширует уже загруженную страницу в резервном режиме. Она нужна
+	// для чтения чата, поэтому повторный GET даёт только задержку старта.
+	Page *watchPage
 }
 
 func findActiveLives(ctx context.Context, apiKey, channelID string) ([]liveVideo, error) {
@@ -784,6 +794,11 @@ func runConfiguration(ctx context.Context, config settings) error {
 		if errors.Is(err, errChannelNotFound) {
 			return err
 		}
+		// Неверный ключ/квота не исправятся ожиданием. Если резерв выключен,
+		// пусть supervisor остановится и дождётся новых настроек вместо повтора.
+		if keyUnusable(err) {
+			return err
+		}
 		logInfo("Поиск эфира не удался: " + err.Error())
 		if !waitInterval(ctx, searchInterval) {
 			return errSettingsChanged
@@ -839,7 +854,7 @@ func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, l
 	var conn *grpc.ClientConn
 	var err error
 	for attempt := 0; ; attempt++ {
-		dialCtx, cancel := context.WithTimeout(ctx, 15*time.Second)
+		dialCtx, cancel := context.WithTimeout(ctx, grpcDialTimeout)
 		conn, err = grpc.DialContext(
 			dialCtx,
 			grpcTarget,
@@ -854,7 +869,12 @@ func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, l
 			return errSettingsChanged
 		}
 		logInfo("Не удалось подключиться к YouTube gRPC: " + err.Error())
-		if !waitInterval(ctx, retryDelay(attempt)) {
+		if attempt+1 >= maxStreamRestarts {
+			return fmt.Errorf("%w: gRPC handshake: %v", errOfficialReadBroken, err)
+		}
+		// Дальше API-ключ не поможет: если HTTP(S) работает, но gRPC недоступен,
+		// watcher должен быстро перейти на резервный публичный путь.
+		if !waitInterval(ctx, time.Duration(attempt+1)*time.Second) {
 			return errSettingsChanged
 		}
 	}
@@ -871,6 +891,7 @@ func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, l
 	results := make(chan result, len(lives))
 	var wg sync.WaitGroup
 	var joinedOnce sync.Once
+	var onlineOnce sync.Once
 
 	for _, video := range lives {
 		video := video
@@ -894,7 +915,9 @@ func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, l
 						Name:    label,
 					})
 				})
-				emitConnection(protocol.ConnectionOnline, "Читаю live chat YouTube", 0)
+				onlineOnce.Do(func() {
+					emitConnection(protocol.ConnectionOnline, "Читаю live chat YouTube", 0)
+				})
 			})
 			results <- result{video: video, err: err}
 		}()
@@ -960,15 +983,16 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 	// сообщений, в которых никто уже не участвует.
 	caughtUp := false
 
-	// restarts считает обрывы подряд, а gotAny — отдал ли поток хоть что-то.
-	// Вместе они отличают «поток мигнул и умер» от обычных переподключений:
-	// второе чинится повтором, первое — только сменой пути чтения.
+	// restarts считает подряд идущие попытки, в которых сервер не вернул
+	// ни одного ответа. Если ответ пришёл — соединение работает, даже когда
+	// в тихом чате в нём нет сообщений.
 	restarts := 0
 	gotAny := false
+	connectedReported := false
 
-	// brokeTooOften — поток рвался много раз и не отдал ни одного сообщения.
-	// Ключ и квота тут ни при чём: дальше повторять бессмысленно.
-	brokeTooOften := func() bool { return !gotAny && restarts >= maxStreamRestarts }
+	// Поток, который несколько раз подряд не смог вернуть даже ответ, не
+	// держим на экспоненциальных паузах бесконечно: пора попробовать резерв.
+	brokeTooOften := func() bool { return restarts >= maxStreamRestarts }
 
 	// Логируем, с чем именно идём в официальный API. Пустой id чата — самая
 	// вероятная причина того, что поток открывается и сразу умирает, а по
@@ -988,15 +1012,9 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			LiveChatId: stringPtr(video.Chat),
 			Part:       []string{"id", "snippet", "authorDetails"},
 		}
-		// MaxResults намеренно не задаём. С ним сервер ведёт себя как при
-		// постраничном запросе: выдал порцию и закрыл поток, вместо того чтобы
-		// держать его открытым и доставлять реплики сразу. На практике это
-		// означало задержку в десятки секунд — реплика ждала следующего открытия.
-		if pageToken == "" && !caughtUp {
-			// Первым запросом берём побольше истории: иначе до живого края придётся
-			// дёргаться десятки раз подряд.
-			request.MaxResults = uint32Ptr(500)
-		}
+		// MaxResults в streaming RPC не используется. Первое подключение без
+		// pageToken получает допустимую серверную порцию истории, которую ниже
+		// ограничиваем по времени, а повторное подключение продолжает с курсора.
 		if pageToken != "" {
 			request.PageToken = stringPtr(pageToken)
 		}
@@ -1006,44 +1024,58 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			if ctx.Err() != nil {
 				return errSettingsChanged
 			}
-			if status.Code(err) == codes.NotFound || status.Code(err) == codes.FailedPrecondition {
+			if grpcChatDefinitelyEnded(err) {
 				return errChatEnded
+			}
+			if status.Code(err) == codes.NotFound || status.Code(err) == codes.FailedPrecondition {
+				// В этих случаях внутренний endpoint может не принять текущий
+				// streamList-запрос, даже когда публичный чат ещё жив. Не объявляем
+				// эфир завершённым автоматически: watcher попробует keyless fallback.
+				return fmt.Errorf("%w: StreamList: %v", errOfficialReadBroken, err)
 			}
 			if permanentGRPCError(err) {
 				return fmt.Errorf("YouTube live chat %q: %w", video.Title, err)
 			}
-			logInfo("Поток чата прерван, переподключаюсь: " + err.Error())
-			emitConnection(protocol.ConnectionReconnecting, "Восстанавливаю поток YouTube live chat", attempt+1)
+
+			// Не тратим 5 + 10 + 20 секунд, прежде чем признать, что gRPC
+			// вообще не может открыть поток. Это и есть случай для keyless fallback.
+			restarts++
+			if brokeTooOften() {
+				return fmt.Errorf("%w: StreamList: %v", errOfficialReadBroken, err)
+			}
+			if !gotAny {
+				emitConnection(protocol.ConnectionReconnecting, "Восстанавливаю поток YouTube live chat", attempt+1)
+			}
+			logInfo("Поток чата не открылся, повторяю: " + err.Error())
 			if !waitInterval(ctx, retryDelay(attempt)) {
 				return errSettingsChanged
 			}
 			attempt++
-			restarts++
-			if brokeTooOften() {
-				return fmt.Errorf("%w: %v", errOfficialReadBroken, err)
-			}
 			continue
 		}
 
 		received := false
-		connectedReported := false
 		for {
 			response, recvErr := stream.Recv()
 			if recvErr != nil {
 				if ctx.Err() != nil {
 					return errSettingsChanged
 				}
+				if grpcChatDefinitelyEnded(recvErr) {
+					return errChatEnded
+				}
+				if status.Code(recvErr) == codes.NotFound || status.Code(recvErr) == codes.FailedPrecondition {
+					return fmt.Errorf("%w: Recv: %v", errOfficialReadBroken, recvErr)
+				}
 				if permanentGRPCError(recvErr) {
-					if status.Code(recvErr) == codes.NotFound ||
-						status.Code(recvErr) == codes.FailedPrecondition ||
-						strings.Contains(strings.ToLower(recvErr.Error()), "ended") ||
-						strings.Contains(strings.ToLower(recvErr.Error()), "disabled") {
-						return errChatEnded
-					}
 					return fmt.Errorf("YouTube live chat %q: %w", video.Title, recvErr)
 				}
 				logInfo("Соединение с чатом потеряно, восстанавливаю поток: " + recvErr.Error())
-				restarts++
+				if !received {
+					restarts++
+				} else {
+					restarts = 0
+				}
 				if brokeTooOften() {
 					return fmt.Errorf("%w: обрыв %v", errOfficialReadBroken, recvErr)
 				}
@@ -1058,16 +1090,22 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 				}
 				break
 			}
-			gotAny = true
 			received = true
+			gotAny = true
+			// Успешный ответ означает, что канал до сервера живой: сбрасываем
+			// exponential backoff и счётчик неудачных открытий. В тихом чате
+			// ответ может быть пустым — это не повод считать его ошибкой.
+			attempt = 0
+			restarts = 0
 			if !connectedReported {
 				onConnected()
 				connectedReported = true
 			}
 			offline := response.GetOfflineAt() != ""
-			// Save the continuation token so the stream can resume after a break.
-			// The official client reconnects when the server has no nextPageToken.
-			pageToken = response.GetNextPageToken()
+			// Храним последний непустой continuation token. Пустое поле в одном
+			// ответе не должно сбрасывать курсор: иначе при следующем соединении
+			// чтение стартует заново и сообщения между попытками можно потерять.
+			pageToken, _ = updateContinuationToken(pageToken, response.GetNextPageToken())
 			for _, item := range response.GetItems() {
 				if item == nil || !remember(item.GetId()) {
 					continue
@@ -1103,13 +1141,14 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 		if ctx.Err() != nil {
 			return errSettingsChanged
 		}
+		delay, nextAttempt := streamRetryDelay(attempt, received)
 		if !received {
 			logInfo("YouTube завершил поток без данных; пробую возобновить")
 		}
-		if !waitInterval(ctx, retryDelay(attempt)) {
+		if !waitInterval(ctx, delay) {
 			return errSettingsChanged
 		}
-		attempt++
+		attempt = nextAttempt
 	}
 }
 
@@ -1197,9 +1236,27 @@ func emitChatMessage(channel string, message *ytproto.LiveChatMessage) error {
 	return nil
 }
 
+// grpcChatDefinitelyEnded avoids interpreting every FailedPrecondition as a
+// finished broadcast. The gRPC endpoint also uses that status for unsupported or
+// rejected stream requests; those should activate the public-page fallback.
+func grpcChatDefinitelyEnded(err error) bool {
+	if err == nil {
+		return false
+	}
+	message := strings.ToLower(err.Error())
+	return strings.Contains(message, "chat ended") ||
+		strings.Contains(message, "chat has ended") ||
+		strings.Contains(message, "chat is disabled") ||
+		strings.Contains(message, "chat disabled") ||
+		strings.Contains(message, "broadcast has ended") ||
+		strings.Contains(message, "stream is offline") ||
+		strings.Contains(message, "no longer live")
+}
+
 func permanentGRPCError(err error) bool {
 	switch status.Code(err) {
-	case codes.InvalidArgument, codes.Unauthenticated, codes.PermissionDenied, codes.NotFound, codes.FailedPrecondition:
+	case codes.InvalidArgument, codes.Unauthenticated, codes.PermissionDenied,
+		codes.NotFound, codes.FailedPrecondition, codes.ResourceExhausted, codes.Unimplemented:
 		return true
 	default:
 		return false
@@ -1233,10 +1290,37 @@ func waitInterval(ctx context.Context, delay time.Duration) bool {
 	}
 }
 
+// updateContinuationToken preserves the last usable cursor when a
+// response omits nextPageToken. Resetting it to empty restarts history retrieval.
+func updateContinuationToken(current, next string) (string, bool) {
+	next = strings.TrimSpace(next)
+	if next == "" {
+		return current, false
+	}
+	return next, true
+}
+
+// streamRetryDelay uses exponential backoff only when no response was received.
+// After a valid response, an ended RPC is resumed quickly from its page token.
+func streamRetryDelay(attempt int, received bool) (time.Duration, int) {
+	if received {
+		return streamRestartDelay, 0
+	}
+	return retryDelay(attempt), attempt + 1
+}
+
 func stringPtr(value string) *string { return &value }
-func uint32Ptr(value uint32) *uint32 { return &value }
 
 func emitConnection(state, reason string, attempt int) {
+	connectionStateMu.Lock()
+	defer connectionStateMu.Unlock()
+
+	// Состояние в UI уже «в сети» — повторный успешный ответ от второго
+	// активного видео не означает нового подключения и не должен засорять чат.
+	if state == protocol.ConnectionOnline && lastConnectionState == protocol.ConnectionOnline {
+		return
+	}
+	lastConnectionState = state
 	send(protocol.KindConnectionState, protocol.ConnectionPayload{
 		State:   state,
 		Service: "YouTube",
