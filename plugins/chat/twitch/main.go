@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"errors"
 	"fmt"
+	"html"
 	"net"
 	"net/textproto"
 	"os"
@@ -404,6 +405,17 @@ func runSession(parent context.Context, current settings) error {
 				strings.Contains(lower, "improperly formatted auth") {
 				return errors.New("Twitch отклонил токен или логин; проверьте OAuth-токен со scope chat:read")
 			}
+			if len(message.Params) > 0 && strings.HasPrefix(message.Params[0], "#") {
+				switch message.Tags["msg-id"] {
+				case "msg_channel_suspended", "msg_channel_not_found":
+					channel := channelName(message.Params[0])
+					send(protocol.KindChannelJoinFailed, protocol.ChannelPayload{
+						Channel: channel,
+						Name:    channel,
+						Reason:  message.Trailing,
+					})
+				}
+			}
 			logInfo("Twitch: " + message.Trailing)
 
 		case "RECONNECT":
@@ -451,10 +463,12 @@ func runSession(parent context.Context, current settings) error {
 				name = login
 			}
 
-			text := message.Trailing
-			if notice := message.Tags["system-msg"]; notice != "" {
-				if text != "" {
-					text = notice + " — " + text
+			body := message.Trailing
+			notice := message.Tags["system-msg"]
+			text := body
+			if notice != "" {
+				if body != "" {
+					text = notice + " — " + body
 				} else {
 					text = notice
 				}
@@ -463,6 +477,17 @@ func runSession(parent context.Context, current settings) error {
 				continue
 			}
 
+			rendered := ""
+			if body != "" {
+				bodyHTML := renderEmotes(body, message.Tags["emotes"])
+				if bodyHTML != "" {
+					if notice != "" {
+						rendered = html.EscapeString(notice) + " — " + bodyHTML
+					} else {
+						rendered = bodyHTML
+					}
+				}
+			}
 			send(protocol.KindMessagePublic, protocol.ChatPayload{
 				Channel: channel,
 				User: protocol.ChatUser{
@@ -473,7 +498,7 @@ func runSession(parent context.Context, current settings) error {
 				Message: protocol.ChatLine{
 					Src:  text,
 					Text: text,
-					Html: renderEmotes(text, message.Tags["emotes"]),
+					Html: rendered,
 				},
 			})
 
@@ -484,6 +509,20 @@ func runSession(parent context.Context, current settings) error {
 					MessageID: message.Tags["target-msg-id"],
 					By:        userLogin(message.Prefix),
 				})
+			}
+
+		case "CLEARCHAT":
+			if len(message.Params) == 0 {
+				continue
+			}
+			channel := channelName(message.Params[0])
+			switch {
+			case message.Trailing == "":
+				logInfo("Twitch очистил чат канала #" + channel)
+			case message.Tags["ban-duration"] != "":
+				logInfo("Twitch выдал тайм-аут в канале #" + channel + ": " + message.Trailing)
+			default:
+				logInfo("Twitch заблокировал пользователя в канале #" + channel + ": " + message.Trailing)
 			}
 
 		case "JOIN":
