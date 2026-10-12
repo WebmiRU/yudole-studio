@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"strconv"
+	"strings"
 	"testing"
 
 	"studio/core/protocol"
@@ -131,9 +132,11 @@ func TestMessageTextCombinesBlocks(t *testing.T) {
 		{Type: "mention", DisplayName: "Alice"},
 		{Type: "text", Content: "! "},
 		{Type: "link", Content: "ссылка"},
-		{Type: "smile", Name: ":wave:"},
+		// Смайл с картинкой: в читаемый текст его код не идёт, он появляется
+		// только в разметке — отдельный тест проверяет именно это.
+		{Type: "smile", ID: "w", Name: "wave", LargeURL: "https://x/w"},
 	}
-	if got, want := messageText(blocks), "Привет, @Alice! ссылка:wave:"; got != want {
+	if got, want := lineText(blocks), "Привет, @Alice! ссылка"; got != want {
 		t.Fatalf("messageText = %q, want %q", got, want)
 	}
 }
@@ -208,18 +211,18 @@ func TestMessageTextDecodesDoubleEncodedContent(t *testing.T) {
 			want: "просто текст",
 		},
 		{
-			name: "смайли и ссылка",
+			name: "смайлы и ссылка",
 			blocks: []vkBlock{
-				{Type: "smile", Name: "🔥"},
+				{Type: "smile", ID: "f", Name: "fire", LargeURL: "https://x/f"},
 				{Type: "text", Content: `[" привет","unstyled",[]]`},
 			},
-			want: "🔥 привет",
+			want: "привет",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := messageText(tc.blocks); got != tc.want {
+			if got := lineText(tc.blocks); got != tc.want {
 				t.Fatalf("messageText() = %q, want %q", got, tc.want)
 			}
 		})
@@ -255,17 +258,17 @@ func TestMessageTextKeepsSmilesInsideText(t *testing.T) {
 			name: "смайл внутри текста",
 			blocks: []vkBlock{{
 				Type:    "text",
-				Content: `["привет ",  "unstyled",[{"type":"smile","name":"🔥"}]]`,
+				Content: `["привет ", "unstyled",[{"type":"smile","id":"f","name":"fire","largeUrl":"https://x/f"}]]`,
 			}},
-			want: "привет 🔥",
+			want: "привет",
 		},
 		{
 			name: "текст со смайлом и упоминанием",
 			blocks: []vkBlock{{
 				Type:    "text",
-				Content: `["привет ","unstyled",[{"type":"smile","name":"🔥"},{"type":"mention","displayName":"Dank1n"}]]`,
+				Content: `["привет ","unstyled",[{"type":"smile","id":"f","name":"fire","largeUrl":"https://x/f"},{"type":"mention","displayName":"Dank1n"}]]`,
 			}},
-			want: "привет 🔥",
+			want: "привет",
 		},
 		{
 			// Узел устроен как [текст, оформление, содержимое], поэтому дети
@@ -273,23 +276,23 @@ func TestMessageTextKeepsSmilesInsideText(t *testing.T) {
 			name: "оформление не печатается, содержимое — да",
 			blocks: []vkBlock{{
 				Type:    "text",
-				Content: `["слово","bold",[{"type":"smile","name":"🎉"}]]`,
+				Content: `["слово","bold",[{"type":"smile","id":"q","name":"party","largeUrl":"https://x/q"}]]`,
 			}},
-			want: "слово🎉",
+			want: "слово",
 		},
 		{
 			name: "смайл отдельным блоком",
 			blocks: []vkBlock{
-				{Type: "smile", Name: "🔥"},
+				{Type: "smile", ID: "f", Name: "fire", LargeURL: "https://x/f"},
 				{Type: "text", Content: `[" привет","unstyled",[]]`},
 			},
-			want: "🔥 привет",
+			want: "привет",
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			if got := messageText(tc.blocks); got != tc.want {
+			if got := lineText(tc.blocks); got != tc.want {
 				t.Fatalf("messageText() = %q, want %q", got, tc.want)
 			}
 		})
@@ -300,20 +303,30 @@ func TestMessageTextKeepsSmilesInsideText(t *testing.T) {
 // Без отсечки одна реплика превращалась в двадцать одинаковых подписей.
 func TestMessageTextCollapsesRepeatedSmiles(t *testing.T) {
 	blocks := []vkBlock{{
-		Type:    "text",
-		Content: `["", "unstyled", [{"type":"smile","name":"CptCheer7"},{"type":"smile","name":"CptCheer7"},{"type":"smile","name":"CptCheer7"}]]`,
+		Type: "text",
+		Content: `["", "unstyled", [` +
+			`{"type":"smile","id":"a","name":"CptCheer7","largeUrl":"https://x/a"},` +
+			`{"type":"smile","id":"a","name":"CptCheer7","largeUrl":"https://x/a"},` +
+			`{"type":"smile","id":"a","name":"CptCheer7","largeUrl":"https://x/a"}]]`,
 	}}
-	if got := messageText(blocks); got != "CptCheer7" {
-		t.Fatalf("messageText() = %q, want %q", got, "CptCheer7")
+	text, html := messageLine(blocks)
+	if text != "" {
+		t.Errorf("код смайла не должен попадать в читаемый текст: %q", text)
+	}
+	if got := strings.Count(html, "<img"); got != 1 {
+		t.Fatalf("картинок смайла %d, ожидалась одна: %q", got, html)
 	}
 
 	// Разные смайлы в одной реплике остаются все: человек мог послать и то и то.
 	mixed := []vkBlock{{
-		Type:    "text",
-		Content: `["", "unstyled", [{"type":"smile","name":"🔥"},{"type":"smile","name":"🎉"}]]`,
+		Type: "text",
+		Content: `["", "unstyled", [` +
+			`{"type":"smile","id":"a","name":"fire","largeUrl":"https://x/a"},` +
+			`{"type":"smile","id":"b","name":"party","largeUrl":"https://x/b"}]]`,
 	}}
-	if got := messageText(mixed); got != "🔥🎉" {
-		t.Fatalf("messageText() = %q, want %q", got, "🔥🎉")
+	_, mixedHTML := messageLine(mixed)
+	if got := strings.Count(mixedHTML, "<img"); got != 2 {
+		t.Fatalf("разных смайлов %d, ожидалось два: %q", got, mixedHTML)
 	}
 }
 
@@ -367,11 +380,13 @@ func TestTopicRegexFindsSlotAddresses(t *testing.T) {
 // отдельными блоками, и узлами внутри текста.
 func TestMessageTextCollapsesSmilesAcrossBlocks(t *testing.T) {
 	blocks := []vkBlock{
-		{Type: "smile", Name: "hardplayDance"},
-		{Type: "text", Content: `["", "unstyled", [{"type":"smile","name":"hardplayDance"}]]`},
+		{Type: "smile", ID: "x", Name: "hardplayDance", LargeURL: "https://x/icon"},
+		{Type: "text", Content: `["", "unstyled", [{"type":"smile","id":"x",` +
+			`"name":"hardplayDance","largeUrl":"https://x/icon"}]]`},
 	}
-	if got := messageText(blocks); got != "hardplayDance" {
-		t.Fatalf("messageText() = %q, want %q", got, "hardplayDance")
+	_, html := messageLine(blocks)
+	if got := strings.Count(html, "<img"); got != 1 {
+		t.Fatalf("один и тот же смайл напечатан %d раз(а): %q", got, html)
 	}
 }
 
@@ -388,5 +403,68 @@ func TestChannelStateReportsOnlyOnce(t *testing.T) {
 	}
 	if state.shouldReport() {
 		t.Error("и третий раз тоже нельзя")
+	}
+}
+
+// lineText is only the readable half of a line: the html half is checked in its
+// own tests, and повторять разбор в каждом было бы только шумом.
+func lineText(blocks []vkBlock) string {
+	text, _ := messageLine(blocks)
+	return text
+}
+
+func TestMessageLinePutsSmilesIntoHTML(t *testing.T) {
+	blocks := []vkBlock{{
+		Type: "text",
+		Content: `["привет ", "unstyled", [{"type":"smile","id":"abc-123",` +
+			`"name":"legionaveGgigiggg","isAnimated":true,` +
+			`"largeUrl":"https://images.live.vkvideo.ru/smile/abc-123/icon/size/large"}]]`,
+	}}
+
+	text, html := messageLine(blocks)
+	if text != "привет" {
+		t.Fatalf("читаемый текст = %q, ожидалось без кода смайла", text)
+	}
+	if !strings.Contains(html, `<img class="smile"`) ||
+		!strings.Contains(html, "images.live.vkvideo.ru/smile/abc-123") {
+		t.Fatalf("в разметке нет картинки смайла: %q", html)
+	}
+	// Код смайла в разметку попадать не должен: человек его не писал.
+	if strings.Contains(html, "legionaveGgigiggg") &&
+		!strings.Contains(html, `alt="legionaveGgigiggg"`) {
+		t.Errorf("код смайла попал в разметку как текст: %q", html)
+	}
+}
+
+// Анимированный смайл приходит десятками одинаковых узлов — по одному на кадр.
+// Без отсечки одна реплика превращалась бы в двадцать одинаковых картинок.
+func TestMessageLineCollapsesRepeatedSmiles(t *testing.T) {
+	node := `{"type":"smile","id":"abc","name":"Cat",` +
+		`"largeUrl":"https://images.live.vkvideo.ru/smile/abc/icon/size/large"}`
+	blocks := []vkBlock{{
+		Type:    "text",
+		Content: `["", "unstyled", [` + node + `,` + node + `,` + node + `]]`,
+	}}
+
+	_, html := messageLine(blocks)
+	if got := strings.Count(html, "<img"); got != 1 {
+		t.Fatalf("картинок смайла %d, ожидалась одна: %q", got, html)
+	}
+}
+
+// Текст от живых людей попадает в разметку экранированным: иначе в ленте можно
+// было бы вставить свою разметку и сломать страницу.
+func TestMessageLineEscapesTextInHTML(t *testing.T) {
+	blocks := []vkBlock{{Type: "text", Content: `["<script>alert(1)</script>","unstyled",[]]`}}
+
+	text, html := messageLine(blocks)
+	if !strings.Contains(text, "<script>") {
+		t.Errorf("читаемый текст должен остаться как есть: %q", text)
+	}
+	if strings.Contains(html, "<script>") {
+		t.Errorf("в разметку попал неэкранированный текст: %q", html)
+	}
+	if !strings.Contains(html, "&lt;script&gt;") {
+		t.Errorf("текст должен быть экранирован: %q", html)
 	}
 }

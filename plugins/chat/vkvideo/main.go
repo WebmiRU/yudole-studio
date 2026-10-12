@@ -862,6 +862,14 @@ type vkBlock struct {
 	Name        string
 	Nick        string
 	URL         string
+	// Смайл приходит сразу со всеми размерами картинки — выбирать больше не
+	// из чего. Раньше эти поля просто не читались, и вместо смайла в ленту
+	// падал его внутренний код.
+	ID         string
+	IsAnimated bool
+	SmallURL   string `json:"smallUrl"`
+	MediumURL  string `json:"mediumUrl"`
+	LargeURL   string `json:"largeUrl"`
 }
 
 // channelState помнит, что мы уже показывали по каналу.
@@ -920,8 +928,8 @@ func processPush(raw json.RawMessage, byID map[string]vkChannel, seen *seenIDs, 
 		if name == "" {
 			name = login
 		}
-		text := messageText(message.Data)
-		if text == "" {
+		text, html := messageLine(message.Data)
+		if text == "" && html == "" {
 			return
 		}
 		kind := protocol.KindMessagePublic
@@ -931,7 +939,7 @@ func processPush(raw json.RawMessage, byID map[string]vkChannel, seen *seenIDs, 
 		send(kind, protocol.ChatPayload{
 			Channel: channel.Slug,
 			User:    protocol.ChatUser{Name: name, ID: idForUser(author.ID), Login: login},
-			Message: protocol.ChatLine{Src: text, Text: text},
+			Message: protocol.ChatLine{Src: text, Text: text, Html: html},
 		})
 	case "stream_online_status":
 		state := states[channel.ID]
@@ -1000,122 +1008,151 @@ func channelNameFromPush(topic string) string {
 	return id
 }
 
-func messageText(blocks []vkBlock) string {
-	var out strings.Builder
-	// Один и тот же смайл в одной реплике печатаем один раз. Анимированные
-	// приходят десятками одинаковых узлов, и без этого одна реплика
-	// превращалась в двадцать одинаковых подписей подряд. Общий набор
-	// проходит через все блоки, а не через каждый отдельно: повторы идут
-	// именно между блоками.
-	seenSmiles := map[string]bool{}
+// vkLine собирает реплику сразу в двух видах, как того ждёт протокол: читаемый
+// текст без кодов смайлов и разметку, где смайлы — картинки.
+//
+// Собирать оба вида надо за один проход: разбирать сообщение дважды означало бы
+// дважды гадать, где смайл, а где текст, и они разъезжались бы.
+type vkLine struct {
+	text strings.Builder
+	html strings.Builder
+	seen map[string]bool
+}
+
+func newVKLine() *vkLine {
+	return &vkLine{seen: map[string]bool{}}
+}
+
+// addSmile кладёт смайл в разметку картинкой.
+//
+// В читаемый текст код смайла не идёт: «legionaveGgigiggg» — это не то, что
+// человек написал, а внутреннее имя картинки. В ленте такое читать невозможно.
+// Анимированные приходят десятками одинаковых узлов, по одному на кадр, и без
+// отсечки одна реплика превращалась в двадцать одинаковых картинок подряд.
+func (l *vkLine) addSmile(node map[string]any) {
+	id := firstNonEmpty(asString(node["id"]), asString(node["name"]))
+	if id == "" {
+		return
+	}
+	if l.seen[id] {
+		return
+	}
+	l.seen[id] = true
+
+	image := firstNonEmpty(
+		asString(node["largeUrl"]),
+		asString(node["mediumUrl"]),
+		asString(node["smallUrl"]),
+	)
+	if image == "" {
+		return
+	}
+	// Без loading="lazy" картинки грузятся сразу. С ленивой загрузкой смайл
+	// вне видимой области остаётся пустым местом с его alt-текстом, и в ленте
+	// вместо смайла видно «legionaveGgigiggg» — то есть ровно то, от чего мы
+	// отступали. Реплик в ленте немного, лениться тут не к чему.
+	fmt.Fprintf(&l.html, `<img class="smile" src="%s" alt="%s">`,
+		htmlEscape(image), htmlEscape(asString(node["name"])))
+}
+
+// addText кладёт кусок текста в оба вида. В разметку — экранированным: текст
+// пришёл от человека, и вставлять его в HTML как есть нельзя.
+func (l *vkLine) addText(value string) {
+	l.text.WriteString(value)
+	l.html.WriteString(htmlEscape(value))
+}
+
+func (l *vkLine) result() (string, string) {
+	return strings.TrimSpace(l.text.String()), strings.TrimSpace(l.html.String())
+}
+
+// messageLine собирает реплику в читаемый текст и в разметку со смайлами.
+func messageLine(blocks []vkBlock) (string, string) {
+	line := newVKLine()
 	for _, block := range blocks {
 		switch block.Type {
-		case "text", "link":
-			out.WriteString(vkPlainTextSeen(block.Content, seenSmiles))
+		case "smile":
+			line.addSmile(map[string]any{
+				"id": block.ID, "name": block.Name,
+				"smallUrl": block.SmallURL, "mediumUrl": block.MediumURL,
+				"largeUrl": block.LargeURL,
+			})
 		case "mention":
 			name := firstNonEmpty(block.DisplayName, block.Name, block.Nick)
 			if name != "" {
 				if !strings.HasPrefix(name, "@") {
-					out.WriteByte('@')
+					line.addText("@")
 				}
-				out.WriteString(name)
-			}
-		case "smile":
-			if block.Name != "" && !seenSmiles[block.Name] {
-				seenSmiles[block.Name] = true
-				out.WriteString(block.Name)
+				line.addText(name)
 			}
 		default:
 			if block.Content != "" {
-				out.WriteString(vkPlainTextSeen(block.Content, seenSmiles))
+				line.addEncoded(block.Content)
 			}
 		}
 	}
-	return strings.TrimSpace(out.String())
+	return line.result()
 }
 
-// vkPlainText достаёт читаемый текст из содержимого блока.
-//
-// Текст приходит закодированным дважды: в content лежит JSON-строка, а внутри
-// неё — сам текст вместе с оформлением: ["привет","unstyled",[]]. Печатать это
-// как есть нельзя, в ленте появляется мусор вида ["привет","unstyled",[]].
-// Если разобрать не удалось, отдаём как есть: лучше лишние кавычки, чем пустота.
-func vkPlainText(raw string) string {
-	return vkPlainTextSeen(raw, map[string]bool{})
-}
-
-func vkPlainTextSeen(raw string, seen map[string]bool) string {
-	if raw == "" || raw[0] != '[' && raw[0] != '{' {
-		return raw
+// addEncoded разбирает содержимое блока, которое приходит закодированным дважды.
+func (l *vkLine) addEncoded(raw string) {
+	if raw == "" || (raw[0] != '[' && raw[0] != '{') {
+		l.addText(raw)
+		return
 	}
 	var decoded any
 	if err := json.Unmarshal([]byte(raw), &decoded); err != nil {
-		return raw
+		l.addText(raw)
+		return
 	}
-	var out strings.Builder
-	collectVKTextSeen(&out, decoded, seen)
-	return out.String()
+	l.walk(decoded)
 }
 
-// collectVKText обходит разобранный кусок. Узел устроен как
-// [текст, оформление, содержимое]: первый элемент — сам текст, второй — стиль
-// («unstyled», «bold» и подобные), его печатать нельзя, третий — вложенные куски.
-func collectVKText(out *strings.Builder, node any) {
-	collectVKTextSeen(out, node, nil)
-}
-
-// collectVKTextSeen обходит разобранный кусок, помня уже выведенные смайлы.
+// walk обходит разобранный кусок.
 //
-// seen передаётся на всё сообщение целиком, а не на отдельный блок: анимированные
-// смайлы приходят сразу десятками одинаковых узлов — по одному на кадр, — и без
-// этого одна реплика превращалась в двадцать одинаковых подписей подряд.
-func collectVKTextSeen(out *strings.Builder, node any, seen map[string]bool) {
+// Форм у массива две, и по длине их не различить: узел это
+// [текст, оформление, содержимое], а содержимое — снова список узлов.
+// Различает тип второго элемента: у узла там строка-стиль («unstyled», «bold»),
+// у списка узлов — объект.
+func (l *vkLine) walk(node any) {
 	switch value := node.(type) {
 	case string:
-		out.WriteString(value)
+		l.addText(value)
 	case []any:
-		if len(value) == 0 {
-			return
-		}
-		// Формы две, и по длине их не различить: узел это
-		// [текст, оформление, содержимое], а содержимое — снова список узлов.
-		// Различает тип второго элемента: у узла на этом месте строка-стиль
-		// («unstyled», «bold»), у списка узлов — объект или ничего.
 		if len(value) >= 2 {
 			if _, isStyle := value[1].(string); isStyle {
-				collectVKTextSeen(out, value[0], seen)
+				l.walk(value[0])
+				// Оформление живёт на втором месте, и печатать его нельзя, а всё,
+				// что дальше, — вложенные куски: смайлы, ссылки, продолжения.
 				for _, nested := range value[2:] {
-					collectVKTextSeen(out, nested, seen)
+					l.walk(nested)
 				}
 				return
 			}
 		}
 		for _, nested := range value {
-			collectVKTextSeen(out, nested, seen)
+			l.walk(nested)
 		}
 	case map[string]any:
-		// Смайлы приходят отдельными узлами прямо внутри текста. Без них
-		// реплика выглядит обрезанной, а человек по ней не вспомнит, что писал.
 		if kind, _ := value["type"].(string); kind == "smile" {
-			name := firstNonEmpty(asString(value["name"]), asString(value["displayName"]))
-			if name != "" {
-				// Один и тот же смайл в одной реплике печатаем один раз.
-				if seen[name] {
-					return
-				}
-				if seen != nil {
-					seen[name] = true
-				}
-				out.WriteString(name)
-				return
-			}
+			l.addSmile(value)
+			return
 		}
 		for _, key := range []string{"text", "content", "title"} {
 			if child, ok := value[key]; ok {
-				collectVKTextSeen(out, child, seen)
+				l.walk(child)
 			}
 		}
 	}
+}
+
+// htmlEscape экранирует всё, что не разметка: в разметку попадает только то,
+// что собрал плагин, а текст пришёл от живых людей.
+func htmlEscape(value string) string {
+	replacer := strings.NewReplacer(
+		"&", "&amp;", "<", "&lt;", ">", "&gt;", `"`, "&quot;", "'", "&#39;",
+	)
+	return replacer.Replace(value)
 }
 
 func asString(v any) string {

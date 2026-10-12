@@ -5,6 +5,7 @@
 // знает, какие плагины вообще есть — что пришло, то и показали.
 
 import '../sass/chat.sass';
+import {serviceIcon} from './service-icons.js';
 
 const API_CHAT = '/api/chat';
 
@@ -159,7 +160,7 @@ const SEVERITIES = ['neutral', 'info', 'success', 'warning', 'error'];
 function line(entry) {
     if (isLine(entry)) {
         const message = entry.payload?.message ?? {};
-        const head = el('span', {class: 'msg__author'}, [entry.user ?? '—']);
+        const head = authorHead(entry);
         // Html приходит только если плагин нашёл в строке смайлы и подставил
         // картинки; иначе это тот же самый текст без единой разметки, и
         // разбирать его как html незачем.
@@ -173,6 +174,34 @@ function line(entry) {
     }
 
     return block(entry, severityOf(entry), author(entry), describe(entry));
+}
+
+// authorHead is the name of the person who wrote, with the service's mark to
+// the left of it. В одной ленте сидят сразу несколько сервисов, и без значка не
+// видно, кто именно написал: одно и то же имя может быть и в Twitch, и в
+// YouTube, а разные ники читаются одинаково.
+function authorHead(entry) {
+    const name = entry.user ?? '—';
+    const mark = serviceIcon(entry.plugin);
+    if (!mark) {
+        return el('span', {class: 'msg__author'}, [name]);
+    }
+
+    // Разметку ставим целиком: значок свой, постоянный, из данных чата в него
+    // ничего не попадает.
+    const icon = document.createElement('span');
+    icon.className = 'msg__service';
+    icon.title = serviceTitle(entry);
+    icon.innerHTML = mark;
+
+    return el('span', {class: 'msg__author'}, [icon, name]);
+}
+
+// serviceTitle is the name of the service for the tooltip: значок без подписи —
+// просто пятнышко, а с подписью человек понимает, что это за площадка.
+function serviceTitle(entry) {
+    const plugin = state.plugins.get(entry.plugin);
+    return plugin?.title || entry.plugin || '';
 }
 
 // richBlock is a block whose text the plugin already turned into markup —
@@ -227,7 +256,19 @@ function noticeAttrs(notice) {
 function author(entry) {
     const plugin = state.plugins.get(entry.plugin);
     const name = plugin?.title || entry.plugin || 'чат';
-    return el('span', {class: 'msg__author msg__author--plugin'}, [`[${name}]`]);
+
+    // Значок тут — тем же, что и у реплик. В ленте вперемешку идут сообщения
+    // Twitch, YouTube и VK Видео, и служебная строка «YouTube: в сети» должна
+    // выглядеть так же, как и реплика оттуда же.
+    const mark = serviceIcon(entry.plugin);
+    if (!mark) {
+        return el('span', {class: 'msg__author msg__author--plugin'}, [`[${name}]`]);
+    }
+    const icon = document.createElement('span');
+    icon.className = 'msg__service';
+    icon.title = name;
+    icon.innerHTML = mark;
+    return el('span', {class: 'msg__author msg__author--plugin'}, [icon, `[${name}]`]);
 }
 
 // severityOf says how much a service event matters.

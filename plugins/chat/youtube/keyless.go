@@ -657,7 +657,7 @@ func emitKeylessMessage(channel string, msg keylessMessage) {
 				pick := run.Emoji.Custom.Thumbnails
 				best := pick[len(pick)-1]
 				html.WriteString(fmt.Sprintf(
-					`<img class="smile" src="%s" alt="%s" loading="lazy">`,
+					`<img class="smile" src="%s" alt="%s">`,
 					htmlEscape(best.URL), htmlEscape(run.Emoji.EmojiID)))
 				continue
 			}

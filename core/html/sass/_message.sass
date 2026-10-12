@@ -42,9 +42,24 @@
   min-height: 20px
 
 .msg__author
+  display: inline-flex
+  gap: 6px
+  align-items: center
   color: tokens.$accent-hi
   font-size: 14px
   font-weight: 600
+
+// Значок сервиса слева от ника. В одной ленте сидят несколько площадок, и без
+// значка не видно, кто именно написал. Мелкий и приглушённый: он подсказка, а
+// не украшение, и спорить с ником он не должен.
+.msg__service
+  display: inline-flex
+  flex: none
+  opacity: .85
+  line-height: 0
+
+  svg
+    display: block
 
 // Служебное сообщение пишет плагин, а не человек: в квадратных скобках, чтобы
 // ник не спутать с тем, кто пишет в чате.
