@@ -1016,11 +1016,10 @@ func channelNameFromPush(topic string) string {
 type vkLine struct {
 	text strings.Builder
 	html strings.Builder
-	seen map[string]bool
 }
 
 func newVKLine() *vkLine {
-	return &vkLine{seen: map[string]bool{}}
+	return &vkLine{}
 }
 
 // addSmile кладёт смайл в разметку картинкой.
@@ -1032,58 +1031,7 @@ func newVKLine() *vkLine {
 // localSmileURL serves known VK CDN smiles through the studio origin.
 // The browser otherwise requests images.live.vkvideo.ru directly, where image
 // hotlinking/security policies can behave differently from opening the URL.
-func localSmileURL(raw string) string {
-	parsed, err := url.Parse(raw)
-	if err != nil || parsed.Scheme != "https" || parsed.Host != "images.live.vkvideo.ru" {
-		return raw
-	}
-
-	parts := strings.Split(strings.Trim(parsed.Path, "/"), "/")
-	if len(parts) != 5 || parts[0] != "smile" || parts[2] != "icon" || parts[3] != "size" {
-		return raw
-	}
-	id, size := parts[1], parts[4]
-	if id == "" {
-		return raw
-	}
-	for _, c := range id {
-		if (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') &&
-			(c < '0' || c > '9') && c != '-' {
-			return raw
-		}
-	}
-	if size != "small" && size != "medium" && size != "large" {
-		return raw
-	}
-
-	local := "/api/vkvideo-smile/" + id + "/icon/size/" + size
-	if changed := parsed.Query().Get("change_time"); changed != "" {
-		valid := len(changed) <= 20
-		for _, c := range changed {
-			if c < '0' || c > '9' {
-				valid = false
-				break
-			}
-		}
-		if valid {
-			query := url.Values{}
-			query.Set("change_time", changed)
-			local += "?" + query.Encode()
-		}
-	}
-	return local
-}
-
 func (l *vkLine) addSmile(node map[string]any) {
-	id := firstNonEmpty(asString(node["id"]), asString(node["name"]))
-	if id == "" {
-		return
-	}
-	if l.seen[id] {
-		return
-	}
-	l.seen[id] = true
-
 	image := firstNonEmpty(
 		asString(node["largeUrl"]),
 		asString(node["mediumUrl"]),
@@ -1092,15 +1040,10 @@ func (l *vkLine) addSmile(node map[string]any) {
 	if image == "" {
 		return
 	}
-	// Без loading="lazy" картинки грузятся сразу. С ленивой загрузкой смайл
-	// вне видимой области остаётся пустым местом с его alt-текстом, и в ленте
-	// вместо смайла видно «legionaveGgigiggg» — то есть ровно то, от чего мы
-	// отступали. Реплик в ленте немного, лениться тут не к чему.
-	// Смайл проксируется через сервер студии: браузер загружает его с того
-	// же origin, что и чат, а политика CDN и блокировщики внешних картинок
-	// больше не ломают отображение.
-	fmt.Fprintf(&l.html, `<img class="smile" src="%s" alt="%s" referrerpolicy="no-referrer">`,
-		htmlEscape(localSmileURL(image)), htmlEscape(asString(node["name"])))
+	// Every smile node is rendered separately and in input order. Do not
+	// deduplicate by ID or name: the viewer may intentionally send repeats.
+	fmt.Fprintf(&l.html, `<img class="smile" src="%s" alt="%s">`,
+		htmlEscape(image), htmlEscape(asString(node["name"])))
 }
 
 // addText кладёт кусок текста в оба вида. В разметку — экранированным: текст
