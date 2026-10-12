@@ -1,0 +1,83 @@
+// Один блок на два места: сообщение в ленте чата и тост на странице настроек.
+// Общий, а не два похожих: разъехаться они могут в мелочах, которые видно
+// только рядом, и править потом оба.
+
+@use "tokens"
+
+// Одно сообщение — один блок: тёмный фон и рамка слева, ширина четыре пикселя.
+// Цвет рамки — вид сообщения, текстом его повторять незачем.
+.msg
+  padding: 11px 16px 13px
+  border-left: 4px solid transparent
+  background: #000
+
+  // У реплик рамки нет, поэтому вид сообщения различает только полоска — и она
+  // должна быть заметной. Сине-серый, а не серый: в палитре серый уходил в
+  // фон и читался как граница блока.
+  &[data-severity="neutral"]
+    --rule: #{tokens.$rule}
+
+  &[data-severity="info"]
+    border-left-color: tokens.$info
+    --rule: #{tokens.$info}
+
+  &[data-severity="success"]
+    border-left-color: tokens.$success
+    --rule: #{tokens.$success}
+
+  &[data-severity="warning"]
+    border-left-color: tokens.$warning
+    --rule: #{tokens.$warning}
+
+  &[data-severity="error"]
+    border-left-color: tokens.$danger
+    --rule: #{tokens.$danger}
+
+// Шапка блока: кто написал. Номера канала здесь нет — он и так есть в фильтре
+// сверху, а в ленте он только шумел.
+.msg__head
+  display: flex
+  gap: 8px
+  align-items: baseline
+  min-height: 20px
+
+.msg__author
+  color: tokens.$accent-hi
+  font-size: 14px
+  font-weight: 600
+
+// Служебное сообщение пишет плагин, а не человек: в квадратных скобках, чтобы
+// ник не спутать с тем, кто пишет в чате.
+.msg__author--plugin
+  color: tokens.$text-dim
+  font-weight: 500
+
+// Полоска отделяет автора от текста и повторяет цвет рамки: одна история вместо
+// двух разных. У реплик рамки нет, и полоска у них приглушённая — иначе
+// болтал бы под каждой строкой чата.
+.msg__rule
+  width: 100%
+  height: 2px
+  margin: 8px 0 10px
+  background: var(--rule, #{tokens.$border-hi})
+
+// Название канала внутри фразы: жирное, чтобы взгляд цеплялся за него.
+.msg__channel
+  color: tokens.$text
+  font-weight: 600
+
+.msg__text
+  color: tokens.$text
+  font-size: 15px
+  line-height: 1.5
+  white-space: pre-wrap
+  word-break: break-word
+
+// У служебного сообщения текст тише реплик: оно и не главное, и часто повторяет
+// то, что уже видно по рамке.
+.msg[data-severity="info"] .msg__text,
+.msg[data-severity="success"] .msg__text,
+.msg[data-severity="warning"] .msg__text,
+.msg[data-severity="error"] .msg__text
+  color: tokens.$text-dim
+  font-size: 13.5px

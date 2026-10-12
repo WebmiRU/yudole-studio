@@ -131,15 +131,21 @@ func updateSmiles(ctx context.Context, book *smileBook) {
 		return
 	}
 
-	sayWaiting("скачиваю смайлы")
+	sayWaiting("Скачиваю смайлы")
 
 	if err := book.Update(ctx); err != nil {
 		sayError("смайлы не обновились: " + err.Error())
 		return
 	}
 
-	sayLog(fmt.Sprintf("смайлов в базе: %d", len(book.get())))
-	sendAck(nil)
+	count := len(book.get())
+	sayLog(fmt.Sprintf("смайлов в базе: %d", count))
+
+	if at, ok := book.UpdatedAt(); ok {
+		sendDone(fmt.Sprintf("База смайлов обновлена: %s в %d", at.Local().Format("02.01 15:04"), count))
+		return
+	}
+	sendDone(fmt.Sprintf("База смайлов обновлена: %d", count))
 }
 
 // channelList — каналы, к которым надо быть подключены прямо сейчас, вместе с
@@ -240,7 +246,7 @@ func apply(ctx context.Context, values map[string]any) (map[string]any, error) {
 	if len(todo) > 0 {
 		// Живой запрос к GoodGame: говорим ядру, что ждать. Сколько именно
 		// каналов ищем — детали, человеку они ничего не говорят.
-		sayWaiting("спрашиваю GoodGame")
+		sayWaiting("Спрашиваю GoodGame")
 
 		resolver := newResolver()
 		for _, input := range todo {
@@ -501,6 +507,12 @@ func send(kind string, payload any) {
 // своему виду, он кладёт итог в values — ядро сохранит именно его.
 func sendAck(values map[string]any) {
 	send(protocol.KindAck, protocol.AckPayload{Values: values})
+}
+
+// sendDone подтверждает команду и говорит, что именно вышло. Словами: человек
+// нажал кнопку и должен понять результат, а не листать лог.
+func sendDone(message string) {
+	send(protocol.KindAck, protocol.AckPayload{Message: message})
 }
 
 func sayLog(text string) {

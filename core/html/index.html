@@ -59,7 +59,9 @@
     </main>
 </div>
 
-<div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+<!-- Тостов может быть несколько: нажали «Сохранить» пять раз —
+     показаны все пять, каждый со своим временем жизни. -->
+<div class="toasts" id="toasts" aria-live="polite"></div>
 
 <script type="module" src="/js/app.js"></script>
 </body>

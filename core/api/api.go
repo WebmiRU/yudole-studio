@@ -23,7 +23,7 @@ type Manager interface {
 	Enable(id string) (plugin.PluginView, error)
 	Disable(id string) (plugin.PluginView, error)
 	SaveOptions(id string, values map[string]any) (plugin.PluginView, error)
-	Run(ctx context.Context, id, kind string) error
+	Run(ctx context.Context, id, kind string) (string, error)
 }
 
 // Handler builds the routes of the options page.
@@ -97,12 +97,15 @@ func Handler(manager Manager) http.Handler {
 		id := r.PathValue("id")
 		slog.Info("api: action", "plugin", id, "kind", body.Kind)
 
-		if err := manager.Run(r.Context(), id, body.Kind); err != nil {
+		done, err := manager.Run(r.Context(), id, body.Kind)
+		if err != nil {
 			slog.Warn("api: action failed", "plugin", id, "kind", body.Kind, "err", err)
 			writeError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
-		write(w, map[string]any{"kind": body.Kind, "done": true})
+
+		// Что именно вышло, знает только плагин: он и пишет, ядро пересылает.
+		write(w, map[string]any{"kind": body.Kind, "done": true, "message": done})
 	})
 
 	mux.HandleFunc("POST /api/plugins/chat/{id}/enable", func(w http.ResponseWriter, r *http.Request) {

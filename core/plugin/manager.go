@@ -462,19 +462,19 @@ func (m *Manager) SaveOptions(id string, values map[string]any) (PluginView, err
 }
 
 // Run asks a running plugin to do something that is not about its options.
-func (m *Manager) Run(ctx context.Context, id, kind string) error {
+func (m *Manager) Run(ctx context.Context, id, kind string) (string, error) {
 	m.mu.Lock()
 	process := m.running[id]
 	_, known := m.descriptors[id]
 	m.mu.Unlock()
 
 	if !known {
-		return fmt.Errorf("plugin %q is not installed", id)
+		return "", fmt.Errorf("plugin %q is not installed", id)
 	}
 	if process == nil {
 		// Нет процесса — некому выполнять. Проще сказать прямо, чем вернуть
 		// ошибку из ниоткуда.
-		return fmt.Errorf("plugin %q is not running", id)
+		return "", fmt.Errorf("plugin %q is not running", id)
 	}
 	return process.Run(ctx, kind)
 }

@@ -181,6 +181,10 @@ type SetOptionsPayload struct {
 // works with, not what the user happened to type.
 type AckPayload struct {
 	Values map[string]any `json:"values,omitempty"`
+	// Message is what the plugin did, in words. Ядро в этом ничего не понимает и
+	// просто показывает: человек нажал кнопку и должен понять, что вышло, а не
+	// разглядывать «готово».
+	Message string `json:"message,omitempty"`
 }
 
 // LogPayload is a line for the kernel log.

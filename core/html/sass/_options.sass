@@ -1,4 +1,5 @@
 @use "tokens"
+@use "message"
 
 // Список чат-клиентов, форма опций и элементы управления.
 
@@ -551,80 +552,50 @@ select.input--invalid
   text-align: center
   color: tokens.$text-faint
 
-// Тост выглядит как сообщение из чата: тот же блок, та же рамка слева, тот же
-// приглушённый текст. Показываем сверху: снизу справа живут кнопки формы, и
-// сообщение не должно закрывать то, ради чего человек нажал «Сохранить».
-.toast
+// Тосты стоят стопкой в углу. Показываем сверху: снизу справа живут кнопки
+// формы, и сообщение не должно закрывать то, ради чего человек нажал
+// «Сохранить».
+.toasts
   position: fixed
   top: 24px
   right: 24px
   display: flex
   flex-direction: column
-  min-width: 280px
+  align-items: flex-end
+  gap: 10px
   max-width: 440px
-  padding: 12px 16px 14px
-  border-left: 4px solid transparent
-  border-radius: tokens.$radius-sm
-  background: #07090d
-  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.5)
   z-index: 10
 
-  &[data-severity="info"]
-    border-left-color: tokens.$info
-    color: tokens.$info
-
-  &[data-severity="success"]
-    border-left-color: tokens.$success
-    color: tokens.$success
-
-  &[data-severity="warning"]
-    border-left-color: tokens.$warning
-    color: tokens.$warning
-
-  &[data-severity="error"]
-    border-left-color: tokens.$danger
-    color: tokens.$danger
-
-// Текст приглушённый: это сообщение, а не заголовок, и оно висит несколько
-// секунд перед глазами.
-.toast__text
-  margin-bottom: 10px
-  color: tokens.$text-dim
-  font-size: 14px
-  line-height: 1.45
-  word-break: break-word
-
-// Полоса — время жизни тоста. Цвет у неё один на все виды: это ровно та же
-// полоска, что отделяет ник от текста в реплике, а не рамка блока. Вид
-// сообщения показывает рамка слева, и подменять им шкалу времени незачем.
+// Тост — тот же блок, что и сообщение в чате: автор сверху, полоска, текст
+// снизу. Один блок на оба случая, а не два похожих: разъехаться они могут в
+// мелочах, которые видно только рядом.
 //
-// Уменьшается влево: прижата к началу и сжимается к правому краю, как будто
-// её съедают.
-//
-// Отрицательные поля выносят её в самый низ, вплотную к краю: внутри отступов
-// она читалась бы как украшение под текстом, а не как шкала времени.
-.toast__life
-  // Пиксель: шкала — намёк, а не украшение. Вид сообщения показывает рамка
-  // слева, так что спорить с ней эта полоска не должна.
+// Скруглений нет, как и у сообщений. Тень остаётся: тост висит поверх формы,
+// и без неё чёрный блок сливается со страницей.
+.toast
+  width: 100%
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.5)
+
+  // Шкала жизни внизу. Отступ задаёт общий блок, поэтому тянем её из-под
+  // нижнего поля и по бокам.
+  .msg__text
+    margin-bottom: 10px
+
+.msg__life
+  display: block
   height: 1px
-  // Боками вытягиваем полосу почти к краям: у блока свои отступы в 16 пикселей,
-  // минус на 8 оставляет от края восемь — и она не липнет ни к рамке слева, ни к
-  // скруглённому углу справа. Снизу в минус на весь отступ, чтобы лежать вплотную.
-  margin: 0 -8px -14px
+  margin: 0 -8px -13px
   background: tokens.$rule
   transform-origin: left center
-
-.toast.is-shown .toast__life
   animation: toast-life var(--life, 5s) linear forwards
 
+// Уменьшается влево: прижата к началу и сжимается к правому краю, как будто
+// её съедают. Пиксель толщиной — шкала это намёк, а не украшение.
 @keyframes toast-life
   from
     transform: scaleX(1)
   to
     transform: scaleX(0)
-
-.toast[hidden]
-  display: none
 
 @media (max-width: 720px)
   .field

@@ -2,6 +2,7 @@ package plugin
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -139,41 +140,46 @@ func (p *Plugin) Configure(values map[string]any) (map[string]any, error) {
 // Команда может быть долгой, поэтому ждём дольше, чем обычный ответ на
 // set_options: скачивание и переписывание базы занимают секунды, а не
 // миллисекунды.
-func (p *Plugin) Run(ctx context.Context, kind string) error {
+func (p *Plugin) Run(ctx context.Context, kind string) (string, error) {
 	// Ответ снимет ожидание: и подтверждение, и отказ означают, что работа
 	// закончена.
 	defer p.setWaiting(false, "")
 
 	if kind == "" {
-		return fmt.Errorf("plugin %q: команда без вида", p.Name)
+		return "", fmt.Errorf("plugin %q: команда без вида", p.Name)
 	}
 
-	message, err := protocol.New(kind, struct{}{})
+	request, err := protocol.New(kind, struct{}{})
 	if err != nil {
-		return err
+		return "", err
 	}
-	if err := p.Send(message); err != nil {
-		return err
+	if err := p.Send(request); err != nil {
+		return "", err
 	}
 
 	select {
 	case reply := <-p.repliesTo():
 		switch reply.Kind {
 		case protocol.KindAck:
-			return nil
+			var payload protocol.AckPayload
+			if err := reply.PayloadInto(&payload); err != nil {
+				// Подтверждение без читаемого содержимого — просто подтверждение.
+				return "", nil
+			}
+			return payload.Message, nil
 		case protocol.KindError:
 			var payload protocol.ErrorPayload
 			if err := reply.PayloadInto(&payload); err != nil || payload.Message == "" {
-				return fmt.Errorf("plugin %q refused %s without saying why", p.Name, kind)
+				return "", fmt.Errorf("plugin %q refused %s without saying why", p.Name, kind)
 			}
-			return fmt.Errorf("%s", payload.Message)
+			return "", errors.New(payload.Message)
 		default:
-			return fmt.Errorf("plugin %q answered %s with %q", p.Name, kind, reply.Kind)
+			return "", fmt.Errorf("plugin %q answered %s with %q", p.Name, kind, reply.Kind)
 		}
 	case <-time.After(actionTimeout):
-		return fmt.Errorf("plugin %q did not finish %s within %s", p.Name, kind, actionTimeout)
+		return "", fmt.Errorf("plugin %q did not finish %s within %s", p.Name, kind, actionTimeout)
 	case <-ctx.Done():
-		return ctx.Err()
+		return "", ctx.Err()
 	}
 }
 

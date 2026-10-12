@@ -28,9 +28,8 @@ const state = {
 const clientsEl = document.getElementById('clients');
 const optionsEl = document.getElementById('options');
 const countEl = document.getElementById('clients-count');
-const toastEl = document.getElementById('toast');
+const toastsEl = document.getElementById('toasts');
 
-let toastTimer = 0;
 
 // --- Обращение к ядру -------------------------------------------------------
 
@@ -276,7 +275,7 @@ function renderOptions() {
 function saveButton(plugin) {
     const busy = state.saving || Boolean(plugin.waiting);
     const label = busy
-        ? (state.waitingText || plugin.waitingText || 'Сохраняем…')
+        ? sentence(state.waitingText || plugin.waitingText || 'Сохраняем…')
         : 'Сохранить';
 
     const children = busy
@@ -352,7 +351,9 @@ function renderButton(plugin, button) {
         row.append(el('p', {class: 'action__hint'}, [button.hint]));
     }
     if (plugin.waiting && plugin.waitingText) {
-        row.append(el('p', {class: 'action__busy'}, [plugin.waitingText]));
+        // Плагин пишет как удобно ему, а на странице это фраза: с большой
+        // буквы.
+        row.append(el('p', {class: 'action__busy'}, [sentence(plugin.waitingText)]));
     }
     return row;
 }
@@ -372,7 +373,7 @@ async function runAction(plugin, button) {
     const poll = setInterval(refreshWaiting, 700);
 
     try {
-        await api(`${API}/${plugin.id}/actions`, {
+        const answer = await api(`${API}/${plugin.id}/actions`, {
             method: 'POST',
             body: JSON.stringify({kind: button.kind}),
         });
@@ -380,7 +381,9 @@ async function runAction(plugin, button) {
         // его свежий вид.
         const view = await api(`${API}/${plugin.id}`);
         replacePlugin(view);
-        toast(`${plugin.title || plugin.id}: готово`, 'success');
+        // Что именно вышло, сказал сам плагин: «готово» после кнопки про
+        // смайлы не значит ничего.
+        toast(answer.message || 'Готово', 'success');
     } catch (error) {
         toast(error.message, 'error');
     } finally {
@@ -656,12 +659,12 @@ async function toggle(plugin, enabled) {
         replacePlugin(view);
 
         if (view.state === 'failed') {
-            toast(`${name}: ${view.problem ?? 'не запустился'}`, 'error');
+            toast(view.problem || 'не запустился', 'error', 60, name);
         } else {
-            toast(`${name}: ${enabled ? 'включён' : 'выключен'}`, 'success');
+            toast(enabled ? 'включён' : 'выключен', 'success');
         }
     } catch (error) {
-        toast(`${name}: ${error.message}`, 'error');
+        toast(error.message, 'error');
     } finally {
         state.busy.delete(plugin.id);
         render();
@@ -710,7 +713,7 @@ function save(plugin) {
         replacePlugin(view);
         state.fieldError = null;
         clearFieldErrors(plugin);
-        toast(`${plugin.title || plugin.id}: настройки сохранены`, 'success');
+        toast('Настройки сохранены', 'success');
     }).catch((error) => {
         // Плагин сказал, что не так: помечаем сами поля и конкретные записи в
         // них. Всплывашку не показываем — она бы только отвлекла от сути.
@@ -877,36 +880,77 @@ window.addEventListener('hashchange', () => {
     }
 });
 
+// selectedPlugin is the one whose options are open: от него тост берёт имя, если
+// вызывающий не назвал плагин сам.
+function selectedPlugin() {
+    return state.plugins.find((plugin) => plugin.id === state.selectedId) ?? null;
+}
+
 function pluginIdFromHash() {
     return location.hash.replace(/^#/, '') || null;
 }
 
 // --- Вспомогательное -------------------------------------------------------
 
-// toast is a short-lived notice, and it looks like a message from the chat:
-// тот же блок, та же рамка слева, тот же текст. Вид и время жизни задаёт
+// toast is a short-lived notice, and it is built from the very same bricks as a
+// chat message: автор сверху, полоска, текст снизу. Вид и время жизни задаёт
 // вызывающий — «сохранилось» это не то же самое, что «не вышло».
 //
+// Тостов может быть сколько угодно: нажали «Сохранить» пять раз — показаны все
+// пять, и у каждого своё время. Раньше элемент был один, и новый просто
+// затирал предыдущий, как будто человек нажал один раз.
+//
 // По умолчанию пять секунд: дольше — уже мешает, короче — не успевают прочесть.
-function toast(text, severity = 'info', seconds = 5) {
-    toastEl.dataset.severity = severity;
-    toastEl.replaceChildren(
-        el('span', {class: 'toast__text'}, [text]),
-        el('span', {class: 'toast__life', style: `--life: ${seconds}s`}),
-    );
+function toast(text, severity = 'info', seconds = 5, author = null) {
+    const who = author ?? selectedPlugin()?.title ?? selectedPlugin()?.id ?? 'Студия';
 
-    toastEl.hidden = false;
-    clearTimeout(toastTimer);
+    const node = el('article', {
+        class: 'msg toast',
+        'data-severity': severity,
+        role: 'status',
+    }, [
+        // Автор в квадратных скобках, как служебное сообщение в ленте: не спутать
+        // с тем, кто пишет в чате.
+        el('div', {class: 'msg__head'}, [
+            el('span', {class: 'msg__author msg__author--plugin'}, [`[${who}]`]),
+        ]),
+        el('div', {class: 'msg__rule'}),
+        el('div', {class: 'msg__text'}, [sentence(text)]),
+        el('span', {class: 'msg__life', style: `--life: ${seconds}s`}),
+    ]);
 
-    // Полоску надо начинать заново, иначе анимация не перезапустится: без
-    // этого второй тост покажет остаток от предыдущего.
-    toastEl.classList.remove('is-shown');
-    void toastEl.offsetWidth;
-    toastEl.classList.add('is-shown');
+    // Под тостом может стоять такой же: разводим их по высоте, иначе полосы
+    // жизни слипнутся в одну.
+    toastsEl.append(node);
 
-    toastTimer = setTimeout(() => {
-        toastEl.hidden = true;
-    }, seconds * 1000);
+    const remove = () => node.remove();
+    const timer = setTimeout(remove, seconds * 1000);
+
+    // Убрали раньше, чем истекло время, — убираем и таймер, иначе он выстрелит
+    // по уже несуществующему узлу.
+    node.addEventListener('transitionend', () => {
+        if (node.dataset.gone) {
+            return;
+        }
+        node.dataset.gone = '';
+        clearTimeout(timer);
+        remove();
+    }, {once: true});
+}
+
+// sentence starts a message with a capital — including the part after a colon.
+// Сообщение читается как фраза: «GoodGame: настройки сохранены» выглядит так,
+// будто слова продолжали другую строку.
+function sentence(text) {
+    const trimmed = String(text ?? '').trim();
+    if (!trimmed) {
+        return '';
+    }
+
+    return trimmed
+        .split(/:\s+/)
+        .map((part) => part.charAt(0).toLocaleUpperCase('ru') + part.slice(1))
+        .join(': ');
 }
 
 function el(tag, attrs = {}, children = []) {
