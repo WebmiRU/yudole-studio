@@ -22,7 +22,9 @@ func writeFile(t *testing.T, path, content string) {
 func newTestWeb(t *testing.T) *web {
 	t.Helper()
 	dir := t.TempDir()
-	writeFile(t, filepath.Join(dir, "index.html"), "<h1>settings</h1>")
+	writeFile(t, filepath.Join(dir, "index.html"), "<h1>home</h1>")
+	writeFile(t, filepath.Join(dir, "settings.html"), "<h1>settings</h1>")
+	writeFile(t, filepath.Join(dir, "chat.html"), "<h1>chat</h1>")
 	writeFile(t, filepath.Join(dir, "assets", "app.css"), "body{}")
 
 	page, err := newWeb(dir)
@@ -48,8 +50,30 @@ func TestWebServesIndex(t *testing.T) {
 			t.Fatalf("GET %s: status %d, want 200", path, rec.Code)
 		}
 		body, _ := io.ReadAll(rec.Body)
-		if string(body) != "<h1>settings</h1>" {
-			t.Errorf("GET %s: body %q, want %q", path, body, "<h1>settings</h1>")
+		if string(body) != "<h1>home</h1>" {
+			t.Errorf("GET %s: body %q, want %q", path, body, "<h1>home</h1>")
+		}
+	}
+}
+
+// Разделы живут по своим адресам: настройки — /settings, чат — /chat. Главная
+// занимается только меню, поэтому и путать их больше не с чем.
+func TestWebServesSectionsByShortAddress(t *testing.T) {
+	page := newTestWeb(t)
+
+	cases := map[string]string{
+		"/settings": "<h1>settings</h1>",
+		"/chat":     "<h1>chat</h1>",
+	}
+	for path, want := range cases {
+		rec := get(t, page, path)
+		if rec.Code != http.StatusOK {
+			t.Errorf("GET %s: status %d, want 200", path, rec.Code)
+			continue
+		}
+		body, _ := io.ReadAll(rec.Body)
+		if string(body) != want {
+			t.Errorf("GET %s: body %q, want %q", path, body, want)
 		}
 	}
 }

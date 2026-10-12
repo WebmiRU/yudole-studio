@@ -16,7 +16,10 @@ export default defineConfig({
     assetsInlineLimit: 0,
     rollupOptions: {
       input: {
+        // Главная — меню разделов. Настройки ушли на отдельную страницу: из
+        // меню на них ведёт ссылка /settings, а не сама главная.
         main: 'html/index.html',
+        settings: 'html/settings.html',
         chat: 'html/chat.html',
       },
     },

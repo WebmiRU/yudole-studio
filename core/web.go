@@ -56,17 +56,20 @@ func (w *web) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 	w.files.ServeHTTP(rw, r)
 }
 
-// pagePath maps a short address to the file behind it: "/" to index.html and
-// "/chat" to chat.html. Serving them by name keeps the addresses readable —
-// /chat instead of /chat.html.
+// pagePath maps a short address to the file behind it: "/" to index.html,
+// "/chat" to chat.html and "/settings" to settings.html. Serving them by name
+// keeps the addresses readable — /chat instead of /chat.html.
 func pagePath(urlPath string) (string, bool) {
 	switch isIndexPath(urlPath) {
 	case true:
 		return "index.html", true
 	default:
 		clean := path.Clean("/" + strings.TrimPrefix(urlPath, "/"))
-		if clean == "/chat" {
+		switch clean {
+		case "/chat":
 			return "chat.html", true
+		case "/settings":
+			return "settings.html", true
 		}
 		return "", false
 	}
