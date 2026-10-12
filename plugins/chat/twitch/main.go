@@ -152,7 +152,17 @@ func supervise(ctx context.Context) {
 		if attempt > 0 { state = protocol.ConnectionReconnecting }
 		emitConnection(state, "", attempt)
 		err := runSession(ctx, s)
-		if ctx.Err() != nil { return }
+		if ctx.Err() != nil {
+			return
+		}
+		if errors.Is(err, errSettingsChanged) {
+			select {
+			case <-changed:
+			default:
+			}
+			attempt = 0
+			continue
+		}
 		attempt++
 		reason := "соединение закрыто"
 		if err != nil { reason = err.Error() }
