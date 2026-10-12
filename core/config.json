@@ -1,0 +1,17 @@
+{
+  "kind": "config",
+  "version": "1.0",
+  "plugins": {
+    "chat": {
+      "goodgame": {
+        "enabled": true,
+        "options": {
+          "channels": []
+        }
+      },
+      "twitch": {},
+      "trovo": {},
+      "youtube": {}
+    }
+  }
+}

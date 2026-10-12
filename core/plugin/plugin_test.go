@@ -3,6 +3,7 @@ package plugin
 import (
 	"bytes"
 	"context"
+	"encoding/json/v2"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -12,8 +13,8 @@ import (
 	"time"
 )
 
-// fakePlugin writes a shell script that behaves like a chat plugin: greets on
-// start, answers ping, exits on quit.
+// fakePlugin writes a shell script that speaks the NDJSON protocol: it greets,
+// answers get_info, and confirms the messages it receives.
 func fakePlugin(t *testing.T, script string) string {
 	t.Helper()
 	if runtime.GOOS == "windows" {
@@ -39,20 +40,24 @@ func captureLog(t *testing.T) *bytes.Buffer {
 	return buf
 }
 
-const echoScript = `#!/bin/sh
-echo "Hello from fake plugin"
-while read -r line; do
+// echoPlugin answers in NDJSON and mirrors every set_options with an ack.
+const echoPlugin = `#!/bin/sh
+echo '{"type":"log","level":"info","message":"Hello from fake plugin"}'
+while IFS= read -r line; do
   case "$line" in
-    ping) echo "pong" ;;
-    quit) echo "bye"; exit 0 ;;
+    *get_info*)
+      echo '{"type":"info","id":"fake","name":"Fake","version":"0.1.0","description":"A fake plugin","options":[{"key":"nick","type":"text","label":"Nick","required":true},{"key":"tags","type":"tags","label":"Tags","default":[]}]}'
+      ;;
+    *set_options*) echo '{"type":"ack"}' ;;
+    *quit*)        echo '{"type":"ack"}'; exit 0 ;;
   esac
 done
 `
 
-func TestPluginStreamsOutput(t *testing.T) {
+func TestPluginStreamsMessages(t *testing.T) {
 	logs := captureLog(t)
 
-	p, err := Start(context.Background(), "fake", fakePlugin(t, echoScript))
+	p, err := Start(context.Background(), "fake", fakePlugin(t, echoPlugin))
 	if err != nil {
 		t.Fatalf("Start: %v", err)
 	}
@@ -64,12 +69,9 @@ func TestPluginStreamsOutput(t *testing.T) {
 		t.Errorf("log line is missing the plugin name:\n%s", logs)
 	}
 
-	// The command channel works too: this is what the options page will use.
-	if err := p.Send("ping"); err != nil {
-		t.Fatalf("Send: %v", err)
-	}
-	if err := waitForLog(t, logs, "pong"); err != nil {
-		t.Fatalf("answer never arrived: %v", err)
+	// Log levels chosen by the plugin are honoured.
+	if !strings.Contains(logs.String(), "level=WARN") && !strings.Contains(logs.String(), "level=INFO") {
+		t.Errorf("no level in the log line:\n%s", logs)
 	}
 
 	if err := p.Stop(); err != nil {
@@ -80,12 +82,64 @@ func TestPluginStreamsOutput(t *testing.T) {
 	case <-time.After(2 * time.Second):
 		t.Fatal("plugin did not exit after Stop")
 	}
-	if err := waitForLog(t, logs, "bye"); err != nil {
-		t.Errorf("plugin did not get the quit command: %v", err)
+}
+
+// Describe and Configure are the requests the kernel makes to a plugin.
+func TestPluginDescribeAndConfigure(t *testing.T) {
+	logs := captureLog(t)
+
+	p, err := Start(context.Background(), "fake", fakePlugin(t, echoPlugin))
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Stop() })
+
+	info, err := p.Describe(context.Background())
+	if err != nil {
+		t.Fatalf("Describe: %v", err)
+	}
+	if info.ID != "fake" || info.Name != "Fake" {
+		t.Errorf("info = %+v, want the fake plugin", info)
+	}
+	if len(info.Options) != 2 {
+		t.Fatalf("options = %v, want two", info.OptionKeys())
+	}
+	if info.Options[0].Key != "nick" || info.Options[0].Type != OptionText {
+		t.Errorf("first option = %+v", info.Options[0])
+	}
+
+	if err := p.Configure(map[string]any{"nick": "vasya", "tags": []any{"a"}}); err != nil {
+		t.Fatalf("Configure: %v", err)
+	}
+	if err := waitForLog(t, logs, "Hello from fake plugin"); err != nil {
+		t.Error(err)
 	}
 }
 
-// A plugin that ignores the quit command must still be killed.
+// Text that is not a protocol message must not stop the reader.
+func TestPluginIgnoresGarbage(t *testing.T) {
+	logs := captureLog(t)
+
+	script := `#!/bin/sh
+echo 'not json at all'
+echo '{"type":"log","message":"still alive"}'
+sleep 0.3
+`
+	p, err := Start(context.Background(), "chatty", fakePlugin(t, script))
+	if err != nil {
+		t.Fatalf("Start: %v", err)
+	}
+	t.Cleanup(func() { _ = p.Stop() })
+
+	if err := waitForLog(t, logs, "still alive"); err != nil {
+		t.Errorf("reader stopped after garbage: %v", err)
+	}
+	if !strings.Contains(logs.String(), "not a protocol message") {
+		t.Errorf("garbage was not reported:\n%s", logs)
+	}
+}
+
+// A plugin that ignores the quit message must still be killed.
 func TestPluginKilledOnStop(t *testing.T) {
 	captureLog(t)
 
@@ -117,16 +171,15 @@ func TestStartFailsForMissingBinary(t *testing.T) {
 }
 
 func TestSupervisorKeepsGoingAfterAFailure(t *testing.T) {
-	logs := captureLog(t)
+	captureLog(t)
 	supervisor := &Supervisor{}
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
-	good := fakePlugin(t, echoScript)
 	supervisor.StartAll(ctx, []Descriptor{
 		{Name: "broken", Path: filepath.Join(t.TempDir(), "nope")},
-		{Name: "fake", Path: good},
+		{Name: "fake", Path: fakePlugin(t, echoPlugin)},
 	})
 
 	if got := supervisor.Names(); len(got) != 1 || got[0] != "fake" {
@@ -139,14 +192,75 @@ func TestSupervisorKeepsGoingAfterAFailure(t *testing.T) {
 		t.Error("Find returned a plugin that failed to start")
 	}
 
-	supervisor.Broadcast("ping")
-	if err := waitForLog(t, logs, "pong"); err != nil {
-		t.Errorf("broadcast did not reach the plugin: %v", err)
-	}
-
+	supervisor.Broadcast(Message{Type: TypeGetInfo})
 	supervisor.StopAll()
 	if len(supervisor.Names()) != 0 {
 		t.Errorf("plugins after StopAll = %v, want none", supervisor.Names())
+	}
+}
+
+// The kernel and the plugin must agree on the line format.
+func TestEncodeDecodeRoundTrip(t *testing.T) {
+	want := Message{
+		Type:        TypeInfo,
+		ID:          "goodgame",
+		Name:        "GoodGame",
+		Version:     "0.1.0",
+		Description: "Чат goodgame.ru",
+		Options: []Option{{
+			Key:     "channels",
+			Type:    OptionTags,
+			Label:   "Каналы",
+			Hint:    "Enter — добавить канал",
+			Default: []string{},
+		}},
+	}
+
+	line, err := Encode(want)
+	if err != nil {
+		t.Fatalf("Encode: %v", err)
+	}
+	if strings.Count(string(line), "\n") != 1 || !strings.HasSuffix(string(line), "\n") {
+		t.Errorf("NDJSON line must end with exactly one newline: %q", line)
+	}
+
+	got, err := DecodeMessage(line)
+	if err != nil {
+		t.Fatalf("DecodeMessage: %v", err)
+	}
+	if got.Type != want.Type || got.Name != want.Name || len(got.Options) != 1 {
+		t.Errorf("round trip = %+v, want %+v", got, want)
+	}
+	if got.Options[0].Key != "channels" || got.Options[0].Type != OptionTags {
+		t.Errorf("option = %+v", got.Options[0])
+	}
+}
+
+func TestDecodeRejectsLinesWithoutType(t *testing.T) {
+	if _, err := DecodeMessage([]byte(`{"name":"GoodGame"}`)); err == nil {
+		t.Error("expected an error for a message without a type")
+	}
+	if _, err := DecodeMessage([]byte(`hello`)); err == nil {
+		t.Error("expected an error for a non-JSON line")
+	}
+}
+
+func TestPluginPayloadStaysOneLine(t *testing.T) {
+	// A description with a newline must not break the protocol.
+	line, err := Encode(Message{Type: TypeLog, Message: "first\nsecond"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Count(string(line), "\n") != 1 {
+		t.Errorf("message broke the line format: %q", line)
+	}
+
+	var back Message
+	if err := json.Unmarshal(line, &back); err != nil {
+		t.Fatalf("unmarshal: %v", err)
+	}
+	if back.Message != "first\nsecond" {
+		t.Errorf("message = %q, want it unchanged", back.Message)
 	}
 }
 

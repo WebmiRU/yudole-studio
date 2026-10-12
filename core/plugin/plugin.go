@@ -1,10 +1,9 @@
 // Package plugin runs chat plugins: separate processes the kernel talks to
-// over stdin/stdout, one message per line.
+// over stdin/stdout, one JSON message per line.
 //
 // A plugin lives in its own directory with a binary of the same name, for
-// example plugins/chat/goodgame/goodgame. Anything the plugin prints on stdout
-// is a message for the kernel; anything the kernel writes to stdin is a
-// command for the plugin.
+// example plugins/chat/goodgame/goodgame. See protocol.go for the messages
+// the two sides exchange.
 package plugin
 
 import (
@@ -21,9 +20,9 @@ import (
 )
 
 const (
-	scanLimit     = 1 << 20 // 1 MiB per line
-	stopTimeout   = 3 * time.Second
-	writeErrorGap = 100 * time.Millisecond
+	scanLimit   = 1 << 20 // 1 MiB per line
+	stopTimeout = 3 * time.Second
+	replyQueue  = 4 // answers waiting to be read by the kernel
 )
 
 // A Plugin is a running plugin process.
@@ -35,13 +34,16 @@ type Plugin struct {
 	stdin  io.WriteCloser
 	logger *slog.Logger
 
+	// replies carries the answers the kernel is waiting for: info and ack.
+	replies chan Message
+
 	writeMu sync.Mutex
 	done    chan struct{}
 	waitErr chan error
 }
 
-// Start launches the plugin at path and starts logging its output. The process
-// is stopped when ctx is cancelled or Stop is called.
+// Start launches the plugin at path and starts handling its messages. The
+// process is stopped when Stop is called or ctx is cancelled.
 func Start(ctx context.Context, name, path string) (*Plugin, error) {
 	logger := slog.Default().With("plugin", name)
 
@@ -65,6 +67,7 @@ func Start(ctx context.Context, name, path string) (*Plugin, error) {
 		cmd:     cmd,
 		stdin:   stdin,
 		logger:  logger,
+		replies: make(chan Message, replyQueue),
 		done:    make(chan struct{}),
 		waitErr: make(chan error, 1),
 	}
@@ -74,27 +77,37 @@ func Start(ctx context.Context, name, path string) (*Plugin, error) {
 	}
 	logger.Info("plugin started", "pid", cmd.Process.Pid)
 
-	go p.readLines(stdout, "stdout", slog.LevelInfo)
-	go p.readLines(stderr, "stderr", slog.LevelWarn)
+	go p.readMessages(stdout)
+	go p.readStderr(stderr)
 	go p.reap()
 
 	return p, nil
 }
 
-// Send writes a command to the plugin's stdin. The trailing newline is added.
-func (p *Plugin) Send(command string) error {
+// Send writes one message to the plugin.
+func (p *Plugin) Send(message Message) error {
+	line, err := Encode(message)
+	if err != nil {
+		return fmt.Errorf("plugin %q: encode %s: %w", p.Name, message.Type, err)
+	}
+
 	p.writeMu.Lock()
 	defer p.writeMu.Unlock()
 
-	if _, err := fmt.Fprintf(p.stdin, "%s\n", command); err != nil {
-		return fmt.Errorf("plugin %q: send %q: %w", p.Name, command, err)
+	if _, err := p.stdin.Write(line); err != nil {
+		return fmt.Errorf("plugin %q: send %s: %w", p.Name, message.Type, err)
 	}
 	return nil
 }
 
+// repliesTo returns the answers waiting to be read by the kernel.
+func (p *Plugin) repliesTo() <-chan Message {
+	return p.replies
+}
+
 // Stop asks the plugin to quit, then kills it if it ignores the request.
 func (p *Plugin) Stop() error {
-	if err := p.Send("quit"); err != nil {
+	if err := p.Send(Message{Type: TypeQuit}); err != nil {
 		// The plugin may already be gone; killing it below is enough.
 		p.logger.Debug("quit was not delivered", "err", err)
 	}
@@ -118,19 +131,74 @@ func (p *Plugin) Done() <-chan struct{} {
 	return p.done
 }
 
-// readLines logs every line the plugin writes to a stream.
-func (p *Plugin) readLines(r io.Reader, stream string, level slog.Level) {
+// readMessages turns the protocol lines of the plugin into messages: logs go
+// straight to the kernel log, replies wait in the inbox for a request.
+func (p *Plugin) readMessages(r io.Reader) {
+	scanner := bufio.NewScanner(r)
+	scanner.Buffer(make([]byte, 0, 4096), scanLimit)
+
+	for scanner.Scan() {
+		line := scanner.Text()
+		if line == "" {
+			continue
+		}
+
+		message, err := DecodeMessage([]byte(line))
+		if err != nil {
+			p.logger.Warn("not a protocol message", "line", line, "err", err)
+			continue
+		}
+		p.handle(message)
+	}
+
+	if err := scanner.Err(); err != nil && !errors.Is(err, fs.ErrClosed) {
+		p.logger.Error("read failed", "stream", "stdout", "err", err)
+	}
+}
+
+func (p *Plugin) handle(message Message) {
+	switch message.Type {
+	case TypeLog:
+		p.logger.Log(context.Background(), logLevel(message.Level), message.Message)
+	case TypeError:
+		p.logger.Error(message.Message)
+
+	case TypeInfo, TypeAck:
+		select {
+		case p.replies <- message:
+		default:
+			p.logger.Warn("reply queue is full, dropping a message", "type", message.Type)
+		}
+
+	default:
+		// An older kernel must not choke on what a newer plugin says.
+		p.logger.Debug("message not handled here", "type", message.Type)
+	}
+}
+
+// readStderr keeps whatever a plugin writes outside the protocol visible,
+// without pretending it is part of it.
+func (p *Plugin) readStderr(r io.Reader) {
 	scanner := bufio.NewScanner(r)
 	scanner.Buffer(make([]byte, 0, 4096), scanLimit)
 
 	for scanner.Scan() {
 		if line := scanner.Text(); line != "" {
-			p.logger.Log(context.Background(), level, line, "stream", stream)
+			p.logger.Warn(line, "stream", "stderr")
 		}
 	}
+}
 
-	if err := scanner.Err(); err != nil && !errors.Is(err, fs.ErrClosed) {
-		p.logger.Error("read failed", "stream", stream, "err", err)
+func logLevel(name string) slog.Level {
+	switch name {
+	case "debug":
+		return slog.LevelDebug
+	case "warn", "warning":
+		return slog.LevelWarn
+	case "error":
+		return slog.LevelError
+	default:
+		return slog.LevelInfo
 	}
 }
 

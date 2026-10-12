@@ -33,6 +33,11 @@ func (s *Supervisor) Names() []string {
 	return names
 }
 
+// Plugins returns the running plugins, in start order.
+func (s *Supervisor) Plugins() []*Plugin {
+	return s.plugins
+}
+
 // Find returns a running plugin by name.
 func (s *Supervisor) Find(name string) (*Plugin, bool) {
 	for _, p := range s.plugins {
@@ -43,15 +48,15 @@ func (s *Supervisor) Find(name string) (*Plugin, bool) {
 	return nil, false
 }
 
-// Broadcast sends a command to every running plugin.
-func (s *Supervisor) Broadcast(command string) {
+// Broadcast sends a message to every running plugin.
+func (s *Supervisor) Broadcast(message Message) {
 	var wg sync.WaitGroup
 	for _, p := range s.plugins {
 		wg.Add(1)
 		go func(p *Plugin) {
 			defer wg.Done()
-			if err := p.Send(command); err != nil {
-				p.logger.Error("broadcast failed", "command", command, "err", err)
+			if err := p.Send(message); err != nil {
+				p.logger.Error("broadcast failed", "type", message.Type, "err", err)
 			}
 		}(p)
 	}

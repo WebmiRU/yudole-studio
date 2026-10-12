@@ -1,7 +1,8 @@
 package main
 
 import (
-	"encoding/json"
+	"encoding/json/jsontext"
+	"encoding/json/v2"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -85,11 +86,12 @@ func healthHandler(w *web) http.HandlerFunc {
 	return func(rw http.ResponseWriter, r *http.Request) {
 		rw.Header().Set("Content-Type", "application/json; charset=utf-8")
 		rw.Header().Set("Cache-Control", "no-store")
-		if err := json.NewEncoder(rw).Encode(map[string]any{
+		health := map[string]any{
 			"status":  "ok",
 			"web":     w.dir,
 			"started": w.built.Format(time.RFC3339),
-		}); err != nil {
+		}
+		if err := json.MarshalEncode(jsontext.NewEncoder(rw), health); err != nil {
 			slog.Error("health: write response", "err", err)
 		}
 	}
