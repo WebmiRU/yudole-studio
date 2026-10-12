@@ -39,10 +39,6 @@ const onlyChatsEl = document.getElementById('only-chats');
 const LINE = 'chat.message.public';
 const PRIVATE = 'chat.message.private';
 
-// One stable perspective profile per event object. redraw() reuses the event,
-// so the panel does not wobble when the feed is rebuilt.
-const panelViews = new WeakMap();
-
 // --- Подключение -----------------------------------------------------------
 
 function connect() {
@@ -210,7 +206,7 @@ function serviceTitle(entry) {
 function richBlock(entry, severity, head, html, notice = false) {
     const text = el('div', {class: 'msg__text'});
     text.innerHTML = html;
-    return messagePanel(entry, notice, head, text);
+    return messagePanel(notice, head, text);
 }
 
 // block is the shape of every message: a HUD frame, a separate header,
@@ -226,12 +222,12 @@ function block(entry, severity, head, text, notice = false) {
     const content = el('div', {class: 'msg__text'}, body.map((piece) => (
         typeof piece === 'string' ? document.createTextNode(piece) : piece
     )));
-    return messagePanel(entry, notice, head, content);
+    return messagePanel(notice, head, content);
 }
 
 // messagePanel keeps the message's content flow natural while the frame,
 // header ticks and footer hardware remain independent decorative layers.
-function messagePanel(entry, notice, head, content) {
+function messagePanel(notice, head, content) {
     const frame = el('div', {class: 'msg__frame', 'aria-hidden': 'true'}, [
         el('span', {class: 'msg__frame-rail msg__frame-rail--top'}),
         el('span', {class: 'msg__frame-light'}),
@@ -247,7 +243,7 @@ function messagePanel(entry, notice, head, content) {
         el('span', {class: 'msg__foot-tick'}),
     ]);
 
-    return el('article', noticeAttrs(notice, entry), [
+    return el('article', noticeAttrs(notice), [
         frame,
         el('div', {class: 'msg__panel'}, [
             header,
@@ -258,29 +254,12 @@ function messagePanel(entry, notice, head, content) {
     ]);
 }
 
-// noticeAttrs — как выглядит служебное сообщение. Отметка нужна и на блоке,
-// и в атрибутах: по одному цвету полоски не отличить, а тег показывает, что
-// реплику писал сервис, а не человек.
-function noticeAttrs(notice, entry) {
-    const attrs = notice
-        ? {class: 'msg is-notice', 'data-severity': 'info'}
-        : {class: 'msg', 'data-severity': 'neutral'};
-    attrs['data-panel-view'] = panelView(entry);
-    return attrs;
-}
-
-// Four small perspective variations provide depth without turning text at an
-// unreadable angle. Every entry keeps its assigned angle through redraws.
-function panelView(entry) {
-    if (!entry || typeof entry !== 'object') {
-        return '1';
+// noticeAttrs marks service notices without affecting the panel geometry.
+function noticeAttrs(notice) {
+    if (notice) {
+        return {class: 'msg is-notice', 'data-severity': 'info'};
     }
-    let view = panelViews.get(entry);
-    if (!view) {
-        view = 1 + Math.floor(Math.random() * 4);
-        panelViews.set(entry, view);
-    }
-    return String(view);
+    return {class: 'msg', 'data-severity': 'neutral'};
 }
 
 // author is who the service message is from: the plugin that sent it, in
