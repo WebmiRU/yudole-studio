@@ -1250,7 +1250,8 @@ func grpcChatDefinitelyEnded(err error) bool {
 
 func permanentGRPCError(err error) bool {
 	switch status.Code(err) {
-	case codes.InvalidArgument, codes.Unauthenticated, codes.PermissionDenied, codes.NotFound, codes.FailedPrecondition:
+	case codes.InvalidArgument, codes.Unauthenticated, codes.PermissionDenied,
+		codes.NotFound, codes.FailedPrecondition, codes.ResourceExhausted, codes.Unimplemented:
 		return true
 	default:
 		return false
