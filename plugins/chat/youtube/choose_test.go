@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestNewWatcherWithoutKeyGoesKeyless(t *testing.T) {
