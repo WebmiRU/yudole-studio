@@ -343,7 +343,7 @@ func (s *store) Load() (smileSet, error) {
 	// И то и другое делается здесь, по тысяче с лишним раз за запуск, а не на
 	// каждой реплике.
 	rows, err := s.db.Query(`
-SELECT name, channel, img, img_big, img_gif
+SELECT name, channel, animated, img, img_big, img_gif
 FROM smiles
 ORDER BY channel`)
 	if err != nil {
@@ -354,16 +354,19 @@ ORDER BY channel`)
 	set := smileSet{}
 	for rows.Next() {
 		var item smile
-		var channel, small, big, gif string
-		if err := rows.Scan(&item.Code, &channel, &small, &big, &gif); err != nil {
+		var channel, animated, small, big, gif string
+		if err := rows.Scan(&item.Code, &channel, &animated, &small, &big, &gif); err != nil {
 			return nil, fmt.Errorf("прочитать смайл: %w", err)
 		}
 		item.Code = ":" + item.Code + ":"
 
-		// Гифка, если она есть: в GoodGame такой смайл и выглядит живым.
-		item.Image = gif
-		if item.Image == "" {
-			item.Image = big
+		// Гифку берём только у анимированных. GoodGame присылает её адрес и
+		// там, где файла нет: у :carrot: анимации нет, и по адресу
+		// anismiles/carrot-gif.gif отдаётся 404. Браузер на битой картинке
+		// показывает alt — и в чате вместо смайла виден его текстовый код.
+		item.Image = big
+		if animated != "" && gif != "" {
+			item.Image = gif
 		}
 		if item.Image == "" {
 			item.Image = small

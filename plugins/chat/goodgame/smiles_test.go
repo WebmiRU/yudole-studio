@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -47,7 +48,8 @@ const realSmiles = `{
       "internal_id": 5, "paid": 0, "animated": false, "tag": "?w5ps6p",
       "img": "https://goodgame.ru/images/smiles/jokie/jokie5.png?0",
       "img_big": "https://goodgame.ru/images/smiles/jokie/jokie5-big.png?0",
-      "img_gif": "", "channel": "SHIMORO", "channel_id": "190074", "tags": ""}
+      "img_gif": "https://goodgame.ru/images/smiles/jokie/jookie5-gif.gif?0",
+       "channel": "SHIMORO", "channel_id": "190074", "tags": ""}
    ]
  },
  "SmilesPacked": "sing,jokie5",
@@ -142,9 +144,62 @@ FROM smiles WHERE name = 'sing'`).Scan(&name, &channel, &tags, &small, &big, &gi
 	if !ok {
 		t.Fatal(":jokie5: не нашёлся по написанию с двоеточиями")
 	}
-	// Гифки нет — берём самую большую статичную.
+	// Анимации нет — берём самую большую статичную. Адрес гифки в файле есть,
+	// но файла за ним нет: GoodGame присылает его и для неанимированных.
 	if jokie.Image != "https://goodgame.ru/images/smiles/jokie/jokie5-big.png?0" {
 		t.Errorf("картинка = %q, want самую большую статичную", jokie.Image)
+	}
+}
+
+// GoodGame присылает адрес гифки и тем смайлам, у которых анимации нет: файла
+// за ним не существует, и страница показала бы вместо картинки текстовый код —
+// тот самый alt. Поэтому гифку берём только у помеченных анимированными.
+func TestPicksTheGifOnlyWhenThereIsOne(t *testing.T) {
+	st := openTestStore(t)
+
+	const file = `{
+  "Smiles": [
+    {"id": 1, "name": "carrot", "animated": false,
+     "img": "https://goodgame.ru/images/smiles/carrot.png?0",
+     "img_big": "https://goodgame.ru/images/smiles/carrot-big.png?0",
+     "img_gif": "https://goodgame.ru/images/anismiles/carrot-gif.gif?0",
+     "channel": null, "channel_id": 0, "tags": ""},
+    {"id": 2, "name": "flashl", "animated": true,
+     "img": "https://goodgame.ru/images/smiles/flashl.png?0",
+     "img_big": "https://goodgame.ru/images/smiles/flashl-big.png?0",
+     "img_gif": "https://goodgame.ru/images/anismiles/flashl-gif.gif?0",
+     "channel": null, "channel_id": 0, "tags": ""}
+  ],
+  "Channel_Smiles": {}, "SmilesPacked": "carrot,flashl",
+  "timezone_offset": "10800", "_compiled_at_": "2026-10-12 09:35:09"
+}`
+
+	var smiles chat.Smiles
+	if err := json.Unmarshal([]byte(file), &smiles); err != nil {
+		t.Fatalf("разобрать: %v", err)
+	}
+	if err := st.Replace(smiles, flatten(smiles), time.Now()); err != nil {
+		t.Fatalf("Replace: %v", err)
+	}
+
+	set, err := st.Load()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Без анимации гифка битая — берём статичную.
+	carrot, _ := set.Lookup(":carrot:")
+	if strings.Contains(carrot.Image, "anismiles/") {
+		t.Errorf("неанимированный смайл получил гифку %q — такого файла нет", carrot.Image)
+	}
+	if carrot.Image != "https://goodgame.ru/images/smiles/carrot-big.png?0" {
+		t.Errorf("картинка = %q, want самую большую статичную", carrot.Image)
+	}
+
+	// С анимацией гифка есть, и показывать надо её.
+	flashl, _ := set.Lookup(":flashl:")
+	if flashl.Image != "https://goodgame.ru/images/anismiles/flashl-gif.gif?0" {
+		t.Errorf("картинка = %q, want гифку", flashl.Image)
 	}
 }
 
