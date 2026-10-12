@@ -24,9 +24,6 @@ const template = `{
       "twitch": {
 
       },
-      "trovo": {
-
-      },
       "youtube": {
 
       }
@@ -47,7 +44,7 @@ func TestParseTemplate(t *testing.T) {
 		t.Errorf("version = %q, want %q", config.Version, Version)
 	}
 
-	want := []string{"goodgame", "trovo", "twitch", "youtube"}
+	want := []string{"goodgame", "twitch", "youtube"}
 	if got := config.ChatPlugins(); !reflect.DeepEqual(got, want) {
 		t.Errorf("chat plugins = %v, want %v (sorted)", got, want)
 	}
