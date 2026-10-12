@@ -342,3 +342,37 @@ func TestRetryDelayIsBounded(t *testing.T) {
 		t.Fatalf("retryDelay(20) = %s; want %s", got, maxChatBackoff)
 	}
 }
+
+
+func TestUpdateContinuationTokenPreservesCursorWhenMissing(t *testing.T) {
+	const cursor = "cursor-123"
+
+	if got, ok := updateContinuationToken(cursor, ""); got != cursor || ok {
+		t.Fatalf("missing token = %q, %v; want previous cursor %q, false", got, ok, cursor)
+	}
+	if got, ok := updateContinuationToken("old", "  next-456  "); got != "next-456" || !ok {
+		t.Fatalf("new token = %q, %v; want trimmed token, true", got, ok)
+	}
+	if got, ok := updateContinuationToken("", ""); got != "" || ok {
+		t.Fatalf("empty initial token = %q, %v; want empty, false", got, ok)
+	}
+}
+
+func TestStreamRetryDelayDoesNotGrowAfterAValidResponse(t *testing.T) {
+	for _, attempt := range []int{0, 1, 4, 20} {
+		delay, nextAttempt := streamRetryDelay(attempt, true)
+		if delay != streamRestartDelay || nextAttempt != 0 {
+			t.Errorf("streamRetryDelay(%d, true) = (%s, %d); want (%s, 0)",
+				attempt, delay, nextAttempt, streamRestartDelay)
+		}
+	}
+
+	delay, nextAttempt := streamRetryDelay(0, false)
+	if delay != 5*time.Second || nextAttempt != 1 {
+		t.Errorf("first failed attempt = (%s, %d); want (5s, 1)", delay, nextAttempt)
+	}
+	delay, nextAttempt = streamRetryDelay(2, false)
+	if delay != 20*time.Second || nextAttempt != 3 {
+		t.Errorf("third failed attempt = (%s, %d); want (20s, 3)", delay, nextAttempt)
+	}
+}
