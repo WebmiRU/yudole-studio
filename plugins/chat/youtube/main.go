@@ -17,6 +17,8 @@ import (
 	"sync"
 	"syscall"
 	"time"
+	"unicode"
+	"unicode/utf8"
 
 	"studio/core/protocol"
 	"studio/plugins/chat/youtube/internal/ytproto"
@@ -41,8 +43,52 @@ var (
 	errSettingsChanged = errors.New("настройки YouTube изменились")
 	errSearchExhausted = errors.New("активный эфир не найден за час")
 	errChatEnded       = errors.New("live chat завершён или недоступен")
-	channelIDPattern   = regexp.MustCompile(`^UC[A-Za-z0-9_-]{20,}$`)
-	handlePattern      = regexp.MustCompile(`^[A-Za-z0-9._-]{3,30}$`)
+	channelIDPattern = regexp.MustCompile(`^UC[A-Za-z0-9_-]{20,}package main
+
+import (
+	"bufio"
+	"context"
+	"crypto/tls"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"net/http"
+	"net/url"
+	"os"
+	"os/signal"
+	"regexp"
+	"strings"
+	"sync"
+	"syscall"
+	"time"
+	"unicode"
+	"unicode/utf8"
+
+	"studio/core/protocol"
+	"studio/plugins/chat/youtube/internal/ytproto"
+
+	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/credentials"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
+)
+
+const (
+	grpcTarget       = "dns:///youtube.googleapis.com:443"
+	searchInterval   = time.Minute
+	maxSearchAttempts = 60
+	requestTimeout   = 20 * time.Second
+	maxChatBackoff   = time.Minute
+)
+
+var (
+	apiBase = "https://www.googleapis.com/youtube/v3/"
+	errSettingsChanged = errors.New("настройки YouTube изменились")
+	errSearchExhausted = errors.New("активный эфир не найден за час")
+	errChatEnded       = errors.New("live chat завершён или недоступен")
+)
 	httpClient         = &http.Client{Timeout: requestTimeout}
 )
 
@@ -209,6 +255,19 @@ type channelRef struct {
 	ID         string
 }
 
+func validHandle(value string) bool {
+	length := utf8.RuneCountInString(value)
+	if length < 3 || length > 30 {
+		return false
+	}
+	for _, r := range value {
+		if !(unicode.IsLetter(r) || unicode.IsDigit(r) || r == '.' || r == '_' || r == '-') {
+			return false
+		}
+	}
+	return true
+}
+
 func normalizeChannelInput(raw string) (string, error) {
 	ref, err := parseChannelRef(raw)
 	if err != nil {
@@ -223,6 +282,12 @@ func parseChannelRef(raw string) (channelRef, error) {
 		return channelRef{}, errors.New("укажите ссылку на канал, @handle или ID канала UC…")
 	}
 
+	if !strings.Contains(value, "://") &&
+		(strings.HasPrefix(strings.ToLower(value), "youtube.com/") ||
+			strings.HasPrefix(strings.ToLower(value), "www.youtube.com/") ||
+			strings.HasPrefix(strings.ToLower(value), "m.youtube.com/")) {
+		value = "https://" + value
+	}
 	if strings.Contains(value, "://") {
 		parsed, err := url.Parse(value)
 		if err != nil {
@@ -241,7 +306,7 @@ func parseChannelRef(raw string) (channelRef, error) {
 		}
 		if strings.HasPrefix(parts[0], "@") {
 			handle := strings.TrimPrefix(parts[0], "@")
-			if !handlePattern.MatchString(handle) {
+			if !validHandle(handle) {
 				return channelRef{}, errors.New("некорректный YouTube @handle")
 			}
 			return channelRef{Normalized: "@" + handle, Handle: handle}, nil
@@ -253,7 +318,7 @@ func parseChannelRef(raw string) (channelRef, error) {
 		return channelRef{Normalized: value, ID: value}, nil
 	}
 	value = strings.TrimPrefix(value, "@")
-	if !handlePattern.MatchString(value) {
+	if !validHandle(value) {
 		return channelRef{}, errors.New("укажите корректный @handle YouTube или ID канала UC…")
 	}
 	return channelRef{Normalized: "@" + value, Handle: value}, nil
@@ -546,7 +611,7 @@ func runConfiguration(ctx context.Context, config settings) error {
 				Name:    channelTitle,
 			})
 			logInfo(fmt.Sprintf("Найдено активных чатов YouTube: %d", len(lives)))
-			return watchLiveChats(ctx, config.APIKey, config.Channel, channelTitle, lives)
+			return watchLiveChats(ctx, config.APIKey, config.Channel, lives)
 		} else {
 			logInfo(fmt.Sprintf("Активный эфир не найден: проверка %d/%d", attempt, maxSearchAttempts))
 		}
@@ -562,7 +627,7 @@ func runConfiguration(ctx context.Context, config settings) error {
 	return errSearchExhausted
 }
 
-func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, lives []liveVideo) error {
+func watchLiveChats(ctx context.Context, apiKey, channel string, lives []liveVideo) error {
 	emitConnection(protocol.ConnectionConnecting, "Подключаю поток liveChatMessages.streamList", 0)
 
 	var conn *grpc.ClientConn
@@ -623,12 +688,8 @@ func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, l
 	for remaining > 0 {
 		select {
 		case <-ctx.Done():
-			if ctx.Err() != nil {
-				cancel()
-				if parentWasCanceled(ctx) {
-					return errSettingsChanged
-				}
-			}
+			cancel()
+			return errSettingsChanged
 		case item, ok := <-results:
 			if !ok {
 				return errChatEnded
@@ -649,10 +710,6 @@ func watchLiveChats(ctx context.Context, apiKey, channel, channelTitle string, l
 		}
 	}
 	return errChatEnded
-}
-
-func parentWasCanceled(ctx context.Context) bool {
-	return ctx.Err() != nil
 }
 
 func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServiceClient, apiKey, channel string, video liveVideo, onConnected func()) error {
@@ -729,9 +786,7 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			if response.GetOfflineAt() != "" {
 				return errChatEnded
 			}
-			if next := response.GetNextPageToken(); next != "" {
-				pageToken = next
-			}
+			pageToken = response.GetNextPageToken()
 			for _, item := range response.GetItems() {
 				if item == nil || !remember(item.GetId()) {
 					continue
@@ -746,7 +801,7 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			}
 			// The streaming API may end a response stream at a page boundary.
 			// Keep the last non-empty token to resume without replaying old messages.
-			if response.GetNextPageToken() == "" {
+			if pageToken == "" {
 				break
 			}
 		}
