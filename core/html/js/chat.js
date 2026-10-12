@@ -234,9 +234,6 @@ function block(entry, severity, head, text, notice = false) {
 function messagePanel(entry, notice, head, content) {
     const frame = el('div', {class: 'msg__frame', 'aria-hidden': 'true'}, [
         el('span', {class: 'msg__frame-rail msg__frame-rail--top'}),
-        el('span', {class: 'msg__frame-rail msg__frame-rail--bottom'}),
-        el('span', {class: 'msg__frame-joint msg__frame-joint--right'}),
-        el('span', {class: 'msg__frame-joint msg__frame-joint--left'}),
         el('span', {class: 'msg__frame-light'}),
     ]);
 
