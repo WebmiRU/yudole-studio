@@ -180,54 +180,49 @@
       position: absolute
       inset: 0
       z-index: 0
+      display: block
+      width: 100%
+      height: 100%
+      overflow: visible
       pointer-events: none
+      filter: drop-shadow(0 0 2px rgba(75, 221, 234, .12))
 
-      &::before,
-      &::after
-        content: ""
-        position: absolute
-        pointer-events: none
-        clip-path: polygon(0 22px, 0 0, 62px 0, 80px 17px, calc(100% - 30px) 17px, 100% 28px, 100% calc(100% - 24px), calc(100% - 22px) calc(100% - 24px), calc(100% - 22px) 100%, 54px 100%, 34px calc(100% - 17px), 14px calc(100% - 17px), 14px 100%, 0 100%)
+    // Glow is a second stroke of the exact same path: no mismatched inner mask,
+    // doubled corners or detached diagonals.
+    .msg__frame-glow
+      fill: none
+      stroke: var(--hud-accent)
+      stroke-width: 7
+      stroke-opacity: .13
+      stroke-linejoin: round
+      stroke-linecap: round
+      vector-effect: non-scaling-stroke
+      filter: blur(1.1px)
 
-      // Layer one is only the illuminated contour, with a small depth shadow.
-      &::before
-        inset: 0
-        z-index: 0
-        background: linear-gradient(132deg, #8cf7ff 0%, #50d9e5 16%, #318c98 43%, #5edbe7 68%, #2c929e 86%, #82f1f8 100%)
-        filter: drop-shadow(0 0 3px rgba(75, 221, 234, .15)) drop-shadow(0 4px 5px rgba(0, 0, 0, .32))
+    .msg__frame-shape
+      fill: #061116
+      stroke: var(--hud-accent)
+      stroke-width: 1.35
+      stroke-linejoin: miter
+      stroke-linecap: butt
+      vector-effect: non-scaling-stroke
 
-      // The inset dark shape leaves a crisp, one-pixel outline instead of a
-      // thick cyan slab. Subtle gradients simulate smoked tactical glass.
-      &::after
-        inset: 1px
-        z-index: 1
-        clip-path: polygon(0 21px, 0 1px, 61px 1px, 79px 18px, calc(100% - 30px) 18px, 100% 29px, 100% calc(100% - 24px), calc(100% - 23px) calc(100% - 24px), calc(100% - 23px) 100%, 54px 100%, 34px calc(100% - 17px), 14px calc(100% - 17px), 14px 100%, 0 100%)
-        background: linear-gradient(180deg, rgba(10, 27, 33, .97) 0%, rgba(5, 15, 20, .98) 62%, rgba(3, 10, 14, .98) 100%)
+    .msg__frame-highlight
+      fill: none
+      stroke: var(--hud-glint)
+      stroke-width: 1.25
+      stroke-opacity: .92
+      stroke-linejoin: round
+      stroke-linecap: round
+      vector-effect: non-scaling-stroke
 
-      .msg__frame-rail
-        position: absolute
-        z-index: 2
-        height: 1px
-        pointer-events: none
-
-      // Bright short rail sits directly on the raised upper-left tab.
-      .msg__frame-rail--top
-        top: 1px
-        left: 3px
-        width: 32px
-        height: 1.5px
-        background: linear-gradient(90deg, #d5fdff, #69e7f2 75%, rgba(105, 231, 242, .28))
-        box-shadow: 0 0 4px rgba(111, 235, 244, .28)
-
-      .msg__frame-light
-        position: absolute
-        z-index: 2
-        top: clamp(29px, 38%, 47px)
-        right: 5px
-        width: 1px
-        height: 23px
-        background: linear-gradient(180deg, transparent, rgba(128, 240, 248, .8), transparent)
-        box-shadow: 0 0 5px rgba(83, 227, 243, .25)
+    .msg__frame-detail
+      fill: none
+      stroke: var(--hud-accent)
+      stroke-width: 1
+      stroke-opacity: .55
+      stroke-linecap: butt
+      vector-effect: non-scaling-stroke
 
     .msg__head
       display: flex
@@ -338,26 +333,29 @@
       border-right: 1px solid rgba(132, 242, 249, .82)
       transform: skewX(35deg)
 
+    --hud-accent: #54d8e5
+    --hud-glint: #b9fbff
+
     &[data-severity="success"]
-      .msg__frame::before
-        background: linear-gradient(132deg, #a5f7ce 0%, #70e2a6 35%, #368e72 72%, #9aefc2 100%)
+      --hud-accent: #66dda3
+      --hud-glint: #c5ffe1
 
       .msg__rule-signal
-        background: #a5f7ce
+        background: var(--hud-glint)
 
     &[data-severity="warning"]
-      .msg__frame::before
-        background: linear-gradient(132deg, #ffe5a0 0%, #e9bd61 35%, #927240 72%, #ffe09a 100%)
+      --hud-accent: #e8bd62
+      --hud-glint: #ffe4a2
 
       .msg__rule-signal
-        background: #ffe5a0
+        background: var(--hud-glint)
 
     &[data-severity="error"]
-      .msg__frame::before
-        background: linear-gradient(132deg, #ffc0c1 0%, #f36f78 35%, #a3434b 72%, #ffb2b4 100%)
+      --hud-accent: #ed737b
+      --hud-glint: #ffc0c3
 
       .msg__rule-signal
-        background: #ffc0c1
+        background: var(--hud-glint)
 
     &.is-notice
       opacity: .9
@@ -367,12 +365,7 @@
       .msg__panel
         padding: 10px 17px 6px
 
-      .msg__frame-rail--top
-        left: 3px
-        width: 30px
 
-      .msg__frame-light
-        right: 4px
 // --- Подвал -----------------------------------------------------------------
 
 .statusbar
