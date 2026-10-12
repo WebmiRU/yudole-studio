@@ -55,10 +55,10 @@ func TestRenderEmotesEscapesText(t *testing.T) {
 	if !strings.Contains(got, "&lt;hello&gt;") {
 		t.Fatalf("plain text wasn't HTML-escaped: %s", got)
 	}
-	if !strings.Contains(got, "alt=\\"Kappa\\"") {
+	if !strings.Contains(got, "alt=\"Kappa\"") {
 		t.Fatalf("emote alt text missing: %s", got)
 	}
-	if !strings.Contains(got, "src=\\"https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/3.0\\"") {
+	if !strings.Contains(got, "src=\"https://static-cdn.jtvnw.net/emoticons/v2/25/default/dark/3.0\"") {
 		t.Fatalf("emote URL missing: %s", got)
 	}
 }
