@@ -542,6 +542,18 @@ select.input--invalid
   background: tokens.$accent-hi
   border-color: tokens.$accent-hi
 
+// Кнопка, которая убирает. Красная рамка и текст — по тону опасности, а не
+// заливка: залитая красным кнопка тяжелее кнопки «Сохранить» и перетягивает на
+// себя взгляд с формы, где с ней рядом стоят обычные поля.
+.btn--danger
+  background: tokens.$surface-hi
+  border-color: rgba(240, 96, 93, 0.55)
+  color: tokens.$danger
+
+.btn--danger:hover
+  background: rgba(240, 96, 93, 0.14)
+  border-color: tokens.$danger
+
 .btn--ghost
   background: none
 

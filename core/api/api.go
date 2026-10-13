@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"studio/core/plugin"
+	"studio/core/settings"
 	"studio/core/theme"
 )
 
@@ -28,6 +29,13 @@ type Manager interface {
 	// WatchPlugins hands out the live plugin states: the options page takes
 	// them instead of asking on a timer.
 	WatchPlugins(buffer int) (<-chan plugin.PluginView, func())
+	// Комнаты. Отдельный раздел настроек, но тот же config.json и тот же
+	// писатель, поэтому комнаты идут через Manager, а не мимо него.
+	ListRooms() []settings.Room
+	GetRoom(id string) (settings.Room, bool)
+	CreateRoom() (settings.Room, error)
+	SaveRoom(room settings.Room) (settings.Room, error)
+	DeleteRoom(id string) error
 }
 
 // Handler builds the routes of the options page.
@@ -43,6 +51,65 @@ func Handler(manager Manager, themes *theme.Catalog) http.Handler {
 	// спрашивает его один раз и держит у себя.
 	mux.HandleFunc("GET /api/themes", func(w http.ResponseWriter, r *http.Request) {
 		write(w, map[string]any{"themes": themes.List()})
+	})
+
+	// --- Комнаты -------------------------------------------------------------
+	//
+	// Комнаты живут в том же config.json, что и плагины, и пишет их Manager.
+	// Формы настроек с ними общается так же, как с плагинами: список, а потом
+	// адрес конкретной комнаты.
+
+	mux.HandleFunc("GET /api/rooms", func(w http.ResponseWriter, r *http.Request) {
+		write(w, map[string]any{"rooms": manager.ListRooms()})
+	})
+
+	mux.HandleFunc("POST /api/rooms", func(w http.ResponseWriter, r *http.Request) {
+		room, err := manager.CreateRoom()
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		write(w, room)
+	})
+
+	mux.HandleFunc("PUT /api/rooms/{id}", func(w http.ResponseWriter, r *http.Request) {
+		room, ok := manager.GetRoom(r.PathValue("id"))
+		if !ok {
+			writeError(w, http.StatusNotFound, "room not found")
+			return
+		}
+
+		// Тело приходит целиком: так сохраняется всё, что есть, и не нужно
+		// различать «поле сброшено» и «поле не прислали».
+		var incoming settings.Room
+		if err := json.UnmarshalRead(r.Body, &incoming); err != nil {
+			writeError(w, http.StatusBadRequest, "cannot read the room: "+err.Error())
+			return
+		}
+
+		// id приходит из адреса, а не из тела: тело ему не доверяем.
+		room.ID = r.PathValue("id")
+		room.Name = incoming.Name
+		room.Title = incoming.Title
+		room.Font = incoming.Font
+		room.Theme = incoming.Theme
+		room.MessageSize = incoming.MessageSize
+		room.AuthorSize = incoming.AuthorSize
+
+		saved, err := manager.SaveRoom(room)
+		if err != nil {
+			writeError(w, http.StatusInternalServerError, err.Error())
+			return
+		}
+		write(w, saved)
+	})
+
+	mux.HandleFunc("DELETE /api/rooms/{id}", func(w http.ResponseWriter, r *http.Request) {
+		if err := manager.DeleteRoom(r.PathValue("id")); err != nil {
+			writeError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		write(w, map[string]bool{"deleted": true})
 	})
 
 	mux.HandleFunc("GET /api/plugins/chat", func(w http.ResponseWriter, r *http.Request) {

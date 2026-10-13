@@ -24,6 +24,7 @@ import (
 	"encoding/json/v2"
 	"errors"
 	"fmt"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -38,17 +39,54 @@ const (
 	// FileName is the default configuration file name.
 	FileName = "config.json"
 
+	// Размеры шрифтов по умолчанию, в пикселях. Подставлены, когда в конфиге
+	// нуля или мусор: ноль в font-size означает невидимый текст, а это хуже,
+	// чем чуть не тот размер.
+	DefaultMessageSize = 15
+	DefaultAuthorSize  = 14
+
+	// Границы размеров. Снаружи них лента либо нечитаема, либо разъезжается.
+	MinFontSize = 8
+	MaxFontSize = 72
+
 	filePerm  = 0o600 // the file may hold tokens and passwords
 	dirPerm   = 0o755
 	writeTemp = ".config-*.tmp"
 )
+
+// ClampFontSize brings a size into the allowed range. Значение приходит из
+// формы, а форма приходит от человека: пустое поле или мусор не должны ни
+// ломать разметку, ни падать с ошибкой.
+func ClampFontSize(size int) int {
+	return min(max(size, MinFontSize), MaxFontSize)
+}
 
 // Config is the whole configuration document.
 type Config struct {
 	Kind    string  `json:"kind"`
 	Version string  `json:"version"`
 	Plugins Plugins `json:"plugins"`
-	extra   map[string]jsontext.Value
+	// Rooms are the chat rooms, each with its own look. They live beside the
+	// plugins rather than inside them: комната — это не плагин, её настройки
+	// описывает сама студия, а не плагин.
+	Rooms []Room `json:"rooms"`
+	extra map[string]jsontext.Value
+}
+
+// Room is one chat room with everything that makes it look like itself.
+//
+// ID не показывается человеку и служит ключом: по нему комната находится в
+// конфиге и адресуется в API. Name — как комната выглядит в списке, Title —
+// как она называется в ленте сообщений.
+type Room struct {
+	ID    string `json:"id"`
+	Name  string `json:"name"`
+	Title string `json:"title"`
+	Font  string `json:"font"`
+	Theme string `json:"theme"`
+	// MessageSize и AuthorSize — в пикселях.
+	MessageSize int `json:"message_size"`
+	AuthorSize  int `json:"author_size"`
 }
 
 // Plugins groups plugin settings by kind, for example "chat".
@@ -69,6 +107,7 @@ func New() *Config {
 		Kind:    Kind,
 		Version: Version,
 		Plugins: Plugins{Chat: map[string]Plugin{}},
+		Rooms:   []Room{},
 	}
 }
 
@@ -108,6 +147,26 @@ func Parse(data []byte, name string) (*Config, error) {
 		if plugin.Options == nil {
 			plugin.Options = map[string]any{}
 			config.Plugins.Chat[name] = plugin
+		}
+	}
+
+	// Пустой список, а не nil: в JSON это [] вместо null, и страница не
+	// проверяет каждый раз, пришло ли что-нибудь в поле.
+	if config.Rooms == nil {
+		config.Rooms = []Room{}
+	}
+	for i, room := range config.Rooms {
+		// Комната без названия или без id — это мусор в конфиге, а не комната.
+		// Молча чинить нельзя: человек не увидит, что его комната исчезла.
+		if room.ID == "" || room.Name == "" {
+			slog.Warn("settings: room without id or name is skipped", "index", i, "room", room)
+			continue
+		}
+		if room.MessageSize <= 0 {
+			config.Rooms[i].MessageSize = DefaultMessageSize
+		}
+		if room.AuthorSize <= 0 {
+			config.Rooms[i].AuthorSize = DefaultAuthorSize
 		}
 	}
 

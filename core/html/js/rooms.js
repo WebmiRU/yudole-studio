@@ -1,71 +1,63 @@
 // Раздел «Комнаты»: список комнат и настройки выбранной.
 //
-// Комнаты в будущем придут с ядра, и настройки их будут храниться там же.
-// Пока сущности нет, список и значения заданы здесь: держать захардкоженное в
-// коде — значит забыть выкинуть. Места, где это заменить, помечены.
+// Всё хранится на ядре в config.json: комнаты читаются через /api/rooms и
+// пишутся обратно. Локальных копий нет намеренно — иначе правка в двух вкладках
+// молча перетирала бы другую.
 
 import '../sass/rooms.sass';
 
-// Шрифты. Взяты те, что есть в любом браузере без загрузки файлов: системный,
-// моноширинный, с засечками и без. Подключать веб-шрифты будем позже, когда
-// появится место, откуда их грузить.
+// Гарнитуры. Взяты те, что реально стоят в системе и есть в любом браузере без
+// загрузки файлов. Первый — тот, которым сейчас рисуется лента: system-ui на
+// linux-системах с Noto Sans отдаёт именно Noto Sans, и переключать комнату на
+// другую гарнитуру не должно незаметно менять шрифт.
 const FONTS = [
-    {value: 'system', label: 'Системный', stack: 'system-ui, -apple-system, "Segoe UI", Roboto, sans-serif'},
-    {value: 'sans', label: 'Без засечек', stack: 'Arial, Helvetica, "Liberation Sans", sans-serif'},
-    {value: 'serif', label: 'С засечками', stack: 'Georgia, "Times New Roman", serif'},
-    {value: 'mono', label: 'Моноширинный', stack: 'ui-monospace, "JetBrains Mono", Menlo, Consolas, monospace'},
+    'Noto Sans',
+    'Open Sans',
+    'Cantarell',
+    'Carlito',
+    'Liberation Serif',
 ];
 
-// Размеры в пикселях: список, а не число, потому что человек выбирает глазами.
-// Ниже 12 читается плохо, выше 22 лента разъезжается.
-const SIZES = [12, 13, 14, 15, 16, 18, 20, 22, 24];
-
-// Помечено: до появления комнат в ядре список и настройки живут здесь.
-const ROOMS = [
-    {id: '1', name: 'Комната 1', title: 'Комната 1', font: 'system', theme: 'system',
-        messageSize: 15, authorSize: 14},
-    {id: '2', name: 'Комната 2', title: 'Комната 2', font: 'system', theme: 'system',
-        messageSize: 15, authorSize: 14},
-    {id: '3', name: 'Комната 3', title: 'Комната 3', font: 'system', theme: 'starcraft',
-        messageSize: 16, authorSize: 14},
-];
+const THEMES_API = '/api/themes';
+const ROOMS_API = '/api/rooms';
 
 const state = {
-    rooms: ROOMS,
-    selectedId: null,
-    // Темы приходят с ядра: /api/themes отдаёт каталог, снятый при старте.
+    rooms: [],
     themes: [],
-    themesLoaded: false,
+    selectedId: null,
+    // Черновик настроек выбранной комнаты. Отдельный от комнаты, потому что до
+    // «Сохранить» правки не должны попасть в список.
+    draft: null,
+    saving: false,
+    error: '',
 };
 
 const roomsEl = document.getElementById('rooms');
 const optionsEl = document.getElementById('room-options');
 const countEl = document.getElementById('rooms-count');
 
-loadThemes();
-render();
+// --- Загрузка -----------------------------------------------------------------
 
-// --- Данные -------------------------------------------------------------------
+// load спрашивает комнаты и темы. Темы — каталог с диска, снятый ядром при
+// старте; комнаты — из config.json.
+async function load() {
+    const [rooms, themes] = await Promise.all([fetchJSON(ROOMS_API), fetchJSON(THEMES_API)]);
 
-// loadThemes спрашивает каталог тем один раз. Сканируется он на стороне ядра
-// тоже один раз, при старте, — здесь перечитывать нечего.
-async function loadThemes() {
+    state.rooms = rooms?.rooms ?? [];
+    state.themes = themes?.themes ?? [];
+    render();
+}
+
+async function fetchJSON(url, options) {
     try {
-        const response = await fetch('/api/themes');
+        const response = await fetch(url, options);
         if (!response.ok) {
             throw new Error(`HTTP ${response.status}`);
         }
-        const data = await response.json();
-        state.themes = Array.isArray(data.themes) ? data.themes : [];
+        return await response.json();
     } catch (error) {
-        // Тем нет — не беда: селект останется с одной системной, и комната
-        // продолжит работать. Ошибку показываем, чтобы было видно, что при
-        //чина не в комнате.
-        console.warn('rooms: cannot load the theme catalog', error);
-        state.themes = [{id: 'system', title: 'Системная'}];
-    } finally {
-        state.themesLoaded = true;
-        render();
+        state.error = `${url}: ${error.message}`;
+        return null;
     }
 }
 
@@ -92,18 +84,13 @@ function renderRooms() {
             class: 'room-row',
             'aria-pressed': String(selectedNow),
             'data-room': room.id,
-        }, [
-            el('span', {class: 'room__name'}, [room.name]),
-        ]);
+        }, [el('span', {class: 'room__name'}, [room.name])]);
         button.addEventListener('click', () => select(room.id));
 
         return el('li', {}, [button]);
     }));
 }
 
-// renderOptions показывает настройки выбранной комнаты. Пока эта форма никуда не
-// отправляется: значения меняются в памяти и переживают переключение между
-// комнатами, но переживать перезагрузку страницы не умеют.
 function renderOptions() {
     const room = selected();
 
@@ -122,21 +109,39 @@ function renderOptions() {
                 ]),
             ]),
             el('form', {class: 'options__body'}, [
-                field('Заголовок', 'Как комната называется в ленте', textInput(room, 'title')),
-                field('Шрифт', 'Гарнитура реплик в этой комнате', selectInput(room, 'font',
-                    FONTS.map((f) => ({value: f.value, label: f.label})))),
-                field('Тема', 'Оформление комнаты', themeSelect(room)),
-                field('Размер шрифта сообщений', 'Высота реплики в ленте', selectInput(room, 'messageSize',
-                    SIZES.map((s) => ({value: String(s), label: `${s} px`})))),
-                field('Размер шрифта никнеймов', 'Высота имени автора', selectInput(room, 'authorSize',
-                    SIZES.map((s) => ({value: String(s), label: `${s} px`})))),
+                field('Заголовок', 'Как комната называется в ленте',
+                    textInput('title')),
+                field('Шрифт', 'Гарнитура реплик в этой комнате',
+                    fontSelect('font')),
+                field('Тема', 'Оформление комнаты', themeSelect('theme')),
+                field('Размер шрифта сообщений', 'Высота реплики в ленте, px',
+                    numberInput('message_size')),
+                field('Размер шрифта никнеймов', 'Высота имени автора, px',
+                    numberInput('author_size')),
+            ]),
+            el('div', {class: 'options__foot'}, [
+                el('div', {}, [
+                    el('button', {type: 'button', class: 'btn btn--danger', id: 'room-delete'},
+                        ['Удалить']),
+                ]),
+                el('div', {class: 'options__actions'}, [
+                    el('button', {type: 'submit', class: 'btn btn--primary', form: 'room-form'},
+                        [state.saving ? 'Сохраняю…' : 'Сохранить']),
+                ]),
             ]),
         ]),
     );
+
+    optionsEl.querySelector('form')?.addEventListener('submit', save);
+    optionsEl.querySelector('#room-delete')?.addEventListener('click', remove);
+
+    if (state.error) {
+        optionsEl.append(el('p', {class: 'options__problem'}, [state.error]));
+    }
 }
 
-// field — строка формы: подпись слева, управление справа. Разметка и отступы те
-// же, что у полей плагина: форма одна на всю студию.
+// field — строка формы: подпись слева, управление справа. Разметка та же, что у
+// полей плагина: в студии одна форма, а не две похожие.
 function field(label, hint, control) {
     return el('div', {class: 'field'}, [
         el('label', {class: 'field__label'}, [
@@ -147,42 +152,162 @@ function field(label, hint, control) {
     ]);
 }
 
-function textInput(room, key) {
-    const input = el('input', {class: 'input', type: 'text', value: room[key] ?? ''});
+// --- Поля ---------------------------------------------------------------------
+
+function textInput(key) {
+    const input = el('input', {class: 'input', type: 'text', value: state.draft[key] ?? ''});
     input.addEventListener('input', () => {
-        room[key] = input.value;
+        state.draft[key] = input.value;
     });
     return input;
 }
 
-function selectInput(room, key, choices) {
+// numberInput, а не select: размер шрифта — число, и человек вправе поставить
+// любое. Границы всё равно проверяет ядро.
+function numberInput(key) {
+    const input = el('input', {
+        class: 'input input--mono',
+        type: 'number',
+        min: '8',
+        max: '72',
+        step: '1',
+        value: String(state.draft[key] ?? ''),
+    });
+    input.addEventListener('input', () => {
+        const value = Number.parseInt(input.value, 10);
+        // Пустое поле — не ноль: человек ещё печатает. Ноль отправить нельзя,
+        // текст с нулевым font-size не виден вовсе.
+        state.draft[key] = Number.isFinite(value) && value > 0 ? value : null;
+    });
+    return input;
+}
+
+function fontSelect(key) {
     const select = el('select', {class: 'select'},
-        choices.map((choice) => el('option', {value: choice.value}, [choice.label])));
-    select.value = String(room[key] ?? '');
+        FONTS.map((font) => el('option', {value: font}, [font])));
+
+    // Если в конфиге шрифт, которого в списке нет, он остаётся выбором: иначе
+    // значение молча сменилось бы на первое в списке.
+    if (state.draft[key] && !FONTS.includes(state.draft[key])) {
+        select.prepend(el('option', {value: state.draft[key]},
+            [`${state.draft[key]} — нет в списке`]));
+    }
+    select.value = state.draft[key] ?? FONTS[0];
     select.addEventListener('change', () => {
-        room[key] = select.value;
+        state.draft[key] = select.value;
     });
     return select;
 }
 
-// themeSelect собирает список из тем ядра. Если у комнаты стоит тема, которой
-// больше нет, она остаётся в списке: иначе выбор молча сдвинулся бы на первую
-// строку и человек не понял бы, что его тему удалили.
-function themeSelect(room) {
+// themeSelect собирает список из тем ядра. Тема, которой больше нет на диске,
+// остаётся в списке с пометкой: иначе выбор тихо уехал бы на первую строку и
+// человек не понял бы, что его тему удалили.
+function themeSelect(key) {
     const choices = state.themes.map((theme) => ({value: theme.id, label: theme.title}));
 
-    if (room.theme && !choices.some((choice) => choice.value === room.theme)) {
-        choices.push({value: room.theme, label: `${room.theme} — темы нет на диске`});
+    if (state.draft[key] && !choices.some((choice) => choice.value === state.draft[key])) {
+        choices.push({value: state.draft[key], label: `${state.draft[key]} — темы нет на диске`});
     }
     if (choices.length === 0) {
-        choices.push({value: '', label: 'Тем нет'});
+        choices.push({value: '', label: 'Тем нет на диске'});
     }
 
-    return selectInput(room, 'theme', choices);
+    const select = el('select', {class: 'select'},
+        choices.map((choice) => el('option', {value: choice.value}, [choice.label])));
+    select.value = state.draft[key] ?? '';
+    select.addEventListener('change', () => {
+        state.draft[key] = select.value;
+    });
+    return select;
+}
+
+// --- Сохранение и удаление ----------------------------------------------------
+
+async function save(event) {
+    event.preventDefault();
+    if (state.saving) {
+        return;
+    }
+
+    const room = selected();
+    if (!room) {
+        return;
+    }
+
+    state.saving = true;
+    state.error = '';
+    renderOptions();
+
+    // Пустое поле размера — это «человек стёр и не ввёл», а не «ноль».
+    // Ноль отправлять нельзя: текст с нулевым font-size не виден.
+    const body = {
+        name: room.name,
+        title: state.draft.title ?? '',
+        font: state.draft.font ?? '',
+        theme: state.draft.theme ?? '',
+        message_size: state.draft.message_size ?? 0,
+        author_size: state.draft.author_size ?? 0,
+    };
+
+    const saved = await fetchJSON(`${ROOMS_API}/${encodeURIComponent(room.id)}`, {
+        method: 'PUT',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify(body),
+    });
+
+    state.saving = false;
+
+    if (saved && saved.id) {
+        const index = state.rooms.findIndex((item) => item.id === saved.id);
+        if (index >= 0) {
+            state.rooms[index] = saved;
+        }
+        state.draft = {...saved};
+    }
+    render();
+}
+
+// remove спрашивает подтверждение обычным confirm: это единственное место, где
+// действие необратимо и нечего подтверждать красивым окном — стандартный
+// вопрос браузера читается как «а ты уверен» без лишнего интерфейса.
+async function remove() {
+    const room = selected();
+    if (!room) {
+        return;
+    }
+
+    if (!window.confirm(`Вы точно хотите удалить комнату "${room.name}"?`)) {
+        return;
+    }
+
+    state.error = '';
+    await fetchJSON(`${ROOMS_API}/${encodeURIComponent(room.id)}`, {method: 'DELETE'});
+
+    state.rooms = state.rooms.filter((item) => item.id !== room.id);
+    state.selectedId = null;
+    state.draft = null;
+    render();
+}
+
+// add создаёт комнату. Имя даёт ядро — оно знает, какие номера уже заняты.
+async function add() {
+    state.error = '';
+    const room = await fetchJSON(ROOMS_API, {method: 'POST'});
+
+    if (room?.id) {
+        state.rooms.push(room);
+        state.selectedId = room.id;
+        state.draft = {...room};
+    }
+    render();
 }
 
 function select(id) {
     state.selectedId = state.selectedId === id ? null : id;
+    const room = selected();
+    // Черновик берётся из комнаты целиком: предыдущие правки другой комнаты не
+    // должны подставляться сюда.
+    state.draft = room ? {...room} : null;
     render();
 }
 
@@ -203,3 +328,6 @@ function el(tag, attrs = {}, children = []) {
     node.append(...children);
     return node;
 }
+
+document.getElementById('rooms-add')?.addEventListener('click', add);
+load();

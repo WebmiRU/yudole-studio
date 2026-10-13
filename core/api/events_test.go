@@ -14,6 +14,7 @@ import (
 	"github.com/coder/websocket"
 
 	"studio/core/plugin"
+	"studio/core/settings"
 )
 
 // fakeManager plays the part of the plugin manager for the states page needs.
@@ -60,6 +61,16 @@ func (f *fakeManager) SaveOptions(string, map[string]any) (plugin.PluginView, er
 	return plugin.PluginView{}, nil
 }
 func (f *fakeManager) Run(context.Context, string, string) (string, error) { return "", nil }
+
+// Комнаты. Эти тесты проверяют ленту состояний, а не комнаты, поэтому подменя
+// их пустыми: методы нужны лишь потому, что Manager требует полный набор.
+func (f *fakeManager) ListRooms() []settings.Room { return nil }
+func (f *fakeManager) GetRoom(string) (settings.Room, bool) {
+	return settings.Room{}, false
+}
+func (f *fakeManager) CreateRoom() (settings.Room, error)                 { return settings.Room{}, nil }
+func (f *fakeManager) SaveRoom(room settings.Room) (settings.Room, error) { return room, nil }
+func (f *fakeManager) DeleteRoom(string) error                            { return nil }
 
 // readState waits for one message of the states page.
 func readState(t *testing.T, conn *websocket.Conn) stateMessage {
