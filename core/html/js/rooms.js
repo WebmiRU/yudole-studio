@@ -21,6 +21,10 @@ const FONTS = [
 const THEMES_API = '/api/themes';
 const ROOMS_API = '/api/rooms';
 
+// Заголовок пустым сохранять можно — человек снял текст и хочет без него. Но в
+// списке пустая строка выглядит как дырка, поэтому там подставляется это.
+const UNTITLED = 'Без названия';
+
 const state = {
     rooms: [],
     themes: [],
@@ -84,7 +88,7 @@ function renderRooms() {
             class: 'room-row',
             'aria-pressed': String(selectedNow),
             'data-room': room.id,
-        }, [el('span', {class: 'room__name'}, [room.name])]);
+        }, [el('span', {class: 'room__name'}, [room.title || UNTITLED])]);
         button.addEventListener('click', () => select(room.id));
 
         return el('li', {}, [button]);
@@ -107,7 +111,7 @@ function renderOptions() {
     const form = el('form', {}, [
         el('div', {class: 'options__head'}, [
             el('div', {}, [
-                el('h2', {class: 'options__title'}, [room.name]),
+                el('h2', {class: 'options__title'}, [room.title || UNTITLED]),
                 el('p', {class: 'options__desc'}, ['Как эта комната выглядит в ленте сообщений.']),
             ]),
         ]),
@@ -244,7 +248,6 @@ async function save(event) {
     // Пустое поле размера — это «человек стёр и не ввёл», а не «ноль».
     // Ноль отправлять нельзя: текст с нулевым font-size не виден.
     const body = {
-        name: room.name,
         title: state.draft.title ?? '',
         font: state.draft.font ?? '',
         theme: state.draft.theme ?? '',
@@ -279,7 +282,7 @@ async function remove() {
         return;
     }
 
-    if (!window.confirm(`Вы точно хотите удалить комнату "${room.name}"?`)) {
+    if (!window.confirm(`Вы точно хотите удалить комнату "${room.title || UNTITLED}"?`)) {
         return;
     }
 

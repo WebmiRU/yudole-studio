@@ -76,11 +76,12 @@ type Config struct {
 // Room is one chat room with everything that makes it look like itself.
 //
 // ID не показывается человеку и служит ключом: по нему комната находится в
-// конфиге и адресуется в API. Name — как комната выглядит в списке, Title —
-// как она называется в ленте сообщений.
+// конфиге и адресуется в API. Title — единственное имя комнаты, оно и в
+// списке, и в ленте. Отдельного «имени для списка» нет: заведи его, и в
+// конфиге появятся два названия, которые разъедутся при первом же
+// переименовании.
 type Room struct {
 	ID    string `json:"id"`
-	Name  string `json:"name"`
 	Title string `json:"title"`
 	Font  string `json:"font"`
 	Theme string `json:"theme"`
@@ -156,10 +157,11 @@ func Parse(data []byte, name string) (*Config, error) {
 		config.Rooms = []Room{}
 	}
 	for i, room := range config.Rooms {
-		// Комната без названия или без id — это мусор в конфиге, а не комната.
-		// Молча чинить нельзя: человек не увидит, что его комната исчезла.
-		if room.ID == "" || room.Name == "" {
-			slog.Warn("settings: room without id or name is skipped", "index", i, "room", room)
+		// Комната без id — это мусор в конфиге, а не комната. Без названия
+		// можно жить: в списке она встанет как «Без названия», и человек её
+		// увидит и починит. Молча выбрасывать нельзя ни то, ни другое.
+		if room.ID == "" {
+			slog.Warn("settings: room without id is skipped", "index", i, "room", room)
 			continue
 		}
 		if room.MessageSize <= 0 {

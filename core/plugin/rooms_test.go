@@ -50,8 +50,8 @@ func TestCreateRoomNamesItself(t *testing.T) {
 	if err != nil {
 		t.Fatalf("CreateRoom: %v", err)
 	}
-	if room.Name != "Комната 1" {
-		t.Errorf("Name: %q, want %q", room.Name, "Комната 1")
+	if room.Title != "Комната 1" {
+		t.Errorf("Title: %q, want %q", room.Title, "Комната 1")
 	}
 
 	// Новая комната обязана оказаться в файле, а не только в памяти.
@@ -63,7 +63,7 @@ func TestCreateRoomNamesItself(t *testing.T) {
 	if err != nil {
 		t.Fatalf("parse config: %v", err)
 	}
-	if len(config.Rooms) != 1 || config.Rooms[0].Name != "Комната 1" {
+	if len(config.Rooms) != 1 || config.Rooms[0].Title != "Комната 1" {
 		t.Errorf("rooms in file: %v", config.Rooms)
 	}
 }
@@ -97,8 +97,8 @@ func TestCreateRoomReusesFreedNumber(t *testing.T) {
 	if next.ID != "2" {
 		t.Errorf("id: %q, want the freed 2", next.ID)
 	}
-	if next.Name != "Комната 2" {
-		t.Errorf("Name: %q, want %q", next.Name, "Комната 2")
+	if next.Title != "Комната 2" {
+		t.Errorf("Title: %q, want %q", next.Title, "Комната 2")
 	}
 }
 
@@ -106,7 +106,7 @@ func TestCreateRoomReusesFreedNumber(t *testing.T) {
 func TestCreateRoomSkipsTakenNumbers(t *testing.T) {
 	manager, _ := newRoomManager(t)
 
-	if _, err := manager.SaveRoom(settings.Room{ID: "1", Name: "Первая"}); err != nil {
+	if _, err := manager.SaveRoom(settings.Room{ID: "1", Title: "Первая"}); err != nil {
 		t.Fatalf("SaveRoom: %v", err)
 	}
 
@@ -144,32 +144,12 @@ func TestSaveRoomReplacesByID(t *testing.T) {
 	}
 }
 
-// Пустое имя из формы не должно стирать имя комнаты: имя живёт в конфиге и
-// меняется только переименованием, отдельного редактора пока нет.
-func TestSaveRoomKeepsNameWhenEmpty(t *testing.T) {
-	manager, _ := newRoomManager(t)
-
-	room, err := manager.CreateRoom()
-	if err != nil {
-		t.Fatalf("CreateRoom: %v", err)
-	}
-
-	room.Name = ""
-	if _, err := manager.SaveRoom(room); err != nil {
-		t.Fatalf("SaveRoom: %v", err)
-	}
-
-	if got := roomByID(t, manager.ListRooms(), room.ID); got.Name != "Комната 1" {
-		t.Errorf("Name: %q, want it kept", got.Name)
-	}
-}
-
 // Размеры приходят из формы, а форма — от человека: ноль или мусор не должны
 // ни ломать разметку, ни падать.
 func TestSaveRoomClampsSizes(t *testing.T) {
 	manager, _ := newRoomManager(t)
 
-	room := settings.Room{ID: "9", Name: "Комната 9", MessageSize: 0, AuthorSize: 5000}
+	room := settings.Room{ID: "9", Title: "Комната 9", MessageSize: 0, AuthorSize: 5000}
 	saved, err := manager.SaveRoom(room)
 	if err != nil {
 		t.Fatalf("SaveRoom: %v", err)
@@ -187,7 +167,7 @@ func TestSaveRoomClampsSizes(t *testing.T) {
 func TestSaveRoomRejectsMissingID(t *testing.T) {
 	manager, _ := newRoomManager(t)
 
-	if _, err := manager.SaveRoom(settings.Room{Name: "Без id"}); err == nil {
+	if _, err := manager.SaveRoom(settings.Room{Title: "Без id"}); err == nil {
 		t.Error("SaveRoom without id: nil error, want an error")
 	}
 	if got := manager.ListRooms(); len(got) != 0 {

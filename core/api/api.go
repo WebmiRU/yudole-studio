@@ -89,7 +89,6 @@ func Handler(manager Manager, themes *theme.Catalog) http.Handler {
 
 		// id приходит из адреса, а не из тела: тело ему не доверяем.
 		room.ID = r.PathValue("id")
-		room.Name = incoming.Name
 		room.Title = incoming.Title
 		room.Font = incoming.Font
 		room.Theme = incoming.Theme

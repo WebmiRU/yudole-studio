@@ -55,11 +55,6 @@ func (m *Manager) SaveRoom(room settings.Room) (settings.Room, error) {
 		}
 	}
 	if index >= 0 {
-		// Имя комнаты живёт в конфиге, но меняется только переименованием:
-		// пустое имя из формы стёрло бы его.
-		if room.Name == "" {
-			room.Name = m.config.Rooms[index].Name
-		}
 		m.config.Rooms[index] = room
 	} else {
 		m.config.Rooms = append(m.config.Rooms, room)
@@ -72,26 +67,24 @@ func (m *Manager) SaveRoom(room settings.Room) (settings.Room, error) {
 	return room, nil
 }
 
-// CreateRoom adds a room with the next free "Комната N" name and writes the file.
+// CreateRoom adds a room with the next free "Комната N" title and writes the file.
 func (m *Manager) CreateRoom() (settings.Room, error) {
 	m.mu.Lock()
 	room := settings.Room{
 		ID:          strconv.Itoa(m.nextRoomNumber()),
-		Name:        "",
 		Font:        "Noto Sans",
 		Theme:       "system",
 		MessageSize: settings.DefaultMessageSize,
 		AuthorSize:  settings.DefaultAuthorSize,
 	}
-	room.Name = roomNumberedName(room.ID)
-	room.Title = room.Name
+	room.Title = roomTitle(room.ID)
 	m.config.Rooms = append(m.config.Rooms, room)
 	m.mu.Unlock()
 
 	if err := m.save(); err != nil {
 		return settings.Room{}, err
 	}
-	slog.Info("room created", "id", room.ID, "name", room.Name)
+	slog.Info("room created", "id", room.ID, "title", room.Title)
 	return room, nil
 }
 
@@ -116,7 +109,7 @@ func (m *Manager) DeleteRoom(id string) error {
 	if err := m.save(); err != nil {
 		return err
 	}
-	slog.Info("room deleted", "id", removed.ID, "name", removed.Name)
+	slog.Info("room deleted", "id", removed.ID, "title", removed.Title)
 	return nil
 }
 
@@ -134,7 +127,7 @@ func (m *Manager) nextRoomNumber() int {
 	}
 }
 
-// roomNumberedName даёт комнате имя по её номеру. Внутри mu.
-func roomNumberedName(id string) string {
+// roomTitle даёт новой комнате название по её номеру. Внутри mu.
+func roomTitle(id string) string {
 	return "Комната " + strings.TrimSpace(id)
 }
