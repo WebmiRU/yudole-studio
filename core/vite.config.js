@@ -21,6 +21,8 @@ export default defineConfig({
         main: 'html/index.html',
         settings: 'html/settings.html',
         chat: 'html/chat.html',
+        // Комнаты — первый раздел настроек, живёт по своему адресу /rooms.
+        rooms: 'html/rooms.html',
       },
     },
   },

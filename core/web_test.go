@@ -25,6 +25,7 @@ func newTestWeb(t *testing.T) *web {
 	writeFile(t, filepath.Join(dir, "index.html"), "<h1>home</h1>")
 	writeFile(t, filepath.Join(dir, "settings.html"), "<h1>settings</h1>")
 	writeFile(t, filepath.Join(dir, "chat.html"), "<h1>chat</h1>")
+	writeFile(t, filepath.Join(dir, "rooms.html"), "<h1>rooms</h1>")
 	writeFile(t, filepath.Join(dir, "assets", "app.css"), "body{}")
 
 	page, err := newWeb(dir)
@@ -64,6 +65,7 @@ func TestWebServesSectionsByShortAddress(t *testing.T) {
 	cases := map[string]string{
 		"/settings": "<h1>settings</h1>",
 		"/chat":     "<h1>chat</h1>",
+		"/rooms":    "<h1>rooms</h1>",
 	}
 	for path, want := range cases {
 		rec := get(t, page, path)

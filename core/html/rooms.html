@@ -1,0 +1,70 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Yudole studio light — комнаты</title>
+</head>
+<body>
+
+<div class="app">
+    <aside class="sidebar">
+        <div class="brand">
+            <span class="brand__mark" aria-hidden="true">◈</span>
+            <span class="brand__name">Yudole studio light</span>
+        </div>
+
+        <nav class="nav" aria-label="Разделы настроек">
+            <p class="nav__label">Разделы</p>
+            <ul class="nav__list">
+                <li>
+                    <a href="/rooms" class="nav__item nav__item--child is-active" aria-current="page">Комнаты</a>
+                </li>
+                <li>
+                    <button type="button" class="nav__item nav__item--parent is-open" aria-expanded="true">
+                        <span class="nav__title">Плагины</span>
+                        <span class="nav__chevron" aria-hidden="true"></span>
+                    </button>
+                    <ul class="nav__sublist">
+                        <li>
+                            <a href="/settings" class="nav__item nav__item--child">Чат-клиенты</a>
+                        </li>
+                    </ul>
+                </li>
+            </ul>
+        </nav>
+
+        <p class="sidebar__foot">Ядро 0.1.0</p>
+    </aside>
+
+    <main class="content">
+        <header class="content__head">
+            <nav class="crumbs" aria-label="Путь по настройкам">
+                <span class="crumbs__item crumbs__item--current">Комнаты</span>
+            </nav>
+            <h1 class="content__title">Комнаты</h1>
+            <p class="content__lead">Комната объединяет каналы и чат-клиенты в один отдельный вид.</p>
+        </header>
+
+        <div class="panels">
+            <section class="panel panel--rooms" aria-label="Список комнат">
+                <div class="panel__head">
+                    <h2 class="panel__title">Комнаты</h2>
+                    <span class="panel__count" id="rooms-count">0</span>
+                </div>
+
+                <!-- Панель действий над списком. Кнопка «Добавить» пока без
+                     обработчика: список комнат ещё не подключён к ядру. -->
+                <div class="rooms__bar">
+                    <button type="button" class="btn btn--primary" id="rooms-add">Добавить</button>
+                </div>
+
+                <ul class="rooms" id="rooms"></ul>
+            </section>
+        </div>
+    </main>
+</div>
+
+<script type="module" src="/js/rooms.js"></script>
+</body>
+</html>
