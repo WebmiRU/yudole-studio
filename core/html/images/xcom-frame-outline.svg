@@ -3,10 +3,10 @@
   <desc>X-COM cyan HUD outline. Thin rails are 1px without glow; emphasized rails are 3px with cyan glow.</desc>
   <defs>
     <filter id="cyan-glow-wide" filterUnits="userSpaceOnUse" x="-24" y="-24" width="770" height="312" color-interpolation-filters="sRGB">
-      <feGaussianBlur stdDeviation="2.1" />
+      <feGaussianBlur stdDeviation="1.5" />
     </filter>
     <filter id="cyan-glow-tight" filterUnits="userSpaceOnUse" x="-24" y="-24" width="770" height="312" color-interpolation-filters="sRGB">
-      <feGaussianBlur stdDeviation="0.8" />
+      <feGaussianBlur stdDeviation="0.6" />
     </filter>
   </defs>
 
@@ -16,13 +16,13 @@
         stroke="#54dce7" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" />
 
   <!-- Emphasized sections use two glow layers beneath their 3px crisp stroke. -->
-  <g id="cyan-glow-wide" stroke="#54dce7" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.14" filter="url(#cyan-glow-wide)">
+  <g id="cyan-glow-wide" stroke="#54dce7" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" opacity="0.08" filter="url(#cyan-glow-wide)">
     <path d="M 24 14 H 46" />
     <path d="M 184 14 H 204 L 232 42 H 256" />
     <path d="M 642 42 H 667 L 694 69 V 249 H 539 L 520 230 H 488" />
     <path d="M 77 230 H 56 L 24 198 V 14" />
   </g>
-  <g id="cyan-glow-tight" stroke="#54dce7" stroke-width="3.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.2" filter="url(#cyan-glow-tight)">
+  <g id="cyan-glow-tight" stroke="#54dce7" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" opacity="0.1" filter="url(#cyan-glow-tight)">
     <path d="M 24 14 H 46" />
     <path d="M 184 14 H 204 L 232 42 H 256" />
     <path d="M 642 42 H 667 L 694 69 V 249 H 539 L 520 230 H 488" />
@@ -37,7 +37,7 @@
   </g>
 
   <!-- Crisp 3px cyan cores are drawn last, cleanly joining the 1px rails. -->
-  <g id="cyan-core" stroke="#70edf5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+  <g id="cyan-core" stroke="#70edf5" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
     <path d="M 24 14 H 46" />
     <path d="M 184 14 H 204 L 232 42 H 256" />
     <path d="M 642 42 H 667 L 694 69 V 249 H 539 L 520 230 H 488" />
