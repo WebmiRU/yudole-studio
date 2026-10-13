@@ -15,12 +15,12 @@
       <path d="M8 20 V3 H31 L64 12 L217 31 L239 36 L258 55 L280 64"/>
       <path d="M8 20 V231 L42 268 L88 278 H280"/>
     </g>
-    <g stroke="url(#cyan)" stroke-width="2.2">
+    <g stroke="url(#cyan)" stroke-width="3">
       <path d="M8 20 V3 H31 L64 12 L217 31 L239 36 L258 55 L280 64"/>
       <path d="M8 20 V231 L42 268 L88 278 H280"/>
     </g>
-    <path d="M10 5 H31 L64 14 L217 33" stroke="#d4fdff" stroke-width="1.1" opacity=".94"/>
-    <path d="M10 24 V226" stroke="#aaf8ff" stroke-width="1" opacity=".45"/>
-    <path d="M43 266 L88 276 H139" stroke="#aaf8ff" stroke-width="1" opacity=".6"/>
+    <path d="M10 5 H31 L64 14 L217 33" stroke="#d4fdff" stroke-width="1" opacity=".7"/>
+    <path d="M10 24 V226" stroke="#aaf8ff" stroke-width="1" opacity=".7"/>
+    <path d="M43 266 L88 276 H139" stroke="#aaf8ff" stroke-width="1" opacity=".7"/>
   </g>
 </svg>
