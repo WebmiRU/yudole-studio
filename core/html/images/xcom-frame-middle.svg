@@ -14,9 +14,9 @@
       <path d="M0 64 H500"/>
       <path d="M0 278 H500"/>
     </g>
-    <path d="M0 64 H500" stroke="url(#rail)" stroke-width="2.2"/>
-    <path d="M0 278 H500" stroke="url(#rail)" stroke-width="2.2"/>
-    <path d="M0 62.8 H500" stroke="#c9fdff" stroke-width=".8" opacity=".5"/>
-    <path d="M0 276.8 H500" stroke="#c9fdff" stroke-width=".8" opacity=".35"/>
+    <path d="M0 64 H500" stroke="url(#rail)" stroke-width="3"/>
+    <path d="M0 278 H500" stroke="url(#rail)" stroke-width="3"/>
+    <path d="M0 62.8 H500" stroke="#c9fdff" stroke-width="1" opacity=".7"/>
+    <path d="M0 276.8 H500" stroke="#c9fdff" stroke-width="1" opacity=".7"/>
   </g>
 </svg>
