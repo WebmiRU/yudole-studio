@@ -1,0 +1,10 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="260" height="84" viewBox="0 0 260 84" preserveAspectRatio="none" fill="none">
+  <defs>
+    <filter id="gw" filterUnits="userSpaceOnUse" x="-40" y="-40" width="340" height="164" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="4.2"/></filter>
+    <filter id="gt" filterUnits="userSpaceOnUse" x="-40" y="-40" width="340" height="164" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.8"/></filter>
+    <clipPath id="cell"><rect width="260" height="84"/></clipPath>
+  </defs>
+  <rect x="0" y="18" width="260" height="66" fill="#000"/>
+  <g clip-path="url(#cell)">
+    <path d="M -60 18 H 320" stroke="#54dce7" stroke-width="1"/>
+  </g></svg>

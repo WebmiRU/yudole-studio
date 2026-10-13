@@ -200,6 +200,29 @@ function serviceTitle(entry) {
     return plugin?.title || entry.plugin || '';
 }
 
+// Рамка сообщения: 14 нарезок одной картинки, разложенных по сетке в _message.
+// Каждая нарезка — кусок той же исходной геометрии, поэтому стыки сходятся
+// точно, а рельсы тянутся вместе с панелью.
+const FRAME_PARTS = [
+    'corner-tl', 'author', 'author-cap', 'top-rail', 'corner-tr',
+    'left-rail', 'content-left', 'content-right', 'right-rail',
+    'corner-bl', 'bottom-short', 'bottom-diag', 'bottom-rail', 'corner-br',
+];
+
+// frame рисует саму рамку. Для чтения с экрана она ничего не значит, поэтому
+// каждому кусочку aria-hidden.
+function frame() {
+    return FRAME_PARTS.map((part) => el('span', {
+        class: `msg__edge msg__edge--${part}`,
+        'aria-hidden': 'true',
+    }));
+}
+
+// panel — колонка внутри рамки: полоска вида сообщения, а под ней текст.
+function panel(...children) {
+    return el('div', {class: 'msg__body'}, children.filter(Boolean));
+}
+
 // richBlock is a block whose text the plugin already turned into markup —
 // смайлы вместо их кодов. Разметку ставим целиком: плагин её собрал сам и
 // экранировал всё, что не разметка.
@@ -208,9 +231,9 @@ function richBlock(entry, severity, head, html, notice = false) {
     text.innerHTML = html;
 
     return el('article', noticeAttrs(notice), [
+        ...frame(),
         el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
-        el('div', {class: 'msg__rule'}),
-        text,
+        panel(el('div', {class: 'msg__rule'}), text),
     ]);
 }
 
@@ -219,21 +242,21 @@ function richBlock(entry, severity, head, html, notice = false) {
 function block(entry, severity, head, text, notice = false) {
     // Текст собирается из кусков, а куски лежат в массивах: расплющиваем
     // насколько угодно глубоко, иначе в блок попадёт сам массив.
-    const body = [...[text].flat(Infinity)].filter(
+    const pieces = [...[text].flat(Infinity)].filter(
         (piece) => piece !== null && piece !== undefined && piece !== '',
     );
-    if (body.length === 0) {
+    if (pieces.length === 0) {
         return null;
     }
 
     return el('article', noticeAttrs(notice), [
+        ...frame(),
         // Полоска стоит между автором и текстом, а не рядом с автором: шапка
         // выстроена в строку, и внутри неё полоска легла бы вбок.
         el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
-        el('div', {class: 'msg__rule'}),
-        el('div', {class: 'msg__text'}, body.map((piece) => (
+        panel(el('div', {class: 'msg__rule'}), el('div', {class: 'msg__text'}, pieces.map((piece) => (
             typeof piece === 'string' ? document.createTextNode(piece) : piece
-        ))),
+        )))),
     ]);
 }
 

@@ -4,42 +4,143 @@
 
 @use "tokens"
 
-// Одно сообщение — один блок: тёмный фон и рамка слева, ширина четыре пикселя.
-// Цвет рамки — вид сообщения, текстом его повторять незачем.
+// Одно сообщение — рамка X-COM. Рамка собрана как CSS Grid из 14 SVG-нарезок
+// одной исходной картинки: углы и стыки держат свой размер, длинные рельсы тянутся
+// по ширине, боковые — по высоте.
+//
+// Числа в grid — это размеры нарезок в их собственных координатах. Совпадать
+// им с нарезками не обязательно: картинка растягивается под ячейку, а толщина
+// линий не плывёт, потому что у нарезок vector-effect: non-scaling-stroke.
+// Совпадение нужно только чтобы пропорции не «плыли» при растяжении.
+//
+// Чёрный фон теперь рисуют сами нарезки (силуэт рамки), поэтому у блока он
+// прозрачный: иначе скруглённые углы получили бы чёрный угол по углам.
 .msg
-  padding: 11px 16px 13px
-  border-left: 4px solid transparent
-  background: #000
+  position: relative
+  display: grid
+  // Колонки: угол с запасом под свечение, ник по содержимому, стык-растяжка,
+  // длинный верхний рельс, правый угол.
+  grid-template-columns: 71px fit-content(260px) 76px minmax(80px, 1fr) 72px
+  // Строки: шапка с полкой под ник, тянущаяся середина, низ с углами.
+  grid-template-rows: 84px minmax(64px, auto) 80px
+  min-width: 0
+  background: transparent
 
-  // У реплик рамки нет, поэтому вид сообщения различает только полоска — и она
-  // должна быть заметной. Сине-серый, а не серый: в палитре серый уходил в
-  // фон и читался как граница блока.
   &[data-severity="neutral"]
     --rule: #{tokens.$rule}
 
   &[data-severity="info"]
-    border-left-color: tokens.$info
     --rule: #{tokens.$info}
 
   &[data-severity="success"]
-    border-left-color: tokens.$success
     --rule: #{tokens.$success}
 
   &[data-severity="warning"]
-    border-left-color: tokens.$warning
     --rule: #{tokens.$warning}
 
   &[data-severity="error"]
-    border-left-color: tokens.$danger
     --rule: #{tokens.$danger}
 
-// Шапка блока: кто написал. Номера канала здесь нет — он и так есть в фильтре
-// сверху, а в ленте он только шумел.
+// Обёртка нарезок. display: contents убирает её из раскладки: иначе нарезки
+// оказались бы внутри ещё одной боксы и не попали бы в сетку сообщения.
+.msg__frame
+  display: contents
+
+// Нарезка рамки. Это не содержимое, а картинка: ни текста, ни кликов.
+.msg__edge
+  position: relative
+  display: block
+  min-width: 0
+  min-height: 0
+  pointer-events: none
+  background-position: center
+  background-repeat: no-repeat
+  background-size: 100% 100%
+
+  // Верхний ряд: угол, ник, стык-приставка, длинный рельс, правый угол.
+  &--corner-tl
+    grid-area: 1 / 1
+    background-image: url("../images/xcom-frame-01-corner-tl.svg")
+
+  &--author
+    grid-area: 1 / 2
+    background-image: url("../images/xcom-frame-02-author.svg")
+
+  &--author-cap
+    grid-area: 1 / 3
+    background-image: url("../images/xcom-frame-03-author-cap.svg")
+
+  &--top-rail
+    grid-area: 1 / 4
+    background-image: url("../images/xcom-frame-04-top-rail.svg")
+
+  &--corner-tr
+    grid-area: 1 / 5
+    background-image: url("../images/xcom-frame-05-corner-tr.svg")
+
+  // Средний ряд: боковые рельсы тянутся по высоте, середина — две neutral-ячейки.
+  &--left-rail
+    grid-area: 2 / 1
+    background-image: url("../images/xcom-frame-06-left-rail.svg")
+
+  &--content-left
+    grid-area: 2 / 2
+    background-image: url("../images/xcom-frame-07-content-left.svg")
+
+  &--content-right
+    grid-area: 2 / 3 / 3 / 5
+    background-image: url("../images/xcom-frame-08-content-right.svg")
+
+  &--right-rail
+    grid-area: 2 / 5
+    background-image: url("../images/xcom-frame-09-right-rail.svg")
+
+  // Нижний ряд: угол, тонкий рельс под ник, стык с диагональю, рельс, угол.
+  &--corner-bl
+    grid-area: 3 / 1
+    background-image: url("../images/xcom-frame-10-corner-bl.svg")
+
+  &--bottom-short
+    grid-area: 3 / 2
+    background-image: url("../images/xcom-frame-11-bottom-short.svg")
+
+  &--bottom-diag
+    grid-area: 3 / 3
+    background-image: url("../images/xcom-frame-12-bottom-diag.svg")
+
+  &--bottom-rail
+    grid-area: 3 / 4
+    background-image: url("../images/xcom-frame-13-bottom-rail.svg")
+
+  &--corner-br
+    grid-area: 3 / 5
+    background-image: url("../images/xcom-frame-14-corner-br.svg")
+
+// Колонка внутри рамки: полоска вида сообщения и под ней текст. Верхняя строка
+// занята шапкой, поэтому текст живёт во второй и тянет её высоту.
+.msg__body
+  grid-area: 2 / 2 / 3 / 5
+  z-index: 1
+  display: flex
+  flex-direction: column
+  min-width: 0
+  padding: 4px 18px 12px 22px
+
+// Шапка блока: кто написал. Стоит в полке между верхним рельсом и стыком —
+// полка для этого и сделана в рамке. Номера канала здесь нет: он и так есть в
+// фильтре сверху, а в ленте он только шумел.
 .msg__head
+  grid-area: 1 / 2 / 2 / 3
+  z-index: 1
   display: flex
   gap: 8px
-  align-items: baseline
-  min-height: 20px
+  align-items: center
+  align-self: start
+  height: 28px
+  margin-top: 18px
+  padding-left: 12px
+  min-width: 0
+  overflow: hidden
 
 .msg__author
   display: inline-flex

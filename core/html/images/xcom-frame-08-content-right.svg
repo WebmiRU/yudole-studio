@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="300" height="120" viewBox="0 0 300 120" preserveAspectRatio="none" fill="none">
+  <defs>
+    <filter id="gw" filterUnits="userSpaceOnUse" x="-40" y="-40" width="380" height="200" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="4.2"/></filter>
+    <filter id="gt" filterUnits="userSpaceOnUse" x="-40" y="-40" width="380" height="200" color-interpolation-filters="sRGB"><feGaussianBlur stdDeviation="1.8"/></filter>
+    <clipPath id="cell"><rect width="300" height="120"/></clipPath>
+  </defs>
+  <rect x="0" y="0" width="300" height="120" fill="#000"/>
+  <g clip-path="url(#cell)">
+  </g></svg>
