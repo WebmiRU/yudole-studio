@@ -5,67 +5,33 @@
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Yudole studio light — настройки</title>
 </head>
-<body>
+<body class="page-home">
 
-<div class="app">
-    <aside class="sidebar">
-        <div class="brand">
-            <span class="brand__mark" aria-hidden="true">◈</span>
-            <span class="brand__name">Yudole studio light</span>
-        </div>
+<!-- Настройки — список разделов, а не раздел. Раньше /settings сразу отдавал
+     комнаты, и второй пункт меню на них просто не вёлся: заходишь — и снова
+     первый. Меню снимает вопрос, какой раздел по умолчанию. -->
+<main class="home">
+    <header class="home__head">
+        <span class="home__mark" aria-hidden="true">◈</span>
+        <span class="home__name">Настройки</span>
+    </header>
+    <p class="home__lead">Выберите раздел.</p>
 
-        <nav class="nav" aria-label="Разделы настроек">
-            <p class="nav__label">Разделы</p>
-            <ul class="nav__list">
-                <li>
-                    <a href="/settings" class="nav__item nav__item--child">Комнаты</a>
-                </li>
-                <li>
-                    <button type="button" class="nav__item nav__item--parent is-open" aria-expanded="true">
-                        <span class="nav__title">Плагины</span>
-                        <span class="nav__chevron" aria-hidden="true"></span>
-                    </button>
-                    <ul class="nav__sublist">
-                        <li>
-                            <a href="/settings/clients" class="nav__item nav__item--child is-active" aria-current="page">Чат-клиенты</a>
-                        </li>
-                    </ul>
-                </li>
-            </ul>
-        </nav>
+    <nav class="home__grid" aria-label="Разделы настроек">
 
-        <p class="sidebar__foot">Ядро 0.1.0</p>
-    </aside>
+        <a class="home__card" href="/settings/rooms">
+            <span class="home__card-title">Комнаты</span>
+            <span class="home__card-note">Список комнат: заголовок, шрифт, тема и размеры</span>
+        </a>
 
-    <main class="content">
-        <header class="content__head">
-            <nav class="crumbs" aria-label="Путь по настройкам">
-                <span class="crumbs__item">Плагины</span>
-                <span class="crumbs__sep" aria-hidden="true">/</span>
-                <span class="crumbs__item crumbs__item--current">Чат-клиенты</span>
-            </nav>
-            <h1 class="content__title">Чат-клиенты</h1>
-            <p class="content__lead">Выберите чат-клиент и настройте параметры его подключения.</p>
-        </header>
+        <a class="home__card" href="/settings/clients">
+            <span class="home__card-title">Чат-клиенты</span>
+            <span class="home__card-note">Подключение к площадкам: каналы, ключи и параметры</span>
+        </a>
 
-        <div class="panels">
-            <section class="panel panel--list" aria-label="Список чат-клиентов">
-                <div class="panel__head">
-                    <h2 class="panel__title">Установленные</h2>
-                    <span class="panel__count" id="clients-count">0</span>
-                </div>
-                <ul class="clients" id="clients"></ul>
-            </section>
+    </nav>
+</main>
 
-            <section class="panel panel--options" id="options" aria-label="Опции чат-клиента" aria-live="polite"></section>
-        </div>
-    </main>
-</div>
-
-<!-- Тостов может быть несколько: нажали «Сохранить» пять раз —
-     показаны все пять, каждый со своим временем жизни. -->
-<div class="toasts" id="toasts" aria-live="polite"></div>
-
-<script type="module" src="/js/app.js"></script>
+<script type="module" src="/js/settings.js"></script>
 </body>
 </html>

@@ -1,13 +1,48 @@
 import { defineConfig } from 'vite';
 
-// Разработка: npm run dev поднимает сервер с HMR на :1081 и отдаёт страницу
-// из html/. Продакшен: npm run build собирает всё в dist/, который раздаёт
-// Go-сервер (go run .).
+// Короткие адреса страниц. Те же, что в pagePath ядра: /settings — комнаты,
+// /settings/clients — чат-клиенты, /chat — лента.
+//
+// Зачем: dev-сервер ищет файл по имени адреса, поэтому без этой таблицы
+// /settings отдал бы settings.html — то есть чат-клиентов вместо комнат, и
+// ссылка «Комнаты» молча возвращала бы туда же, откуда кликнули. На :1080 всё
+// работало, на :1081 — нет; расхождение адресов между сборкой и разработкой
+// стоило бы слишком дорого, чтобы его искать потом по симптому.
+//
+// Middleware добавляется напрямую, а не через возвращаемую функцию: прямое
+// добавление в configureServer встаёт ДО внутренних middleware Vite, иначе
+// подменять адрес было бы поздно.
+function shortAddresses(pages) {
+  return {
+    name: 'studio-short-addresses',
+    configureServer(server) {
+      server.middlewares.use((req, _res, next) => {
+        const path = req.url.split('?')[0];
+        const page = pages[path];
+        if (page) {
+          req.url = `/${page}`;
+        }
+        next();
+      });
+    },
+  };
+}
+
 export default defineConfig({
   root: 'html',
   publicDir: false,
 
-  // Две страницы: настройки и живой чат. У каждой свой html и свой скрипт.
+  plugins: [
+    shortAddresses({
+      '/': 'index.html',
+      '/chat': 'chat.html',
+      '/settings': 'settings.html',
+      '/settings/rooms': 'settings/rooms.html',
+      '/settings/clients': 'settings/clients.html',
+    }),
+  ],
+
+  // Каждая страница со своим html и своим скриптом.
   build: {
     outDir: '../dist',
     emptyOutDir: true,
@@ -16,13 +51,14 @@ export default defineConfig({
     assetsInlineLimit: 0,
     rollupOptions: {
       input: {
-        // Главная — меню разделов. Настройки ушли на отдельную страницу: из
-        // меню на них ведёт ссылка /settings, а не сама главная.
+        // Главная — меню разделов. Настройки — тоже меню, а не раздел:
+        // разделы живут по вложенным адресам /settings/rooms и
+        // /settings/clients, и файлы лежат в той же папке.
         main: 'html/index.html',
         settings: 'html/settings.html',
+        rooms: 'html/settings/rooms.html',
+        clients: 'html/settings/clients.html',
         chat: 'html/chat.html',
-        // Комнаты — первый раздел настроек, живёт по своему адресу /rooms.
-        rooms: 'html/rooms.html',
       },
     },
   },

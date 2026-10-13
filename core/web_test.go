@@ -25,7 +25,8 @@ func newTestWeb(t *testing.T) *web {
 	writeFile(t, filepath.Join(dir, "index.html"), "<h1>home</h1>")
 	writeFile(t, filepath.Join(dir, "settings.html"), "<h1>settings</h1>")
 	writeFile(t, filepath.Join(dir, "chat.html"), "<h1>chat</h1>")
-	writeFile(t, filepath.Join(dir, "rooms.html"), "<h1>rooms</h1>")
+	writeFile(t, filepath.Join(dir, "settings", "rooms.html"), "<h1>rooms</h1>")
+	writeFile(t, filepath.Join(dir, "settings", "clients.html"), "<h1>clients</h1>")
 	writeFile(t, filepath.Join(dir, "assets", "app.css"), "body{}")
 
 	page, err := newWeb(dir)
@@ -63,11 +64,10 @@ func TestWebServesSectionsByShortAddress(t *testing.T) {
 	page := newTestWeb(t)
 
 	cases := map[string]string{
-		// Комнаты — раздел по умолчанию, поэтому и /settings, и /rooms ведут
-		// в них, а чат-клиенты ушли на свой адрес.
-		"/settings":         "<h1>rooms</h1>",
-		"/rooms":            "<h1>rooms</h1>",
-		"/settings/clients": "<h1>settings</h1>",
+		// Настройки — меню разделов, разделы живут по вложенным адресам.
+		"/settings":         "<h1>settings</h1>",
+		"/settings/rooms":   "<h1>rooms</h1>",
+		"/settings/clients": "<h1>clients</h1>",
 		"/chat":             "<h1>chat</h1>",
 	}
 	for path, want := range cases {

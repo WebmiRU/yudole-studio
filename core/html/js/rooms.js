@@ -100,40 +100,43 @@ function renderOptions() {
         return;
     }
 
-    optionsEl.replaceChildren(
-        el('div', {class: 'options'}, [
-            el('div', {class: 'options__head'}, [
-                el('div', {}, [
-                    el('h2', {class: 'options__title'}, [room.name]),
-                    el('p', {class: 'options__desc'}, ['Как эта комната выглядит в ленте сообщений.']),
-                ]),
-            ]),
-            el('form', {class: 'options__body'}, [
-                field('Заголовок', 'Как комната называется в ленте',
-                    textInput('title')),
-                field('Шрифт', 'Гарнитура реплик в этой комнате',
-                    fontSelect('font')),
-                field('Тема', 'Оформление комнаты', themeSelect('theme')),
-                field('Размер шрифта сообщений', 'Высота реплики в ленте, px',
-                    numberInput('message_size')),
-                field('Размер шрифта никнеймов', 'Высота имени автора, px',
-                    numberInput('author_size')),
-            ]),
-            el('div', {class: 'options__foot'}, [
-                el('div', {}, [
-                    el('button', {type: 'button', class: 'btn btn--danger', id: 'room-delete'},
-                        ['Удалить']),
-                ]),
-                el('div', {class: 'options__actions'}, [
-                    el('button', {type: 'submit', class: 'btn btn--primary', form: 'room-form'},
-                        [state.saving ? 'Сохраняю…' : 'Сохранить']),
-                ]),
+    // Подвал лежит внутри формы, а не рядом с ней. Снаружи кнопке
+    // «Сохранить» пришлось бы ссылаться на форму через атрибут form, и одна
+    // забытая буква в id молча отменяла бы отправку: кнопка нажимается, ничего
+    // не происходит. Внутри формы submit достаётся ей сам.
+    const form = el('form', {}, [
+        el('div', {class: 'options__head'}, [
+            el('div', {}, [
+                el('h2', {class: 'options__title'}, [room.name]),
+                el('p', {class: 'options__desc'}, ['Как эта комната выглядит в ленте сообщений.']),
             ]),
         ]),
-    );
+        el('div', {class: 'options__body'}, [
+            field('Заголовок', 'Как комната называется в ленте',
+                textInput('title')),
+            field('Шрифт', 'Гарнитура реплик в этой комнате',
+                fontSelect('font')),
+            field('Тема', 'Оформление комнаты', themeSelect('theme')),
+            field('Размер шрифта сообщений', 'Высота реплики в ленте, px',
+                numberInput('message_size')),
+            field('Размер шрифта никнеймов', 'Высота имени автора, px',
+                numberInput('author_size')),
+        ]),
+        el('div', {class: 'options__foot'}, [
+            el('span', {class: 'options__note'}, ['Настройки сохраняются в config.json']),
+            el('span', {class: 'options__actions'}, [
+                el('button', {type: 'button', class: 'btn btn--danger', id: 'room-delete'},
+                    ['Удалить']),
+                el('button', {type: 'submit', class: 'btn btn--primary'},
+                    [state.saving ? 'Сохраняю…' : 'Сохранить']),
+            ]),
+        ]),
+    ]);
 
-    optionsEl.querySelector('form')?.addEventListener('submit', save);
-    optionsEl.querySelector('#room-delete')?.addEventListener('click', remove);
+    form.addEventListener('submit', save);
+    form.querySelector('#room-delete')?.addEventListener('click', remove);
+
+    optionsEl.replaceChildren(el('div', {class: 'options'}, [form]));
 
     if (state.error) {
         optionsEl.append(el('p', {class: 'options__problem'}, [state.error]));

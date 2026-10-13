@@ -60,8 +60,8 @@ func (w *web) ServeHTTP(rw http.ResponseWriter, r *http.Request) {
 // "/chat" to chat.html and the settings addresses to their pages. Serving them
 // by name keeps the addresses readable — /chat instead of /chat.html.
 //
-// Комнаты — первый раздел настроек, поэтому /settings ведёт в них, а не в
-// чат-клиентов: иначе настройки открывались бы вторым пунктом меню.
+// /settings — меню разделов, а не раздел: адрес раздела выглядит как вложенный
+// путь (/settings/rooms), и ядро отдаёт файл по тому же пути.
 func pagePath(urlPath string) (string, bool) {
 	switch isIndexPath(urlPath) {
 	case true:
@@ -71,10 +71,12 @@ func pagePath(urlPath string) (string, bool) {
 		switch clean {
 		case "/chat":
 			return "chat.html", true
-		case "/rooms", "/settings":
-			return "rooms.html", true
-		case "/settings/clients":
+		case "/settings":
 			return "settings.html", true
+		case "/settings/rooms":
+			return "settings/rooms.html", true
+		case "/settings/clients":
+			return "settings/clients.html", true
 		}
 		return "", false
 	}
