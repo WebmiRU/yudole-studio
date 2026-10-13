@@ -158,6 +158,9 @@
     padding: 0
     border: 0
     background: transparent
+    --hud-accent: #54d8e5
+    --hud-glint: #c4fcff
+
     &:last-child
       margin-bottom: 0
 
@@ -179,9 +182,6 @@
       height: 100%
       overflow: visible
       pointer-events: none
-      --hud-accent: #54d8e5
-      --hud-glint: #c4fcff
-
     .msg__edge
       position: absolute
       z-index: 2
@@ -203,7 +203,7 @@
       border-radius: 0
       background: linear-gradient(155deg, rgba(10, 27, 33, .97), rgba(4, 13, 17, .985) 66%, rgba(3, 10, 14, .99))
       box-shadow: none
-      clip-path: polygon(0 5px, 1% 5px, 4.2% 13px, 25.5% 34px, 28.2% 35px, 32% 53px, 35.7% 54px, 92.5% 65px, 95% 65px, 99.5% 86px, 100% 88px, 100% calc(100% - 7px), 78.3% calc(100% - 11px), 75% calc(100% - 24px), 71.5% calc(100% - 24px), 9.2% calc(100% - 33px), 4.2% calc(100% - 33px), 0 calc(100% - 59px))
+      clip-path: polygon(0 5px, 1% 5px, 4.2% 13px, 25.5% 34px, 28.2% 35px, 32% 53px, 35.7% 54px, 92.5% 65px, 95% 65px, 99% 81px, 99% calc(100% - 11px), 78.3% calc(100% - 11px), 75% calc(100% - 24px), 71.5% calc(100% - 24px), 9.2% calc(100% - 33px), 4.2% calc(100% - 33px), 0 calc(100% - 59px))
 
     // Upper-left lip and long climbing shelf.
     .msg__edge--left-vertical
@@ -261,16 +261,16 @@
       transform: rotate(1deg)
 
     .msg__edge--top-right-diagonal
-      right: .5%
+      right: 1%
       top: 65px
       width: 4.5%
-      transform: rotate(22deg)
+      transform: rotate(16deg)
       background: linear-gradient(90deg, var(--hud-accent), #9bf7fc)
 
     .msg__edge--right-vertical
-      right: 0
-      top: 86px
-      bottom: 7px
+      right: 1%
+      top: 81px
+      bottom: 11px
       width: 1.6px
       height: auto
       border-radius: 0
@@ -311,7 +311,7 @@
 
     .msg__edge--bottom-right-main
       left: 78.3%
-      right: .5%
+      right: 1%
       bottom: 11px
       background: linear-gradient(90deg, #7beaf2, var(--hud-accent) 48%, #c6fcff)
 
