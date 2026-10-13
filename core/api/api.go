@@ -14,6 +14,7 @@ import (
 	"strings"
 
 	"studio/core/plugin"
+	"studio/core/theme"
 )
 
 // Manager is the part of the plugin manager the API needs.
@@ -30,13 +31,19 @@ type Manager interface {
 }
 
 // Handler builds the routes of the options page.
-func Handler(manager Manager) http.Handler {
+func Handler(manager Manager, themes *theme.Catalog) http.Handler {
 	mux := http.NewServeMux()
 
 	// Живое состояние плагинов. Страница настроек подписывается на него вместо
 	// опроса: спрашивать каждые две секунды значило затирать наполовину
 	// набранное в форме.
 	mux.HandleFunc("GET /api/plugins/events", watchHandler(manager))
+
+	// Темы. Список снят при старте, поэтому ответ мгновенный: страница
+	// спрашивает его один раз и держит у себя.
+	mux.HandleFunc("GET /api/themes", func(w http.ResponseWriter, r *http.Request) {
+		write(w, map[string]any{"themes": themes.List()})
+	})
 
 	mux.HandleFunc("GET /api/plugins/chat", func(w http.ResponseWriter, r *http.Request) {
 		write(w, map[string]any{"plugins": manager.List()})

@@ -63,9 +63,12 @@ func TestWebServesSectionsByShortAddress(t *testing.T) {
 	page := newTestWeb(t)
 
 	cases := map[string]string{
-		"/settings": "<h1>settings</h1>",
-		"/chat":     "<h1>chat</h1>",
-		"/rooms":    "<h1>rooms</h1>",
+		// Комнаты — раздел по умолчанию, поэтому и /settings, и /rooms ведут
+		// в них, а чат-клиенты ушли на свой адрес.
+		"/settings":         "<h1>rooms</h1>",
+		"/rooms":            "<h1>rooms</h1>",
+		"/settings/clients": "<h1>settings</h1>",
+		"/chat":             "<h1>chat</h1>",
 	}
 	for path, want := range cases {
 		rec := get(t, page, path)

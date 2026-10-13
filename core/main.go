@@ -23,6 +23,7 @@ import (
 	"studio/core/chat"
 	"studio/core/plugin"
 	"studio/core/settings"
+	"studio/core/theme"
 )
 
 const (
@@ -36,6 +37,14 @@ const (
 
 // pluginsRelPath is the chat plugins directory, relative to the repository root.
 var pluginsRelPath = filepath.Join("plugins", "chat")
+
+// themesRelPath is the themes directory, relative to the repository root.
+var themesRelPath = "themes"
+
+// defaultThemesDir points at themes/ in the repository root.
+func defaultThemesDir() string {
+	return theme.DefaultDir(baseDir(), repoRoot())
+}
 
 // defaultWebDir prefers the build output and falls back to the sources, so the
 // server works before the first `npm run build`.
@@ -127,6 +136,7 @@ func run() error {
 	addr := flag.String("addr", envOr("STUDIO_ADDR", defaultAddr), "address to listen on")
 	configPath := flag.String("config", envOr("STUDIO_CONFIG", defaultConfigPath()), "path to the configuration file")
 	pluginsDir := flag.String("plugins", envOr("STUDIO_PLUGINS", defaultPluginsDir()), "directory with chat plugins")
+	themesDir := flag.String("themes", envOr("STUDIO_THEMES", defaultThemesDir()), "directory with themes")
 	webDir := flag.String("web", envOr("STUDIO_WEB", defaultWebDir()), "directory with the built front-end (npm run build -> dist)")
 	shutdownTimeout := flag.Duration("shutdown-timeout", 5*time.Second, "how long to wait for in-flight requests on shutdown")
 	flag.Parse()
@@ -142,6 +152,14 @@ func run() error {
 		"plugins", len(config.ChatPlugins()),
 	)
 	slog.Info("chat plugins found", "plugins", strings.Join(pluginIDs(manager.List()), ", "))
+
+	// Темы читаются один раз, здесь: за время работы они не появляются, а
+	// список должен быть готов до первого запроса от страницы.
+	catalog := theme.Scan(*themesDir)
+	slog.Info("themes found",
+		"path", relPath(*themesDir),
+		"themes", strings.Join(themeIDs(catalog), ", "),
+	)
 
 	page, err := newWeb(*webDir)
 	if err != nil {
@@ -160,7 +178,7 @@ func run() error {
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", healthHandler(page))
 	mux.Handle("GET /api/chat", hub.Handler())
-	mux.Handle("/api/", api.Handler(manager))
+	mux.Handle("/api/", api.Handler(manager, catalog))
 	mux.Handle("/", page)
 
 	srv := &http.Server{
@@ -228,6 +246,16 @@ func pluginIDs(views []plugin.PluginView) []string {
 	ids := make([]string, 0, len(views))
 	for _, view := range views {
 		ids = append(ids, view.ID)
+	}
+	return ids
+}
+
+// themeIDs lists the ids of the themes found on disk.
+func themeIDs(catalog *theme.Catalog) []string {
+	list := catalog.List()
+	ids := make([]string, 0, len(list))
+	for _, item := range list {
+		ids = append(ids, item.ID)
 	}
 	return ids
 }
