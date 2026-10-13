@@ -228,29 +228,7 @@ function block(entry, severity, head, text, notice = false) {
 function messagePanel(notice, head, content) {
     // Each contour segment is independent: only the long rails flex with width,
     // while bevels, short joints and the side edges keep their reference sizes.
-    const frameParts = [
-        'fill',
-        'left-vertical',
-        'top-left-cap',
-        'top-left-slope',
-        'top-left-tip',
-        'top-step-diagonal',
-        'top-step-cap',
-        'top-main',
-        'top-right-cap',
-        'top-right-diagonal',
-        'right-vertical',
-        'bottom-left-diagonal',
-        'bottom-left-cap',
-        'bottom-main',
-        'bottom-middle-cap',
-        'bottom-middle-diagonal',
-        'bottom-right-main',
-        'top-glint',
-        'bottom-left-glint',
-        'bottom-right-glint',
-        'right-glint',
-    ];
+    const frameParts = ['fill', 'left', 'middle', 'right'];
     const frame = el('div', {class: 'msg__frame', 'aria-hidden': 'true'},
         frameParts.map((part) => el('span', {class: `msg__edge msg__edge--${part}`})),
     );
