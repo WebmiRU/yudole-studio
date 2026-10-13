@@ -6,6 +6,7 @@
 
 import '../sass/chat.sass';
 import {serviceLogo} from './service-icons.js';
+import {buildFrame} from './xcom-frame.js';
 
 const API_CHAT = '/api/chat';
 
@@ -227,6 +228,9 @@ function block(entry, severity, head, text, notice = false) {
     }
 
     return el('article', noticeAttrs(notice), [
+        // Рамка идёт первой и отдельным слоем: она кладёт заливку и контур и
+        // лежит под текстом, иначе подсвечивала бы его.
+        buildFrame(),
         // Полоска стоит между автором и текстом, а не рядом с автором: шапка
         // выстроена в строку, и внутри неё полоска легла бы вбок.
         el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),

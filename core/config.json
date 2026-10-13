@@ -25,19 +25,35 @@
         "enabled": true,
         "options": {
           "channels": [
-            "forsen"
+            "digitalcorp"
           ],
           "nick": "",
           "token": ""
         }
       },
       "vkvideo": {
-        "enabled": false,
-        "options": {}
+        "enabled": true,
+        "options": {
+          "channels": [
+            "hardplay",
+            "vitalsportbasic",
+            "near_you",
+            "labr",
+            "ruwarface",
+            "sportcastnhl",
+            "milah"
+          ]
+        }
       },
       "youtube": {
-        "enabled": false,
-        "options": {}
+        "enabled": true,
+        "options": {
+          "api_key": "AIzaSyDhv7eykPRiszrRtgF0iN8lzj6_bpIiFl8",
+          "channel": [
+            "@ArtiSOR86"
+          ],
+          "fallback": true
+        }
       }
     }
   },

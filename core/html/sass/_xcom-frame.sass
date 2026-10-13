@@ -1,0 +1,64 @@
+// Рамка сообщения в духе X-COM: Enemy Within.
+//
+// Сам контур лежит в xcom-frame.js — он рисуется скриптом. Здесь только вид:
+// цвет, толщина, свечение. Разделено так, потому что геометрия и оформление
+// меняются по разным поводам: форму правят по скриншоту, цвет — под тему.
+//
+// Почему рамка на SVG, а не на clip-path: контур снят с картинки и живёт в
+// пропорциях этой картинки, а реплика в ленте то длиннее, то короче. Полигон из
+// пикселей на такой высоте рассыпается — углы уезжают, выступы наезжают на
+// текст. Путь с preserveAspectRatio="none" тянется как угодно и держит форму, а
+// non-scaling-stroke оставляет толщину обводки постоянной в пикселях.
+
+$frame-ink: #46c8c3        // основной контур: бирюзовый, как в игре
+$frame-bright: #8bf4e8     // левая кромка: толще и светлее
+$frame-body: #080c0d       // заливка панели
+
+// Рамка лежит поверх текста и ничего не ловит: иначе она мешала бы выделять
+// реплику мышью.
+.msg__frame
+  position: absolute
+  inset: 0
+  width: 100%
+  height: 100%
+  overflow: visible
+  pointer-events: none
+
+.msg__frame-body
+  fill: $frame-body
+  stroke: none
+
+// Свечение двумя слоями: широкое слабое светит наружу, узкое держит саму линию.
+.msg__frame-glow
+  fill: none
+  stroke: $frame-ink
+  stroke-width: 2.4
+  vector-effect: non-scaling-stroke
+  opacity: .55
+  filter: drop-shadow(0 0 6px rgba(70, 200, 195, .55))
+
+.msg__frame-line
+  fill: none
+  stroke: $frame-ink
+  stroke-width: 1.7
+  stroke-linejoin: bevel
+  vector-effect: non-scaling-stroke
+
+// Левая кромка в игре заметно толще и ярче: рамка там светится сильнее всего,
+// и взгляд идёт именно с этой стороны.
+.msg__frame-edge
+  fill: none
+  stroke: $frame-bright
+  stroke-width: 3
+  stroke-linecap: round
+  vector-effect: non-scaling-stroke
+  filter: drop-shadow(0 0 5px rgba(120, 240, 230, .8))
+
+// Тонкая внутренняя линия, параллельная верхней кромке: в игре она есть и сразу
+// выдаёт «приборную» рамку.
+.msg__frame-whisper
+  fill: none
+  stroke: $frame-ink
+  stroke-width: 1
+  opacity: .3
+  vector-effect: non-scaling-stroke
