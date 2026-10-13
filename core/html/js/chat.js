@@ -132,20 +132,7 @@ function redraw() {
     // Держим не больше сотни строк: иначе страница растёт бесконечно.
     // Неизвестные события не дают блока, поэтому null убираем.
     const trimmed = shown.slice(-100).map(line).filter(Boolean);
-    if (messageFrameObserver) {
-        for (const panel of feedEl.querySelectorAll('.msg__panel')) {
-            messageFrameObserver.unobserve(panel);
-        }
-    }
     feedEl.replaceChildren(...trimmed);
-    for (const panel of feedEl.querySelectorAll('.msg__panel')) {
-        const layers = messageFrameLayers.get(panel);
-        if (messageFrameObserver) {
-            messageFrameObserver.observe(panel);
-        } else {
-            syncMessageFrame(panel, layers);
-        }
-    }
 
     if (state.stuck) {
         feedEl.scrollTop = feedEl.scrollHeight;
@@ -238,114 +225,35 @@ function block(entry, severity, head, text, notice = false) {
     return messagePanel(notice, head, content);
 }
 
-// This contour follows the X-COM reference silhouette. The SVG uses a fixed
-// design coordinate system and preserves stroke width while the long sections
-// stretch to the message's actual width and height.
-function messagePanelOutline(rawHeight) {
-    const height = Math.max(90, Math.round(rawHeight));
-    // The top tab and shoulders use fixed CSS-pixel geometry. Only the long
-    // horizontal runs stretch in X; the lower contour is anchored to the
-    // measured bottom so a short emote-only line and a wrapped message both fit.
-    return [
-        'M 0 17',
-        'L 0 0',
-        'L 20 0',
-        'L 58 4',
-        'L 330 12',
-        'L 365 13',
-        'L 388 14',
-        'L 405 18',
-        'L 424 21',
-        'L 457 22',
-        'L 790 22.5',
-        'L 1158 23',
-        'L 1260 24',
-        'L 1286 29',
-        'L 1320 37',
-        'L 1350 43',
-        `L 1350 ${height - 4}`,
-        `L 1064 ${height - 4}`,
-        `L 1038 ${height - 11}`,
-        `L 1020 ${height - 17}`,
-        `L 1004 ${height - 5}`,
-        `L 780 ${height - 8}`,
-        `L 575 ${height - 10}`,
-        `L 365 ${height - 12}`,
-        `L 150 ${height - 14}`,
-        `L 78 ${height - 15}`,
-        `L 38 ${height - 20}`,
-        `L 0 ${height - 36}`,
-        'Z',
-    ].join(' ');
-}
-
-function messagePanelHighlight(rawHeight) {
-    const height = Math.max(90, Math.round(rawHeight));
-    return [
-        'M 2 2 L 20 2 L 58 6 L 330 14 L 365 15',
-        `M 2 ${height - 36} L 38 ${height - 20} L 78 ${height - 15} L 140 ${height - 14}`,
-    ].join(' ');
-}
-
-const messageFrameLayers = new WeakMap();
-const messageFrameObserver = typeof ResizeObserver === 'function'
-    ? new ResizeObserver((entries) => {
-        for (const entry of entries) {
-            const layers = messageFrameLayers.get(entry.target);
-            if (layers) {
-                syncMessageFrame(entry.target, layers);
-            }
-        }
-    })
-    : null;
-
-function syncMessageFrame(panel, layers) {
-    if (!panel || !layers) {
-        return;
-    }
-    const height = Math.max(90, Math.round(panel.getBoundingClientRect().height));
-    const viewBox = `0 0 1350 ${height}`;
-    if (layers.frame.getAttribute('viewBox') === viewBox) {
-        return;
-    }
-    layers.frame.setAttribute('viewBox', viewBox);
-    const outline = messagePanelOutline(height);
-    layers.glow.setAttribute('d', outline);
-    layers.shape.setAttribute('d', outline);
-    layers.highlight.setAttribute('d', messagePanelHighlight(height));
-}
-
-function svgElement(tag, attrs = {}, children = []) {
-    const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
-    for (const [name, value] of Object.entries(attrs)) {
-        if (value !== undefined && value !== null) {
-            node.setAttribute(name, String(value));
-        }
-    }
-    for (const child of children) {
-        node.append(child);
-    }
-    return node;
-}
-
-// messagePanel keeps the message's content flow natural while the frame,
-// header ticks and footer hardware remain independent decorative layers.
 function messagePanel(notice, head, content) {
-    const initialHeight = 180;
-    const initialOutline = messagePanelOutline(initialHeight);
-    const glow = svgElement('path', {class: 'msg__frame-glow', d: initialOutline});
-    const shape = svgElement('path', {class: 'msg__frame-shape', d: initialOutline});
-    const highlight = svgElement('path', {
-        class: 'msg__frame-highlight',
-        d: messagePanelHighlight(initialHeight),
-    });
-    const frame = svgElement('svg', {
-        class: 'msg__frame',
-        viewBox: `0 0 1350 ${initialHeight}`,
-        preserveAspectRatio: 'none',
-        'aria-hidden': 'true',
-        focusable: 'false',
-    }, [glow, shape, highlight]);
+    // Each contour segment is independent: only the long rails flex with width,
+    // while bevels, short joints and the side edges keep their reference sizes.
+    const frameParts = [
+        'fill',
+        'left-vertical',
+        'top-left-cap',
+        'top-left-slope',
+        'top-left-tip',
+        'top-step-diagonal',
+        'top-step-cap',
+        'top-main',
+        'top-right-cap',
+        'top-right-diagonal',
+        'right-vertical',
+        'bottom-left-diagonal',
+        'bottom-left-cap',
+        'bottom-main',
+        'bottom-middle-cap',
+        'bottom-middle-diagonal',
+        'bottom-right-main',
+        'top-glint',
+        'bottom-left-glint',
+        'bottom-right-glint',
+        'right-glint',
+    ];
+    const frame = el('div', {class: 'msg__frame', 'aria-hidden': 'true'},
+        frameParts.map((part) => el('span', {class: `msg__edge msg__edge--${part}`})),
+    );
 
     const header = el('header', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]);
     const rule = el('div', {class: 'msg__rule', 'aria-hidden': 'true'}, [
@@ -356,7 +264,6 @@ function messagePanel(notice, head, content) {
         rule,
         el('div', {class: 'msg__content'}, [content]),
     ]);
-    messageFrameLayers.set(panel, {frame, glow, shape, highlight});
 
     return el('article', noticeAttrs(notice), [frame, panel]);
 }
