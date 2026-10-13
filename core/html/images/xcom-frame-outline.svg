@@ -16,13 +16,13 @@
         stroke="#54dce7" stroke-width="1" stroke-linecap="round" stroke-linejoin="round" />
 
   <!-- Emphasized sections use two glow layers beneath their 3px crisp stroke. -->
-  <g id="cyan-glow-wide" stroke="#54dce7" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity="0.7" filter="url(#red-glow)">
+  <g id="cyan-glow-wide" stroke="#54dce7" stroke-width="7" stroke-linecap="round" stroke-linejoin="round" opacity="0.7" filter="url(#cyan-glow-wide)">
     <path d="M 24 14 H 46" />
     <path d="M 184 14 H 204 L 232 42 H 256" />
     <path d="M 642 42 H 667 L 694 69 V 249 H 539 L 520 230 H 488" />
     <path d="M 77 230 H 56 L 24 198 V 14" />
   </g>
-  <g id="cyan-glow-tight" stroke="#54dce7" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.68" filter="url(#red-hot-glow)">
+  <g id="cyan-glow-tight" stroke="#54dce7" stroke-width="5" stroke-linecap="round" stroke-linejoin="round" opacity="0.68" filter="url(#cyan-glow-tight)">
     <path d="M 24 14 H 46" />
     <path d="M 184 14 H 204 L 232 42 H 256" />
     <path d="M 642 42 H 667 L 694 69 V 249 H 539 L 520 230 H 488" />
@@ -30,14 +30,14 @@
   </g>
 
   <!-- Thin 1px cyan rails; no filter or glow is applied to these sections. -->
-  <g id="thin-cyan-rails" stroke="#4ecbd7" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
+  <g id="thin-cyan-rails" stroke="#54dce7" stroke-width="1" stroke-linecap="round" stroke-linejoin="round">
     <path d="M 46 14 H 184" />
     <path d="M 256 42 H 642" />
     <path d="M 77 230 H 488" />
   </g>
 
   <!-- Crisp 3px cyan cores are drawn last, cleanly joining the 1px rails. -->
-  <g id="cyan-core" stroke="#a1f8ff" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
+  <g id="cyan-core" stroke="#70edf5" stroke-width="3" stroke-linecap="round" stroke-linejoin="round">
     <path d="M 24 14 H 46" />
     <path d="M 184 14 H 204 L 232 42 H 256" />
     <path d="M 642 42 H 667 L 694 69 V 249 H 539 L 520 230 H 488" />
