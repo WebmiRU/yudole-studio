@@ -132,7 +132,20 @@ function redraw() {
     // Держим не больше сотни строк: иначе страница растёт бесконечно.
     // Неизвестные события не дают блока, поэтому null убираем.
     const trimmed = shown.slice(-100).map(line).filter(Boolean);
+    if (messageFrameObserver) {
+        for (const panel of feedEl.querySelectorAll('.msg__panel')) {
+            messageFrameObserver.unobserve(panel);
+        }
+    }
     feedEl.replaceChildren(...trimmed);
+    for (const panel of feedEl.querySelectorAll('.msg__panel')) {
+        const layers = messageFrameLayers.get(panel);
+        if (messageFrameObserver) {
+            messageFrameObserver.observe(panel);
+        } else {
+            syncMessageFrame(panel, layers);
+        }
+    }
 
     if (state.stuck) {
         feedEl.scrollTop = feedEl.scrollHeight;
@@ -228,37 +241,79 @@ function block(entry, severity, head, text, notice = false) {
 // This contour follows the X-COM reference silhouette. The SVG uses a fixed
 // design coordinate system and preserves stroke width while the long sections
 // stretch to the message's actual width and height.
-const MESSAGE_PANEL_OUTLINE = [
-    'M 0 18',
-    'L 0 0',
-    'L 18 0',
-    'L 52 10',
-    'L 310 39',
-    'L 350 43',
-    'L 378 48',
-    'L 400 70',
-    'L 420 80',
-    'L 458 86',
-    'L 790 99',
-    'L 1158 108',
-    'L 1260 111',
-    'L 1285 125',
-    'L 1320 158',
-    'L 1350 182',
-    'L 1350 506',
-    'L 1064 506',
-    'L 1038 486',
-    'L 1020 465',
-    'L 1004 459',
-    'L 780 450',
-    'L 575 440',
-    'L 365 430',
-    'L 150 422',
-    'L 78 418',
-    'L 38 398',
-    'L 0 354',
-    'Z',
-].join(' ');
+function messagePanelOutline(rawHeight) {
+    const height = Math.max(90, Math.round(rawHeight));
+    // The top tab and shoulders use fixed CSS-pixel geometry. Only the long
+    // horizontal runs stretch in X; the lower contour is anchored to the
+    // measured bottom so a short emote-only line and a wrapped message both fit.
+    return [
+        'M 0 17',
+        'L 0 0',
+        'L 20 0',
+        'L 58 4',
+        'L 330 12',
+        'L 365 13',
+        'L 388 14',
+        'L 405 18',
+        'L 424 21',
+        'L 457 22',
+        'L 790 22.5',
+        'L 1158 23',
+        'L 1260 24',
+        'L 1286 29',
+        'L 1320 37',
+        'L 1350 43',
+        `L 1350 ${height - 5}`,
+        `L 1064 ${height - 5}`,
+        `L 1038 ${height - 13}`,
+        `L 1020 ${height - 20}`,
+        `L 1004 ${height - 23}`,
+        `L 780 ${height - 26}`,
+        `L 575 ${height - 30}`,
+        `L 365 ${height - 34}`,
+        `L 150 ${height - 38}`,
+        `L 78 ${height - 39}`,
+        `L 38 ${height - 46}`,
+        `L 0 ${height - 62}`,
+        'Z',
+    ].join(' ');
+}
+
+function messagePanelHighlight(rawHeight) {
+    const height = Math.max(90, Math.round(rawHeight));
+    return [
+        'M 2 2 L 20 2 L 58 6 L 330 14 L 365 15',
+        `M 2 ${height - 62} L 38 ${height - 46} L 78 ${height - 39} L 140 ${height - 38}`,
+    ].join(' ');
+}
+
+const messageFrameLayers = new WeakMap();
+const messageFrameObserver = typeof ResizeObserver === 'function'
+    ? new ResizeObserver((entries) => {
+        for (const entry of entries) {
+            const layers = messageFrameLayers.get(entry.target);
+            if (layers) {
+                syncMessageFrame(entry.target, layers);
+            }
+        }
+    })
+    : null;
+
+function syncMessageFrame(panel, layers) {
+    if (!panel || !layers) {
+        return;
+    }
+    const height = Math.max(90, Math.round(panel.getBoundingClientRect().height));
+    const viewBox = `0 0 1350 ${height}`;
+    if (layers.frame.getAttribute('viewBox') === viewBox) {
+        return;
+    }
+    layers.frame.setAttribute('viewBox', viewBox);
+    const outline = messagePanelOutline(height);
+    layers.glow.setAttribute('d', outline);
+    layers.shape.setAttribute('d', outline);
+    layers.highlight.setAttribute('d', messagePanelHighlight(height));
+}
 
 function svgElement(tag, attrs = {}, children = []) {
     const node = document.createElementNS('http://www.w3.org/2000/svg', tag);
@@ -276,33 +331,34 @@ function svgElement(tag, attrs = {}, children = []) {
 // messagePanel keeps the message's content flow natural while the frame,
 // header ticks and footer hardware remain independent decorative layers.
 function messagePanel(notice, head, content) {
+    const initialHeight = 180;
+    const initialOutline = messagePanelOutline(initialHeight);
+    const glow = svgElement('path', {class: 'msg__frame-glow', d: initialOutline});
+    const shape = svgElement('path', {class: 'msg__frame-shape', d: initialOutline});
+    const highlight = svgElement('path', {
+        class: 'msg__frame-highlight',
+        d: messagePanelHighlight(initialHeight),
+    });
     const frame = svgElement('svg', {
         class: 'msg__frame',
-        viewBox: '0 0 1350 520',
+        viewBox: `0 0 1350 ${initialHeight}`,
         preserveAspectRatio: 'none',
         'aria-hidden': 'true',
         focusable: 'false',
-    }, [
-        svgElement('path', {class: 'msg__frame-glow', d: MESSAGE_PANEL_OUTLINE}),
-        svgElement('path', {class: 'msg__frame-shape', d: MESSAGE_PANEL_OUTLINE}),
-        svgElement('path', {
-            class: 'msg__frame-highlight',
-            d: 'M 2 2 L 18 2 L 52 11 L 310 40 L 350 44 M 2 356 L 38 398 L 78 418 L 140 422 M 1065 505 L 1347 505',
-        }),
-    ]);
+    }, [glow, shape, highlight]);
 
     const header = el('header', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]);
     const rule = el('div', {class: 'msg__rule', 'aria-hidden': 'true'}, [
         el('span', {class: 'msg__rule-signal'}),
     ]);
-    return el('article', noticeAttrs(notice), [
-        frame,
-        el('div', {class: 'msg__panel'}, [
-            header,
-            rule,
-            el('div', {class: 'msg__content'}, [content]),
-        ]),
+    const panel = el('div', {class: 'msg__panel'}, [
+        header,
+        rule,
+        el('div', {class: 'msg__content'}, [content]),
     ]);
+    messageFrameLayers.set(panel, {frame, glow, shape, highlight});
+
+    return el('article', noticeAttrs(notice), [frame, panel]);
 }
 
 // noticeAttrs marks service notices without affecting the panel geometry.
