@@ -148,15 +148,18 @@
   padding: 14px 20px 22px
   scroll-behavior: auto
 
-  // X-COM tactical-panel treatment. The frame, top/bottom hardware and
-  // message content are separate layers so variable-height and wide messages
-  // can stretch without stretching their corner geometry.
+  // X-COM frame: 13 SVG slices arranged as a CSS Grid.
+  // The nickname track is content-sized; the long rails flex and the side rails stretch.
   .msg
     position: relative
-    isolation: isolate
+    display: grid
+    grid-template-columns: 72px fit-content(260px) 32px minmax(40px, 1fr) 84px
+    grid-template-rows: 64px minmax(52px, auto) 24px
+    min-width: 0
     margin-bottom: 18px
     padding: 0
     border: 0
+    isolation: isolate
     background: transparent
     --hud-accent: #54d8e5
     --hud-glint: #c4fcff
@@ -164,106 +167,127 @@
     &:last-child
       margin-bottom: 0
 
-    // Neutral glass body: text never sits inside an SVG or a clipped element.
-    .msg__panel
-      position: relative
-      z-index: 1
-      min-width: 0
-      // Independent top and bottom rails need dedicated clear zones around text.
-      padding: 70px 23px 40px
-
-    // Three SVG pieces: fixed left/right caps and a flexible center rail.
-    // The SVGs are flat 2D artwork; rotation belongs to the surrounding layout.
-    .msg__frame
-      position: absolute
-      inset: 0
-      z-index: 0
-      pointer-events: none
+    // These wrappers are semantic groups; their children participate in the outer grid.
+    .msg__frame,
+    .msg__panel,
+    .msg__head
+      display: contents
 
     .msg__edge
-      position: absolute
-      display: block
-      pointer-events: none
-
-    // Dark fill follows the same silhouette as the three SVG line pieces.
-    .msg__edge--fill
-      inset: 0
+      position: relative
       z-index: 0
-      background: linear-gradient(155deg, rgba(10, 27, 33, .98), rgba(4, 13, 17, .99) 66%, rgba(3, 10, 14, .99))
-      clip-path: polygon(
-        8px 6.7%,
-        8px 1%,
-        31px 1%,
-        64px 4%,
-        217px 10.3%,
-        239px 12%,
-        258px 18.3%,
-        280px 21.3%,
-        calc(100% - 240px) 21.3%,
-        calc(100% - 85px) 21.3%,
-        calc(100% - 63px) 23.3%,
-        calc(100% - 42px) 30.3%,
-        calc(100% - 21px) 36%,
-        calc(100% - 21px) 86%,
-        calc(100% - 33px) 86%,
-        calc(100% - 33px) 92.7%,
-        calc(100% - 50px) 92.7%,
-        calc(100% - 62px) 95.3%,
-        calc(100% - 181px) 95.3%,
-        calc(100% - 199px) 92.7%,
-        calc(100% - 213px) 92.7%,
-        calc(100% - 240px) 92.7%,
-        280px 92.7%,
-        88px 92.7%,
-        42px 89.3%,
-        8px 77%
-      )
+      display: block
+      min-width: 0
+      min-height: 0
+      pointer-events: none
+      background-position: center
+      background-repeat: no-repeat
+      background-size: 100% 100%
 
-    // End caps keep fixed width. The center asset stretches horizontally only.
-    .msg__edge--left
-      inset: 0 auto 0 0
-      z-index: 1
-      width: 280px
-      background: url("../images/xcom-frame-left.svg") center / 100% 100% no-repeat
+    // Top row: 1 logo corner, 2 variable-width author rail, 3 closing cap,
+    // 4 flexible rail, 5 upper-right mosaic corner.
+    .msg__edge--logo
+      grid-area: 1 / 1
+      background-image: url("../images/xcom-frame-01-logo.svg")
 
-    .msg__edge--middle
-      inset: 0 240px 0 280px
-      z-index: 1
-      background: url("../images/xcom-frame-middle.svg") center / 100% 100% no-repeat
+    .msg__edge--author
+      grid-area: 1 / 2
+      background-image: url("../images/xcom-frame-02-author.svg")
 
-    .msg__edge--right
-      inset: 0 0 0 auto
-      z-index: 1
-      width: 240px
-      background: url("../images/xcom-frame-right.svg") center / 100% 100% no-repeat
+    .msg__edge--author-cap
+      grid-area: 1 / 3
+      background-image: url("../images/xcom-frame-03-author-cap.svg")
 
-    .msg__head
-      display: flex
-      align-items: center
-      gap: 9px
-      min-height: 22px
-      padding: 2px 0 3px
+    .msg__edge--top-rail
+      grid-area: 1 / 4
+      background-image: url("../images/xcom-frame-04-top-rail.svg")
+
+    .msg__edge--top-right
+      grid-area: 1 / 5
+      background-image: url("../images/xcom-frame-05-top-right.svg")
+
+    // Middle row: side rails grow with message height; center is two neutral cells.
+    .msg__edge--left-rail
+      grid-area: 2 / 1
+      background-image: url("../images/xcom-frame-06-left-rail.svg")
+
+    .msg__edge--content-left
+      grid-area: 2 / 2
+      background-image: url("../images/xcom-frame-07-content-left.svg")
+
+    .msg__edge--content-right
+      grid-area: 2 / 3 / 3 / 5
+      background-image: url("../images/xcom-frame-08-content-right.svg")
+
+    .msg__edge--right-rail
+      grid-area: 2 / 5
+      background-image: url("../images/xcom-frame-09-right-rail.svg")
+
+    // Bottom row: fixed corner, short fixed rail, flexible rail, fixed corner.
+    .msg__edge--bottom-left
+      grid-area: 3 / 1
+      background-image: url("../images/xcom-frame-10-bottom-left.svg")
+
+    .msg__edge--bottom-short
+      grid-area: 3 / 2
+      background-image: url("../images/xcom-frame-11-bottom-short.svg")
+
+    .msg__edge--bottom-rail
+      grid-area: 3 / 3 / 4 / 5
+      background-image: url("../images/xcom-frame-12-bottom-rail.svg")
+
+    .msg__edge--bottom-right
+      grid-area: 3 / 5
+      background-image: url("../images/xcom-frame-13-bottom-right.svg")
+
+    // Header items sit over slices 1 and 2, not inside an image.
+    .msg__service
+      grid-area: 1 / 1
+      z-index: 2
+      align-self: center
+      justify-self: start
+      margin-left: 18px
+      opacity: .94
+      filter: drop-shadow(0 0 3px rgba(60, 220, 236, .12))
 
     .msg__author
+      grid-area: 1 / 2
+      z-index: 2
+      align-self: center
+      justify-self: stretch
+      display: flex
+      align-items: center
+      box-sizing: border-box
+      width: auto
+      max-width: 260px
+      min-width: 0
+      padding: 0 8px
+      overflow: hidden
       color: #70edf5
       font-size: 14px
       font-weight: 600
       letter-spacing: .025em
+      white-space: nowrap
+      text-overflow: ellipsis
       text-shadow: 0 0 7px rgba(73, 220, 234, .12)
 
     .msg__author--plugin
       color: #6edce6
       font-weight: 500
 
-    .msg__service
-      opacity: .94
-      filter: drop-shadow(0 0 3px rgba(60, 220, 236, .12))
+    // Text content is a real HTML grid item spanning the two middle art cells.
+    .msg__body
+      grid-area: 2 / 1 / 3 / 6
+      position: relative
+      z-index: 2
+      min-width: 0
+      padding: 8px 23px 12px
 
     .msg__rule
       position: relative
       width: 100%
       height: 1px
-      margin: 6px 0 9px
+      margin: 0 0 9px
       background: linear-gradient(90deg, rgba(107, 231, 241, .62), rgba(56, 155, 166, .36) 61%, rgba(48, 128, 139, .07))
 
     .msg__rule-signal
@@ -314,8 +338,18 @@
 
   @media (max-width: 720px)
     .msg
-      .msg__panel
-        padding: 68px 17px 38px
+      grid-template-columns: 52px fit-content(140px) 24px minmax(24px, 1fr) 60px
+
+      .msg__service
+        margin-left: 14px
+
+      .msg__author
+        max-width: 140px
+        padding-right: 6px
+        padding-left: 6px
+
+      .msg__body
+        padding: 7px 17px 10px
 
 
 // --- Подвал -----------------------------------------------------------------

@@ -226,9 +226,13 @@ function block(entry, severity, head, text, notice = false) {
 }
 
 function messagePanel(notice, head, content) {
-    // Each contour segment is independent: only the long rails flex with width,
-    // while bevels, short joints and the side edges keep their reference sizes.
-    const frameParts = ['fill', 'left', 'middle', 'right'];
+    // The frame is a 13-slice CSS Grid: header pieces, stretching side rails,
+    // two neutral body cells, then the asymmetric bottom rail and corner.
+    const frameParts = [
+        'logo', 'author', 'author-cap', 'top-rail', 'top-right',
+        'left-rail', 'content-left', 'content-right', 'right-rail',
+        'bottom-left', 'bottom-short', 'bottom-rail', 'bottom-right',
+    ];
     const frame = el('div', {class: 'msg__frame', 'aria-hidden': 'true'},
         frameParts.map((part) => el('span', {class: `msg__edge msg__edge--${part}`})),
     );
@@ -237,11 +241,11 @@ function messagePanel(notice, head, content) {
     const rule = el('div', {class: 'msg__rule', 'aria-hidden': 'true'}, [
         el('span', {class: 'msg__rule-signal'}),
     ]);
-    const panel = el('div', {class: 'msg__panel'}, [
-        header,
+    const body = el('div', {class: 'msg__body'}, [
         rule,
         el('div', {class: 'msg__content'}, [content]),
     ]);
+    const panel = el('div', {class: 'msg__panel'}, [header, body]);
 
     return el('article', noticeAttrs(notice), [frame, panel]);
 }
@@ -264,12 +268,13 @@ function author(entry) {
     // Twitch, YouTube и VK Видео, и служебная строка «YouTube: в сети» должна
     // выглядеть так же, как и реплика оттуда же.
     const logo = serviceLogo(entry.plugin, 16);
+    const label = el('span', {class: 'msg__author msg__author--plugin'}, [`[${name}]`]);
     if (!logo) {
-        return el('span', {class: 'msg__author msg__author--plugin'}, [`[${name}]`]);
+        return [label];
     }
     const icon = el('span', {class: 'msg__service', title: name});
     icon.append(logo);
-    return el('span', {class: 'msg__author msg__author--plugin'}, [icon, `[${name}]`]);
+    return [icon, label];
 }
 
 // severityOf says how much a service event matters.
