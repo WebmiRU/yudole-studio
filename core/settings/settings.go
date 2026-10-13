@@ -54,6 +54,14 @@ const (
 	writeTemp = ".config-*.tmp"
 )
 
+// DefaultEvents — что новая комната показывает, пока человек не расставил
+// крышки. Только публичные сообщения: без них комната не лента, а пустой
+// список означал бы «молчит», и новая комната выглядела бы сломанной.
+//
+// var, а не const: срезом константа быть нельзя. Копируется через slices.Clone,
+// чтобы никто не дописал в него, меняя настройки по чужой комнате.
+var DefaultEvents = []string{"chat.message.public"}
+
 // ClampFontSize brings a size into the allowed range. Значение приходит из
 // формы, а форма приходит от человека: пустое поле или мусор не должны ни
 // ломать разметку, ни падать с ошибкой.
@@ -88,6 +96,13 @@ type Room struct {
 	// MessageSize и AuthorSize — в пикселях.
 	MessageSize int `json:"message_size"`
 	AuthorSize  int `json:"author_size"`
+	// Events — какие события эта комната показывает в ленте. Хранятся теми же
+	// kind'ами, что приходят по протоколу, без сокращений: chat.message.public
+	// в конфиге и в потоке должны совпадать, иначе в конфиге не разберёшься.
+	//
+	// Пустой список — комната молчит. Это не «показать всё»: человек снял
+	// крыжки и получил именно это.
+	Events []string `json:"events"`
 }
 
 // Plugins groups plugin settings by kind, for example "chat".
@@ -169,6 +184,11 @@ func Parse(data []byte, name string) (*Config, error) {
 		}
 		if room.AuthorSize <= 0 {
 			config.Rooms[i].AuthorSize = DefaultAuthorSize
+		}
+		// Пустой список, а не null: в JSON это [] вместо null, и страница не
+		// проверяет каждый раз, пришло ли что-нибудь в поле.
+		if room.Events == nil {
+			config.Rooms[i].Events = []string{}
 		}
 	}
 

@@ -94,6 +94,7 @@ func Handler(manager Manager, themes *theme.Catalog) http.Handler {
 		room.Theme = incoming.Theme
 		room.MessageSize = incoming.MessageSize
 		room.AuthorSize = incoming.AuthorSize
+		room.Events = incoming.Events
 
 		saved, err := manager.SaveRoom(room)
 		if err != nil {

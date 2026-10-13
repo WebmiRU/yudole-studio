@@ -1,0 +1,89 @@
+// Крышки выбора событий: список групп, в каждом события с галочкой.
+//
+// Отдельный блок, а не продолжение полей: у полей формы подпись слева и
+// значение справа, а здесь всё наоборот — галочки должны стоять с левого края
+// списком, иначе список из девяти строк растянется на всю ширину панели и
+// крыжки окажутся за экраном.
+
+@use "tokens"
+
+// Отступ сверху отделяет раздел от последнего поля: без него девять строк
+// крыжков идут встык с формой и читаются как её продолжение.
+.events
+  display: flex
+  flex-direction: column
+  gap: 16px
+  margin-top: 22px
+  padding-top: 18px
+  border-top: 1px solid tokens.$border-hi
+  // text-transform наследуется, а рядом может оказаться класс с капсом. Здесь
+  // всё именуется как есть, поэтому регистр задан явно.
+  text-transform: none
+
+// Заголовок раздела с пояснением под ним: что это и зачем настраивается.
+.events__head
+  display: flex
+  flex-direction: column
+  gap: 2px
+  margin: 0
+  color: tokens.$text
+  font-size: 14px
+  font-weight: 600
+  text-transform: none
+
+.events__head-note
+  color: tokens.$text-faint
+  font-size: 12px
+  font-weight: 400
+
+// Группа событий. Заголовок — обычным кеглем, как подписи полей: прописными
+// буквами в этой теме не подписывали ничего, и капс здесь выглядел бы чужеродно.
+.events__group
+  display: flex
+  flex-direction: column
+  gap: 2px
+
+.events__title
+  margin-bottom: 6px
+  padding-bottom: 6px
+  border-bottom: 1px solid tokens.$border
+  color: tokens.$text-dim
+  font-size: 13px
+  font-weight: 600
+  text-transform: none
+
+// Строка крыжка + подпись. Вся строка кликается: бить в подпись удобнее, чем в
+// квадратик, и промахнуться мимо неё невозможно.
+.events__row
+  display: flex
+  align-items: center
+  gap: 10px
+  padding: 6px 8px
+  border-radius: tokens.$radius-sm
+  cursor: pointer
+  transition: background 0.12s ease
+
+.events__row:hover
+  background: tokens.$surface-hi
+
+// Под каптионом браузера: своих галочек не заводим, иначе пришлось бы
+// рисовать третье состояние — «выбрано, но сохранение идёт».
+.events__row input
+  flex: none
+  width: 15px
+  height: 15px
+  margin: 0
+  accent-color: tokens.$accent
+  cursor: pointer
+
+.events__label
+  font-size: 14px
+  color: tokens.$text
+
+// Событие, которого нет в реестре: плагин прислал своё. Показываем как есть —
+// иначе человек не поймёт, почему его событие пропало из списка.
+.events__kind
+  margin-left: auto
+  color: tokens.$text-faint
+  font-family: tokens.$mono
+  font-size: 11px

@@ -5,6 +5,7 @@
 // молча перетирала бы другую.
 
 import '../sass/rooms.sass';
+import {ALL_KINDS, EVENT_GROUPS, labelOf} from './events.js';
 
 // Гарнитуры. Взяты те, что реально стоят в системе и есть в любом браузере без
 // загрузки файлов. Первый — тот, которым сейчас рисуется лента: system-ui на
@@ -134,6 +135,7 @@ function renderOptions() {
                 numberInput('message_size')),
             field('Размер шрифта никнеймов', 'Высота имени автора, px',
                 numberInput('author_size')),
+            eventsField(),
         ]),
         el('div', {class: 'options__foot'}, [
             el('span', {class: 'options__note'}, ['Настройки сохраняются в config.json']),
@@ -154,6 +156,55 @@ function renderOptions() {
     if (state.error) {
         optionsEl.append(el('p', {class: 'options__problem'}, [state.error]));
     }
+}
+
+// eventsField — крышки событий. Список берётся из реестра, а не из самой
+// комнаты: события, которых в комнате нет, всё равно нужно предложить, иначе
+// их нечем будет включить. Помеченные в комнате — включены.
+function eventsField() {
+    const on = new Set(state.draft.events ?? []);
+    // События, которых нет в реестре: пришли из плагина, которого эта страница
+    // не знает. Показываем, иначе они молча потерялись бы при сохранении.
+    const extra = [...on].filter((kind) => !ALL_KINDS.includes(kind));
+
+    const groups = [...EVENT_GROUPS];
+    if (extra.length) {
+        groups.push({id: 'other', title: 'Прочие', events: extra.map((k) => ({kind: k, label: labelOf(k)}))});
+    }
+
+    // Без options__section: он тянет за собой text-transform: uppercase, и
+    // регистр наследуется в заголовки групп. Класс не нужен — отступы свои.
+    return el('div', {class: 'events'}, [
+        // Собственный заголовок раздела: поля выше — это про вид комнаты, а
+        // крышки — про то, что она вообще показывает. Без разграничителя
+        // список из девяти строк читался бы как ещё пять полей формы.
+        el('h3', {class: 'events__head'}, [
+            'События в ленте',
+            el('span', {class: 'events__head-note'}, ['что показывать в чате этой комнаты']),
+        ]),
+        ...groups.map((group) =>
+        el('div', {class: 'events__group'}, [
+            el('div', {class: 'events__title'}, [group.title]),
+            ...group.events.map((event) => {
+                const input = el('input', {type: 'checkbox', value: event.kind});
+                input.checked = on.has(event.kind);
+                input.addEventListener('change', () => {
+                    if (input.checked) {
+                        on.add(event.kind);
+                    } else {
+                        on.delete(event.kind);
+                    }
+                    state.draft.events = [...on];
+                });
+
+                return el('label', {class: 'events__row'}, [
+                    input,
+                    el('span', {class: 'events__label'}, [event.label]),
+                    el('span', {class: 'events__kind'}, [event.kind]),
+                ]);
+            }),
+        ])),
+    ]);
 }
 
 // field — строка формы: подпись слева, управление справа. Разметка та же, что у
@@ -262,6 +313,7 @@ async function save(event) {
         theme: state.draft.theme ?? '',
         message_size: state.draft.message_size ?? 0,
         author_size: state.draft.author_size ?? 0,
+        events: state.draft.events ?? [],
     };
 
     const saved = await fetchJSON(`${ROOMS_API}/${encodeURIComponent(room.id)}`, {

@@ -3,6 +3,7 @@ package plugin
 import (
 	"fmt"
 	"log/slog"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -78,6 +79,7 @@ func (m *Manager) CreateRoom() (settings.Room, error) {
 		AuthorSize:  settings.DefaultAuthorSize,
 	}
 	room.Title = roomTitle(room.ID)
+	room.Events = slices.Clone(settings.DefaultEvents)
 	m.config.Rooms = append(m.config.Rooms, room)
 	m.mu.Unlock()
 
