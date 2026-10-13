@@ -1,8 +1,5 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 500 300" width="500" height="300" preserveAspectRatio="none">
   <defs>
-    <filter id="glow" x="-10%" y="-30%" width="120%" height="160%" color-interpolation-filters="sRGB">
-      <feGaussianBlur stdDeviation="2.3"/>
-    </filter>
     <linearGradient id="rail" x1="0" y1="0" x2="1" y2="0">
       <stop offset="0" stop-color="#56dfe9"/>
       <stop offset=".55" stop-color="#3fc6d2"/>
@@ -10,12 +7,9 @@
     </linearGradient>
   </defs>
   <g fill="none" stroke-linecap="butt">
-    <g stroke="#4de3ed" stroke-width="5" opacity=".48" filter="url(#glow)">
-      <path d="M0 64 H500"/>
-      <path d="M0 278 H500"/>
-    </g>
-    <path d="M0 64 H500" stroke="url(#rail)" stroke-width="3"/>
-    <path d="M0 278 H500" stroke="url(#rail)" stroke-width="3"/>
+    <!-- These long rails are intentionally unlit: 1px at 70% opacity. -->
+    <path d="M0 64 H500" stroke="url(#rail)" stroke-width="1" opacity=".7"/>
+    <path d="M0 278 H500" stroke="url(#rail)" stroke-width="1" opacity=".7"/>
     <path d="M0 62.8 H500" stroke="#c9fdff" stroke-width="1" opacity=".7"/>
     <path d="M0 276.8 H500" stroke="#c9fdff" stroke-width="1" opacity=".7"/>
   </g>
