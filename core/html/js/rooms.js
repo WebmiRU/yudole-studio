@@ -39,6 +39,7 @@ const state = {
 const roomsEl = document.getElementById('rooms');
 const optionsEl = document.getElementById('room-options');
 const countEl = document.getElementById('rooms-count');
+const toastsEl = document.getElementById('toasts');
 
 // --- Загрузка -----------------------------------------------------------------
 
@@ -85,7 +86,10 @@ function renderRooms() {
 
         const button = el('button', {
             type: 'button',
-            class: 'room-row',
+            // is-selected ставится на саму строку, а не на li: оформление
+            // выбранной строки живёт в _rooms-list на .room-row.is-selected,
+            // и класс на li его не задевал бы. Так же сделано у чат-клиентов.
+            class: `room-row${selectedNow ? ' is-selected' : ''}`,
             'aria-pressed': String(selectedNow),
             'data-room': room.id,
         }, [el('span', {class: 'room__name'}, [room.title || UNTITLED])]);
@@ -99,8 +103,13 @@ function renderOptions() {
     const room = selected();
 
     if (!room) {
-        optionsEl.replaceChildren(el('p', {class: 'panel__empty'},
-            ['Выберите комнату слева, чтобы задать её настройки.']));
+        optionsEl.replaceChildren(el('p', {class: 'empty'},
+            // Класс .empty — тот же, что у плагинов. .panel__empty задаёт
+            // только отступы: текст в нём остался бы цвета страницы, и
+            // подпись выглядела бы иначе, чем «Выберите плагин». И без
+            // «слева»: в узком окне панель встаёт под списком, и слово
+            // указывало бы не туда.
+            ['Выберите комнату']));
         return;
     }
 
@@ -263,12 +272,17 @@ async function save(event) {
 
     state.saving = false;
 
-    if (saved && saved.id) {
+    if (saved?.id) {
         const index = state.rooms.findIndex((item) => item.id === saved.id);
         if (index >= 0) {
             state.rooms[index] = saved;
         }
         state.draft = {...saved};
+        toast(`Настройки сохранены: ${saved.title || UNTITLED}`, 'success');
+    } else {
+        // fetch положил причину в state.error: молча пропавший тост человек
+        // принял бы за «ничего не изменилось».
+        toast(state.error || 'Не удалось сохранить', 'error', 8);
     }
     render();
 }
@@ -287,11 +301,17 @@ async function remove() {
     }
 
     state.error = '';
-    await fetchJSON(`${ROOMS_API}/${encodeURIComponent(room.id)}`, {method: 'DELETE'});
+    const done = await fetchJSON(`${ROOMS_API}/${encodeURIComponent(room.id)}`, {method: 'DELETE'});
+
+    if (!done?.deleted) {
+        toast(state.error || 'Не удалось удалить', 'error', 8);
+        return;
+    }
 
     state.rooms = state.rooms.filter((item) => item.id !== room.id);
     state.selectedId = null;
     state.draft = null;
+    toast(`Комната удалена: ${room.title || UNTITLED}`, 'info');
     render();
 }
 
@@ -304,6 +324,9 @@ async function add() {
         state.rooms.push(room);
         state.selectedId = room.id;
         state.draft = {...room};
+        toast(`Комната создана: ${room.title || UNTITLED}`, 'success');
+    } else {
+        toast(state.error || 'Не удалось создать комнату', 'error', 8);
     }
     render();
 }
@@ -319,6 +342,56 @@ function select(id) {
 
 function selected() {
     return state.rooms.find((room) => room.id === state.selectedId) ?? null;
+}
+
+// --- Тосты --------------------------------------------------------------------
+
+// toast — короткая весть о том, что произошло. Собрана из тех же кирпичиков,
+// что и на странице плагинов: та же разметка, та же полоса жизни. Своя копия
+// потому, что модуль на страницу, а тост нужен обеим.
+function toast(text, severity = 'info', seconds = 5) {
+    const node = el('article', {
+        class: 'msg toast',
+        'data-severity': severity,
+        role: 'status',
+    }, [
+        el('div', {class: 'msg__head'}, [
+            el('span', {class: 'msg__author msg__author--plugin'}, ['[Комнаты]']),
+        ]),
+        el('div', {class: 'msg__rule'}),
+        el('div', {class: 'msg__text'}, [sentence(text)]),
+        el('span', {class: 'msg__life', style: `--life: ${seconds}s`}),
+    ]);
+
+    // Под тостом может стоять такой же: разводим их по высоте, иначе полосы
+    // жизни слипнутся в одну.
+    toastsEl.append(node);
+
+    const remove = () => node.remove();
+    const timer = setTimeout(remove, seconds * 1000);
+
+    // Убрали раньше, чем истекло время, — убираем и таймер, иначе он выстрелит
+    // по уже несуществующему узлу.
+    node.addEventListener('transitionend', () => {
+        if (node.dataset.gone) {
+            return;
+        }
+        node.dataset.gone = '';
+        clearTimeout(timer);
+        remove();
+    }, {once: true});
+}
+
+// sentence начинает фразу с заглавной — включая часть после двоеточия.
+function sentence(text) {
+    const trimmed = String(text ?? '').trim();
+    if (!trimmed) {
+        return '';
+    }
+    return trimmed
+        .split(/:\s+/)
+        .map((part) => part.charAt(0).toLocaleUpperCase('ru') + part.slice(1))
+        .join(': ');
 }
 
 // el собирает элемент. Тот же помощник, что на странице чат-клиентов: правила

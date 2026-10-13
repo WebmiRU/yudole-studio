@@ -99,8 +99,14 @@ function listenStates() {
                 applyView(view);
             }
 
-            const gone = !state.plugins.some((plugin) => plugin.id === state.selectedId);
-            if (gone) {
+            // Переключаться на другой плагин нужно только когда выбранный
+            // исчез: его удалили или он не собрался. Если не выбрано ничего,
+            // выбирать нечего — иначе страница открывается на первом плагине,
+            // хотя человек его не трогал, и комнаты с этим не согласуются:
+            // там по умолчанию пусто.
+            const lost = state.selectedId !== null &&
+                !state.plugins.some((plugin) => plugin.id === state.selectedId);
+            if (lost) {
                 state.selectedId = state.plugins[0]?.id ?? null;
             }
             render();
@@ -431,7 +437,9 @@ function enabledToggle(plugin) {
 function renderOptions() {
     const plugin = selected();
     if (!plugin) {
-        optionsEl.replaceChildren(el('p', {class: 'empty'}, ['Выберите плагин слева']));
+        // Без «слева»: панель опций в узком окне оказывается под списком, и
+        // слово указывало бы человеку не туда.
+        optionsEl.replaceChildren(el('p', {class: 'empty'}, ['Выберите плагин']));
         return;
     }
 
