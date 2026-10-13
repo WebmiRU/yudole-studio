@@ -200,26 +200,13 @@ function serviceTitle(entry) {
     return plugin?.title || entry.plugin || '';
 }
 
-// Рамка сообщения: 14 нарезок одной картинки, разложенных по сетке в _message.
-// Каждая нарезка — кусок той же исходной геометрии, поэтому стыки сходятся
-// точно, а рельсы тянутся вместе с панелью.
-const FRAME_PARTS = [
-    'corner-tl', 'author', 'author-cap', 'top-rail', 'corner-tr',
-    'left-rail', 'content-left', 'content-right', 'right-rail',
-    'corner-bl', 'bottom-short', 'bottom-diag', 'bottom-rail', 'corner-br',
-];
+// Рамку сообщения рисует CSS: два слоя-псевдоэлемента с картинками на весь блок.
+// В разметке для неё ничего нет — иначе пришлось бы повторять геометрию рамки
+// в DOM, а картинка всё равно была бы сверху.
 
-// frame рисует саму рамку. Для чтения с экрана она ничего не значит, поэтому
-// каждому кусочку aria-hidden.
-function frame() {
-    return FRAME_PARTS.map((part) => el('span', {
-        class: `msg__edge msg__edge--${part}`,
-        'aria-hidden': 'true',
-    }));
-}
-
-// panel — колонка внутри рамки: полоска вида сообщения, а под ней текст.
-function panel(...children) {
+// body — колонка под шапкой: полоска вида сообщения, а под ней текст. Всё
+// содержимое лежит над слоями рамки, поэтому поднимается по z-index.
+function body(...children) {
     return el('div', {class: 'msg__body'}, children.filter(Boolean));
 }
 
@@ -231,9 +218,8 @@ function richBlock(entry, severity, head, html, notice = false) {
     text.innerHTML = html;
 
     return el('article', noticeAttrs(notice), [
-        ...frame(),
         el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
-        panel(el('div', {class: 'msg__rule'}), text),
+        body(el('div', {class: 'msg__rule'}), text),
     ]);
 }
 
@@ -250,11 +236,10 @@ function block(entry, severity, head, text, notice = false) {
     }
 
     return el('article', noticeAttrs(notice), [
-        ...frame(),
         // Полоска стоит между автором и текстом, а не рядом с автором: шапка
         // выстроена в строку, и внутри неё полоска легла бы вбок.
         el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
-        panel(el('div', {class: 'msg__rule'}), el('div', {class: 'msg__text'}, pieces.map((piece) => (
+        body(el('div', {class: 'msg__rule'}), el('div', {class: 'msg__text'}, pieces.map((piece) => (
             typeof piece === 'string' ? document.createTextNode(piece) : piece
         )))),
     ]);
