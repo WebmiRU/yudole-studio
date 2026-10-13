@@ -9,9 +9,19 @@
       <stop offset="1" stop-color="#c0fbff"/>
     </linearGradient>
   </defs>
-  <g fill="none" stroke-linecap="square" stroke-linejoin="miter">
-    <path d="M0 64 H155 L177 70 L198 91 L219 108 V258 H207 V278 H190 L178 286 H59 L41 278 H27 H0" stroke="#4de3ed" stroke-width="5" opacity=".5" filter="url(#glow)"/>
-    <path d="M0 64 H155 L177 70 L198 91 L219 108 V258 H207 V278 H190 L178 286 H59 L41 278 H27 H0" stroke="url(#cyan)" stroke-width="3"/>
+  <g fill="none" stroke-linecap="butt" stroke-linejoin="miter">
+    <!-- The thin top/bottom rails enter the glowing sections at their centerlines. -->
+    <g stroke="#4de3ed" stroke-width="5" opacity=".5" filter="url(#glow)">
+      <path d="M155 64 L177 70 L198 91 L219 108 V258 H207 V278 H190 L178 286 H59 L41 278 H27"/>
+    </g>
+    <path d="M155 64 L177 70 L198 91 L219 108 V258 H207 V278 H190 L178 286 H59 L41 278 H27" stroke="url(#cyan)" stroke-width="3"/>
+
+    <g stroke="#54dce7" stroke-width="1" opacity=".7">
+      <path d="M0 64 H155"/>
+      <path d="M0 278 H27"/>
+    </g>
+
+    <!-- Secondary unlit glints remain 1px and 70% opaque. -->
     <path d="M0 62.8 H154" stroke="#c9fdff" stroke-width="1" opacity=".7"/>
     <path d="M177 72 L198 93 L217 109 V255" stroke="#b9fbff" stroke-width="1" opacity=".7"/>
     <path d="M60 284 H178 L190 276 H204" stroke="#9df5fb" stroke-width="1" opacity=".7"/>
