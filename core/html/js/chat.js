@@ -263,18 +263,18 @@ function messagePanelOutline(rawHeight) {
         'L 1286 29',
         'L 1320 37',
         'L 1350 43',
-        `L 1350 ${height - 5}`,
-        `L 1064 ${height - 5}`,
-        `L 1038 ${height - 13}`,
-        `L 1020 ${height - 20}`,
-        `L 1004 ${height - 23}`,
-        `L 780 ${height - 26}`,
-        `L 575 ${height - 30}`,
-        `L 365 ${height - 34}`,
-        `L 150 ${height - 38}`,
-        `L 78 ${height - 39}`,
-        `L 38 ${height - 46}`,
-        `L 0 ${height - 62}`,
+        `L 1350 ${height - 4}`,
+        `L 1064 ${height - 4}`,
+        `L 1038 ${height - 11}`,
+        `L 1020 ${height - 17}`,
+        `L 1004 ${height - 5}`,
+        `L 780 ${height - 8}`,
+        `L 575 ${height - 10}`,
+        `L 365 ${height - 12}`,
+        `L 150 ${height - 14}`,
+        `L 78 ${height - 15}`,
+        `L 38 ${height - 20}`,
+        `L 0 ${height - 36}`,
         'Z',
     ].join(' ');
 }
@@ -283,7 +283,7 @@ function messagePanelHighlight(rawHeight) {
     const height = Math.max(90, Math.round(rawHeight));
     return [
         'M 2 2 L 20 2 L 58 6 L 330 14 L 365 15',
-        `M 2 ${height - 62} L 38 ${height - 46} L 78 ${height - 39} L 140 ${height - 38}`,
+        `M 2 ${height - 36} L 38 ${height - 20} L 78 ${height - 15} L 140 ${height - 14}`,
     ].join(' ');
 }
 
