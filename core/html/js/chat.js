@@ -182,15 +182,16 @@ function line(entry) {
 // YouTube, а разные ники читаются одинаково.
 function authorHead(entry) {
     const name = entry.user ?? '—';
+    const label = el('span', {class: 'msg__author'}, [name]);
     const logo = serviceLogo(entry.plugin, 16);
     if (!logo) {
-        return el('span', {class: 'msg__author'}, [name]);
+        return [label];
     }
 
     const icon = el('span', {class: 'msg__service', title: serviceTitle(entry)});
     icon.append(logo);
 
-    return el('span', {class: 'msg__author'}, [icon, name]);
+    return [icon, label];
 }
 
 // serviceTitle is the name of the service for the tooltip: значок без подписи —
@@ -230,7 +231,7 @@ function messagePanel(notice, head, content) {
     // two neutral body cells, then the asymmetric bottom rail and corner.
     const frameParts = [
         'logo', 'author', 'author-cap', 'top-rail', 'top-right',
-        'left-rail', 'content-left', 'content-right', 'right-rail',
+        'left-rail', 'right-rail',
         'bottom-left', 'bottom-short', 'bottom-rail', 'bottom-right',
     ];
     const frame = el('div', {class: 'msg__frame', 'aria-hidden': 'true'},

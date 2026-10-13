@@ -148,12 +148,14 @@
   padding: 14px 20px 22px
   scroll-behavior: auto
 
-  // X-COM frame: 13 SVG slices arranged as a CSS Grid.
-  // The nickname track is content-sized; the long rails flex and the side rails stretch.
+  // X-COM frame: 11 SVG slices and a CSS-filled center, arranged as a 5x3 grid.
+  // Corner mosaics stay fixed; the author rail and horizontal rails flex; side rails stretch vertically.
   .msg
+    --hud-left-cap: 72px
+    --hud-right-cap: 84px
     position: relative
     display: grid
-    grid-template-columns: 72px fit-content(260px) 32px minmax(40px, 1fr) 84px
+    grid-template-columns: var(--hud-left-cap) fit-content(260px) 32px minmax(40px, 1fr) var(--hud-right-cap)
     grid-template-rows: 64px minmax(52px, auto) 24px
     min-width: 0
     margin-bottom: 18px
@@ -167,7 +169,7 @@
     &:last-child
       margin-bottom: 0
 
-    // These wrappers are semantic groups; their children participate in the outer grid.
+    // The frame/header wrappers expose their children as direct grid items.
     .msg__frame,
     .msg__panel,
     .msg__head
@@ -184,8 +186,7 @@
       background-repeat: no-repeat
       background-size: 100% 100%
 
-    // Top row: 1 logo corner, 2 variable-width author rail, 3 closing cap,
-    // 4 flexible rail, 5 upper-right mosaic corner.
+    // Top row: logo corner, variable-width author plate, end cap, flexible rail, mosaic.
     .msg__edge--logo
       grid-area: 1 / 1
       background-image: url("../images/xcom-frame-01-logo.svg")
@@ -206,41 +207,33 @@
       grid-area: 1 / 5
       background-image: url("../images/xcom-frame-05-top-right.svg")
 
-    // Middle row: side rails grow with message height; center is two neutral cells.
+    // Middle row: the side rails are the only sliced artwork here.
     .msg__edge--left-rail
       grid-area: 2 / 1
       background-image: url("../images/xcom-frame-06-left-rail.svg")
 
-    .msg__edge--content-left
-      grid-area: 2 / 2
-      background-image: url("../images/xcom-frame-07-content-left.svg")
-
-    .msg__edge--content-right
-      grid-area: 2 / 3 / 3 / 5
-      background-image: url("../images/xcom-frame-08-content-right.svg")
-
     .msg__edge--right-rail
       grid-area: 2 / 5
-      background-image: url("../images/xcom-frame-09-right-rail.svg")
+      background-image: url("../images/xcom-frame-07-right-rail.svg")
 
-    // Bottom row: fixed corner, short fixed rail, flexible rail, fixed corner.
+    // Bottom row: fixed corners and short pieces around one flexible rail.
     .msg__edge--bottom-left
       grid-area: 3 / 1
-      background-image: url("../images/xcom-frame-10-bottom-left.svg")
+      background-image: url("../images/xcom-frame-08-bottom-left.svg")
 
     .msg__edge--bottom-short
       grid-area: 3 / 2
-      background-image: url("../images/xcom-frame-11-bottom-short.svg")
+      background-image: url("../images/xcom-frame-09-bottom-short.svg")
 
     .msg__edge--bottom-rail
       grid-area: 3 / 3 / 4 / 5
-      background-image: url("../images/xcom-frame-12-bottom-rail.svg")
+      background-image: url("../images/xcom-frame-10-bottom-rail.svg")
 
     .msg__edge--bottom-right
       grid-area: 3 / 5
-      background-image: url("../images/xcom-frame-13-bottom-right.svg")
+      background-image: url("../images/xcom-frame-11-bottom-right.svg")
 
-    // Header items sit over slices 1 and 2, not inside an image.
+    // Service logo and nickname are separate grid cells.
     .msg__service
       grid-area: 1 / 1
       z-index: 2
@@ -275,13 +268,20 @@
       color: #6edce6
       font-weight: 500
 
-    // Text content is a real HTML grid item spanning the two middle art cells.
+    // The center fill is CSS, not an SVG: it can stretch without distorting artwork.
     .msg__body
       grid-area: 2 / 1 / 3 / 6
       position: relative
       z-index: 2
       min-width: 0
       padding: 8px 23px 12px
+
+      &::before
+        content: ""
+        position: absolute
+        inset: 0 var(--hud-right-cap) 0 var(--hud-left-cap)
+        z-index: -1
+        background: linear-gradient(155deg, rgba(10, 27, 33, .98), rgba(4, 13, 17, .99) 66%, rgba(3, 10, 14, .99))
 
     .msg__rule
       position: relative
@@ -338,7 +338,9 @@
 
   @media (max-width: 720px)
     .msg
-      grid-template-columns: 52px fit-content(140px) 24px minmax(24px, 1fr) 60px
+      --hud-left-cap: 52px
+      --hud-right-cap: 60px
+      grid-template-columns: var(--hud-left-cap) fit-content(140px) 24px minmax(24px, 1fr) var(--hud-right-cap)
 
       .msg__service
         margin-left: 14px
