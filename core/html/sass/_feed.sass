@@ -172,182 +172,72 @@
       // Independent top and bottom rails need dedicated clear zones around text.
       padding: 70px 23px 40px
 
-    // Segmented HUD frame. Corner geometry is fixed; long rails use both
-    // edges (or percentages) so they stretch without warping their bevels.
+    // Three SVG pieces: fixed left/right caps and a flexible center rail.
+    // The SVGs are flat 2D artwork; rotation belongs to the surrounding layout.
     .msg__frame
       position: absolute
       inset: 0
       z-index: 0
-      width: 100%
-      height: 100%
-      overflow: visible
-      pointer-events: none
-    .msg__edge
-      position: absolute
-      z-index: 2
-      display: block
-      height: 1.6px
-      border: 0
-      border-radius: 1px
-      background: linear-gradient(90deg, var(--hud-glint), var(--hud-accent) 38%, var(--hud-accent))
-      box-shadow: 0 0 2px rgba(75, 221, 234, .25)
-      transform-origin: left center
       pointer-events: none
 
-    // This is only the dark glass fill; every visible contour is a separate
-    // line element below, so the corners can be tuned individually.
+    .msg__edge
+      position: absolute
+      display: block
+      pointer-events: none
+
+    // Dark fill follows the same silhouette as the three SVG line pieces.
     .msg__edge--fill
       inset: 0
       z-index: 0
-      height: auto
-      border-radius: 0
-      background: linear-gradient(155deg, rgba(10, 27, 33, .97), rgba(4, 13, 17, .985) 66%, rgba(3, 10, 14, .99))
-      box-shadow: none
-      clip-path: polygon(0 5px, 1% 5px, 4.2% 13px, 25.5% 34px, 28.2% 35px, 32% 53px, 35.7% 54px, 92.5% 65px, 95% 65px, 99% 81px, 99% calc(100% - 11px), 78.3% calc(100% - 11px), 75% calc(100% - 24px), 71.5% calc(100% - 24px), 9.2% calc(100% - 33px), 4.2% calc(100% - 33px), 0 calc(100% - 59px))
+      background: linear-gradient(155deg, rgba(10, 27, 33, .98), rgba(4, 13, 17, .99) 66%, rgba(3, 10, 14, .99))
+      clip-path: polygon(
+        0 6.7%,
+        8px 6.7%,
+        8px 1%,
+        31px 1%,
+        64px 4%,
+        217px 10.3%,
+        239px 12%,
+        258px 18.3%,
+        280px 21.3%,
+        calc(100% - 240px) 21.3%,
+        calc(100% - 85px) 21.3%,
+        calc(100% - 63px) 23.3%,
+        calc(100% - 42px) 30.3%,
+        calc(100% - 21px) 36%,
+        calc(100% - 21px) 86%,
+        calc(100% - 33px) 86%,
+        calc(100% - 33px) 92.7%,
+        calc(100% - 50px) 92.7%,
+        calc(100% - 62px) 95.3%,
+        calc(100% - 181px) 95.3%,
+        calc(100% - 199px) 92.7%,
+        calc(100% - 213px) 92.7%,
+        calc(100% - 240px) 92.7%,
+        280px 92.7%,
+        88px 92.7%,
+        42px 89.3%,
+        8px 77%,
+        0 77%
+      )
 
-    // Upper-left lip and long climbing shelf.
-    .msg__edge--left-vertical
-      left: 0
-      top: 5px
-      bottom: 59px
-      width: 1.6px
-      height: auto
-      border-radius: 0
-      background: linear-gradient(180deg, var(--hud-glint), var(--hud-accent) 18%, var(--hud-accent))
+    // End caps keep fixed width. The center asset stretches horizontally only.
+    .msg__edge--left
+      inset: 0 auto 0 0
+      z-index: 1
+      width: 280px
+      background: url("../images/xcom-frame-left.svg") center / 100% 100% no-repeat
 
-    .msg__edge--top-left-cap
-      left: .8%
-      top: 5px
-      width: 3.2%
-      transform: rotate(4deg)
-      background: linear-gradient(90deg, #d7fdff, var(--hud-accent))
+    .msg__edge--middle
+      inset: 0 240px 0 280px
+      z-index: 1
+      background: url("../images/xcom-frame-middle.svg") center / 100% 100% no-repeat
 
-    .msg__edge--top-left-slope
-      left: 5%
-      top: 8px
-      width: 20.5%
-      transform: rotate(5.5deg)
-
-    .msg__edge--top-left-tip
-      left: 25.5%
-      top: 32px
-      width: 2.8%
-      transform: rotate(2deg)
-
-    .msg__edge--top-step-diagonal
-      left: 28.2%
-      top: 33px
-      width: 4%
-      transform: rotate(22deg)
-      background: linear-gradient(90deg, var(--hud-accent), #8af4fc)
-
-    .msg__edge--top-step-cap
-      left: 32%
-      top: 51px
-      width: 3.7%
-      background: linear-gradient(90deg, #a5f7fc, var(--hud-accent))
-
-    .msg__edge--top-main
-      left: 35.7%
-      right: 7.5%
-      top: 53px
-      transform: rotate(.95deg)
-      background: linear-gradient(90deg, var(--hud-accent), rgba(72, 200, 213, .9) 65%, var(--hud-accent))
-
-    .msg__edge--top-right-cap
-      right: 5%
-      top: 64px
-      width: 2.5%
-      transform: rotate(1deg)
-
-    .msg__edge--top-right-diagonal
-      right: 1%
-      top: 65px
-      width: 4.5%
-      transform: rotate(16deg)
-      background: linear-gradient(90deg, var(--hud-accent), #9bf7fc)
-
-    .msg__edge--right-vertical
-      right: 1%
-      top: 81px
-      bottom: 11px
-      width: 1.6px
-      height: auto
-      border-radius: 0
-      background: linear-gradient(180deg, var(--hud-accent), #4ecbd7 70%, var(--hud-glint))
-
-    // Lower-left return, long flexible shelf, then the short center bevel.
-    .msg__edge--bottom-left-diagonal
-      left: 0
-      bottom: 59px
-      width: 51px
-      transform: rotate(28deg)
-
-    .msg__edge--bottom-left-cap
-      left: 4.2%
-      bottom: 33px
-      width: 5%
-      transform: rotate(2deg)
-      background: linear-gradient(90deg, #b5fbff, var(--hud-accent))
-
-    .msg__edge--bottom-main
-      left: 9.2%
-      right: 28.5%
-      bottom: 33px
-      transform: rotate(.65deg)
-      background: linear-gradient(90deg, var(--hud-accent), rgba(61, 183, 196, .95) 84%, var(--hud-accent))
-
-    .msg__edge--bottom-middle-cap
-      left: 71.5%
-      bottom: 24px
-      width: 3.5%
-
-    .msg__edge--bottom-middle-diagonal
-      left: 75%
-      bottom: 24px
-      width: 3.5%
-      transform: rotate(20deg)
-      background: linear-gradient(90deg, var(--hud-accent), #9bf7fc)
-
-    .msg__edge--bottom-right-main
-      left: 78.3%
-      right: 1%
-      bottom: 11px
-      background: linear-gradient(90deg, #7beaf2, var(--hud-accent) 48%, #c6fcff)
-
-    // Short specular strokes on selected segments, not extra free-floating lines.
-    .msg__edge--top-glint
-      left: .8%
-      top: 4px
-      width: 3%
-      height: 1.4px
-      background: #d7fdff
-      box-shadow: 0 0 4px rgba(176, 250, 255, .55)
-
-    .msg__edge--bottom-left-glint
-      left: 4.3%
-      bottom: 32px
-      width: 3.4%
-      height: 1.2px
-      background: #b9fbff
-      box-shadow: 0 0 3px rgba(176, 250, 255, .45)
-
-    .msg__edge--bottom-right-glint
-      left: 78.5%
-      right: 1%
-      bottom: 10px
-      height: 1.2px
-      background: linear-gradient(90deg, rgba(196, 252, 255, .06), #9af5fb)
-
-    .msg__edge--right-glint
-      right: 1px
-      top: 99px
-      bottom: 22px
-      width: 1px
-      height: auto
-      border-radius: 0
-      background: linear-gradient(180deg, transparent, #9bf7fc 46%, transparent)
-      box-shadow: 0 0 4px rgba(105, 231, 242, .35)
+    .msg__edge--right
+      inset: 0 0 0 auto
+      z-index: 1
+      width: 240px
+      background: url("../images/xcom-frame-right.svg") center / 100% 100% no-repeat
 
     .msg__head
       display: flex
