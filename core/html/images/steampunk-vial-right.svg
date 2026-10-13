@@ -36,7 +36,7 @@
     </g>
     <path d="M20 38V57M20 62V84" stroke="#a8f5ff" stroke-opacity=".7" stroke-width="1.6"/>
     <path d="M37 38V54M37 78V86" stroke="#e4c47c" stroke-opacity=".5" stroke-width="1"/>
-    <path d="M16 61C21 57 25 64 30 61C34 58 39 61 44 59V98H16Z" stroke="#47dff7" stroke-opacity=".45" stroke-width="3" filter="url(#aqua-glow-r)"/>
+    <path d="M16 61C21 57 25 64 30 61C34 58 39 61 44 59V98H16Z" fill="none" stroke="#47dff7" stroke-opacity=".45" stroke-width="3" filter="url(#aqua-glow-r)"/>
     <path d="M15 29H45V35H15Z" fill="#301d0f" stroke="url(#brass-r)" stroke-width="2"/>
     <path d="M17 31H43M17 34H43" stroke="#f1cf82" stroke-opacity=".7" stroke-width=".8"/>
     <path d="M15 88H45V95H15Z" fill="#301d0f" stroke="url(#brass-r)" stroke-width="2"/>
