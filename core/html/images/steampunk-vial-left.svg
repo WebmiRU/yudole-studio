@@ -1,0 +1,62 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="56" height="126" viewBox="0 0 56 126" fill="none">
+  <defs>
+    <linearGradient id="brass" x1="8" y1="8" x2="45" y2="100" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#f2d58f"/><stop offset=".24" stop-color="#ad7838"/><stop offset=".48" stop-color="#4a2b15"/><stop offset=".69" stop-color="#d7ac61"/><stop offset="1" stop-color="#6b431d"/>
+    </linearGradient>
+    <linearGradient id="glass" x1="15" y1="38" x2="42" y2="85" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#071921" stop-opacity=".98"/><stop offset=".5" stop-color="#0c3543" stop-opacity=".92"/><stop offset="1" stop-color="#06151b" stop-opacity=".98"/>
+    </linearGradient>
+    <linearGradient id="fluid" x1="18" y1="61" x2="39" y2="96" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#68efff" stop-opacity=".92"/><stop offset=".48" stop-color="#168da9" stop-opacity=".94"/><stop offset="1" stop-color="#064253"/>
+    </linearGradient>
+    <filter id="aqua-glow" x="-60%" y="-40%" width="220%" height="180%">
+      <feGaussianBlur stdDeviation="2.2"/>
+    </filter>
+    <clipPath id="vial-clip">
+      <path d="M21 29H35C39 29 41 32 41 37V86C41 94 37 99 30 99C23 99 19 94 19 86V37C19 32 17 29 21 29Z"/>
+    </clipPath>
+  </defs>
+  <g stroke-linecap="round" stroke-linejoin="round">
+    <!-- Copper feed pipe and threaded collars -->
+    <path d="M29 0V14M29 105V126" stroke="#1b110a" stroke-width="8"/>
+    <path d="M29 0V14M29 105V126" stroke="url(#brass)" stroke-width="5"/>
+    <path d="M27.5 1V12M27.5 109V124" stroke="#f5d995" stroke-opacity=".7" stroke-width="1"/>
+    <path d="M20 11H38V21L35 25H23L20 21Z" fill="#24170d" stroke="url(#brass)" stroke-width="2"/>
+    <path d="M20 15H38M21 19H37" stroke="#d2a15a" stroke-width="1"/>
+    <circle cx="23" cy="17" r="1.4" fill="#f8df9d"/><circle cx="35" cy="17" r="1.4" fill="#f8df9d"/>
+    <!-- Glass cylinder -->
+    <path d="M21 25H35C40 25 43 30 43 36V86C43 96 38 103 30 103C22 103 17 96 17 86V36C17 30 16 25 21 25Z" fill="#100d0a" stroke="#442911" stroke-width="3"/>
+    <path d="M21 29H35C39 29 41 32 41 37V86C41 94 37 99 30 99C23 99 19 94 19 86V37C19 32 17 29 21 29Z" fill="url(#glass)" stroke="#c59a52" stroke-width="1.5"/>
+    <g clip-path="url(#vial-clip)">
+      <path d="M16 61C21 57 25 64 30 61C34 58 39 61 44 59V103H16Z" fill="url(#fluid)"/>
+      <path d="M16 61C21 57 25 64 30 61C34 58 39 61 44 59" stroke="#94f6ff" stroke-width="1.4"/>
+      <path d="M24 68V87" stroke="#6eeaff" stroke-opacity=".7" stroke-width="2.2"/>
+      <path d="M27 70V81" stroke="#d5fbff" stroke-opacity=".65" stroke-width=".8"/>
+      <g fill="#9bf5ff">
+        <circle cx="33" cy="72" r="1.5" opacity=".8"/><circle cx="29" cy="82" r="1" opacity=".75"/><circle cx="35" cy="89" r="1.8" opacity=".6"/><circle cx="25" cy="92" r=".8" opacity=".8"/>
+      </g>
+    </g>
+    <path d="M20 38V57M20 62V84" stroke="#a8f5ff" stroke-opacity=".7" stroke-width="1.6"/>
+    <path d="M37 38V54M37 78V86" stroke="#e4c47c" stroke-opacity=".5" stroke-width="1"/>
+    <!-- Bright liquid halo, held to the glass interior -->
+    <path d="M16 61C21 57 25 64 30 61C34 58 39 61 44 59V98H16Z" stroke="#47dff7" stroke-opacity=".45" stroke-width="3" filter="url(#aqua-glow)"/>
+    <!-- Clamp rings -->
+    <path d="M15 29H45V35H15Z" fill="#301d0f" stroke="url(#brass)" stroke-width="2"/>
+    <path d="M17 31H43M17 34H43" stroke="#f1cf82" stroke-opacity=".7" stroke-width=".8"/>
+    <path d="M15 88H45V95H15Z" fill="#301d0f" stroke="url(#brass)" stroke-width="2"/>
+    <path d="M17 90H43M18 93H42" stroke="#f1cf82" stroke-opacity=".65" stroke-width=".8"/>
+    <path d="M20 101H40L37 108H23Z" fill="#25170d" stroke="url(#brass)" stroke-width="2"/>
+    <path d="M24 104H36" stroke="#e7c478" stroke-width="1"/>
+    <!-- Small side valve and toothed gauge -->
+    <path d="M17 49H9V54H17" stroke="url(#brass)" stroke-width="3"/>
+    <circle cx="8.5" cy="57" r="7" fill="#18110a" stroke="url(#brass)" stroke-width="2"/>
+    <circle cx="8.5" cy="57" r="4.1" fill="#30200f" stroke="#d6ad65" stroke-width="1"/>
+    <path d="M8.5 53.5V60.5M5 57H12M6 54.5L11 59.5M11 54.5L6 59.5" stroke="#e8c981" stroke-width=".8"/>
+    <circle cx="8.5" cy="57" r="1.2" fill="#6aeaff"/>
+    <path d="M43 72H49V76H43" stroke="url(#brass)" stroke-width="2.5"/>
+    <circle cx="49" cy="74" r="2.4" fill="#201309" stroke="#d7b16d" stroke-width="1.1"/>
+    <!-- Rivets in the metal foot -->
+    <circle cx="19" cy="32" r="1.05" fill="#ffe7a9"/><circle cx="41" cy="32" r="1.05" fill="#ffe7a9"/>
+    <circle cx="19" cy="92" r="1.05" fill="#ffe7a9"/><circle cx="41" cy="92" r="1.05" fill="#ffe7a9"/>
+  </g>
+</svg>

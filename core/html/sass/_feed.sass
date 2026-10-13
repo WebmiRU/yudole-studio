@@ -148,13 +148,221 @@
   padding: 14px 20px 22px
   scroll-behavior: auto
 
-  // Между сообщениями двадцать пикселей. В общий блок это не годится: там же
-  // живут тосты, у которых промежуток задаёт раскладка стопки.
+  // Steampunk message prototype: fixed glass ampoules, flexible brass rails,
+  // and a content-sized panel. Decorative SVGs keep their own aspect ratio.
   .msg
+    display: grid
+    grid-template-columns: 56px minmax(0, 1fr) 56px
+    grid-template-rows: 14px auto 14px
+    width: fit-content
+    max-width: 100%
+    min-width: min(320px, 100%)
     margin-bottom: 20px
+    padding: 0
+    border: 0
+    background: transparent
+    isolation: isolate
 
     &:last-child
       margin-bottom: 0
+
+    // Side shells stretch vertically, but the glass ampoule within each remains fixed-size.
+    .msg__side
+      position: relative
+      display: flex
+      align-items: center
+      justify-content: center
+      grid-row: 1 / 4
+      min-width: 0
+      min-height: 112px
+      overflow: visible
+      z-index: 1
+
+      &::before
+        content: ""
+        position: absolute
+        top: 0
+        bottom: 0
+        left: 50%
+        width: 6px
+        transform: translateX(-50%)
+        border-right: 1px solid rgba(222, 179, 99, .8)
+        border-left: 1px solid rgba(79, 46, 20, .95)
+        background: linear-gradient(90deg, #20150e, #b88743 28%, #f2d18b 47%, #68411d 72%, #160f0a)
+        box-shadow: 0 0 5px rgba(183, 133, 54, .18)
+
+    .msg__side--left
+      grid-column: 1
+
+    .msg__side--right
+      grid-column: 3
+
+    .msg__vial
+      position: relative
+      z-index: 1
+      display: block
+      flex: none
+      width: 48px
+      height: 108px
+      background-position: center
+      background-repeat: no-repeat
+      background-size: contain
+      filter: drop-shadow(0 2px 4px rgba(0, 0, 0, .72))
+
+    .msg__vial--left
+      background-image: url("../images/steampunk-vial-left.svg")
+
+    .msg__vial--right
+      background-image: url("../images/steampunk-vial-right.svg")
+
+    // Top and bottom brass rails are CSS gradients, not stretched pictures.
+    .msg__rail
+      position: relative
+      z-index: 0
+      min-width: 0
+      background:
+        linear-gradient(180deg, #e3c37c 0, #8e612c 20%, #29190e 58%, #b1813e 80%, #f0ce83 100%)
+      box-shadow: 0 0 0 1px rgba(10, 7, 4, .95), inset 0 1px 0 rgba(255, 235, 170, .4), inset 0 -1px 0 rgba(11, 7, 4, .92)
+
+      &::before
+        content: ""
+        position: absolute
+        inset: 3px 0 auto
+        height: 1px
+        background: linear-gradient(90deg, transparent, rgba(255, 226, 157, .9) 16%, rgba(238, 200, 120, .45) 50%, rgba(255, 226, 157, .9) 84%, transparent)
+
+      &::after
+        content: ""
+        position: absolute
+        inset: 0
+        pointer-events: none
+        background-image: radial-gradient(circle, #f2d694 0 1px, #5c3718 1.6px, transparent 2.5px)
+        background-position: 14px center
+        background-size: 34px 100%
+        opacity: .8
+
+    .msg__rail--top
+      grid-area: 1 / 2
+      border-top: 1px solid #e7c782
+      border-bottom: 1px solid #3d2512
+
+    .msg__rail--bottom
+      grid-area: 3 / 2
+      border-top: 1px solid #3d2512
+      border-bottom: 1px solid #d5ad67
+      background:
+        linear-gradient(180deg, #5f3b1b 0, #21150c 43%, #a57436 76%, #d6b36b 100%)
+
+      &::before
+        inset: auto 0 3px
+        background: linear-gradient(90deg, transparent, rgba(255, 226, 157, .62) 16%, rgba(238, 200, 120, .3) 50%, rgba(255, 226, 157, .62) 84%, transparent)
+
+    // Central plate expands with its content; its edges remain metallic instead of scaling.
+    .msg__panel
+      grid-area: 2 / 2
+      position: relative
+      z-index: 1
+      min-width: 0
+      padding: 10px 14px 12px
+      border-right: 1px solid #8e672f
+      border-left: 1px solid #8e672f
+      background: linear-gradient(135deg, rgba(29, 23, 17, .98), rgba(10, 12, 13, .99) 50%, rgba(23, 17, 11, .98))
+      box-shadow: inset 0 1px 0 rgba(255, 219, 143, .08), inset 0 0 18px rgba(0, 0, 0, .82)
+
+      &::before
+        content: ""
+        position: absolute
+        inset: 0
+        z-index: -1
+        pointer-events: none
+        background-image: repeating-linear-gradient(135deg, rgba(205, 166, 98, .025) 0 1px, transparent 1px 6px)
+
+    .msg__head
+      display: flex
+      align-items: center
+      gap: 8px
+      min-width: 0
+      min-height: 20px
+      color: #e9d09a
+
+    .msg__author
+      min-width: 0
+      color: #f0d9a7
+      font-size: 14px
+      font-weight: 700
+      letter-spacing: .025em
+      text-shadow: 0 1px 2px rgba(0, 0, 0, .9), 0 0 7px rgba(213, 161, 75, .12)
+
+    .msg__author--plugin
+      color: #c7a66c
+      font-weight: 600
+
+    .msg__service
+      flex: none
+      line-height: 0
+      filter: drop-shadow(0 0 3px rgba(73, 203, 233, .3))
+
+    .msg__rule
+      position: relative
+      height: 2px
+      margin: 7px 0 10px
+      border-top: 1px solid rgba(200, 154, 79, .8)
+      border-bottom: 1px solid rgba(41, 27, 14, .95)
+      background: linear-gradient(90deg, rgba(41, 27, 14, .8), rgba(80, 176, 187, .66) 24%, rgba(32, 123, 141, .7) 50%, rgba(80, 176, 187, .45) 76%, rgba(41, 27, 14, .8))
+
+      &::after
+        content: ""
+        position: absolute
+        top: -3px
+        left: 18px
+        width: 5px
+        height: 5px
+        border: 1px solid #d7b16e
+        border-radius: 50%
+        background: #4ec8df
+        box-shadow: 0 0 5px rgba(67, 202, 228, .6)
+
+    .msg__text
+      min-width: 0
+      color: #e2d8c3
+      font-size: 15px
+      line-height: 1.5
+      white-space: pre-wrap
+      word-break: break-word
+      text-shadow: 0 1px 1px rgba(0, 0, 0, .72)
+
+    .msg__channel
+      color: #f4d18b
+      font-weight: 700
+
+    &[data-severity="info"],
+    &[data-severity="success"],
+    &[data-severity="warning"],
+    &[data-severity="error"]
+      .msg__text
+        color: #cbbda2
+
+    &.is-notice
+      .msg__panel
+        border-left-color: #735c36
+        border-right-color: #735c36
+
+  @media (max-width: 720px)
+    .msg
+      grid-template-columns: 44px minmax(0, 1fr) 44px
+      min-width: min(270px, 100%)
+
+      .msg__side
+        min-height: 100px
+
+      .msg__vial
+        width: 42px
+        height: 95px
+
+      .msg__panel
+        padding: 8px 9px 10px
+
+
 
 // --- Подвал -----------------------------------------------------------------
 

@@ -206,16 +206,37 @@ function serviceTitle(entry) {
 function richBlock(entry, severity, head, html, notice = false) {
     const text = el('div', {class: 'msg__text'});
     text.innerHTML = html;
-
-    return el('article', noticeAttrs(notice), [
-        el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
-        el('div', {class: 'msg__rule'}),
-        text,
-    ]);
+    return framedMessage(notice, head, text);
 }
 
 // block is the shape of every message: who wrote it, a rule under the name, and
 // then the text itself.
+
+/*
+ * Keep all metallic decoration outside the content box. The vial drawings have
+ * a fixed aspect ratio while their brass rails span the entire message height.
+ */
+function framedMessage(notice, head, content) {
+    const panel = el('div', {class: 'msg__panel'}, [
+        el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
+        el('div', {class: 'msg__rule', 'aria-hidden': 'true'}),
+        content,
+    ]);
+    const side = (position) => el(
+        'span',
+        {class: `msg__side msg__side--${position}`, 'aria-hidden': 'true'},
+        [el('span', {class: `msg__vial msg__vial--${position}`})],
+    );
+
+    return el('article', noticeAttrs(notice), [
+        side('left'),
+        el('span', {class: 'msg__rail msg__rail--top', 'aria-hidden': 'true'}),
+        panel,
+        side('right'),
+        el('span', {class: 'msg__rail msg__rail--bottom', 'aria-hidden': 'true'}),
+    ]);
+}
+
 function block(entry, severity, head, text, notice = false) {
     // Текст собирается из кусков, а куски лежат в массивах: расплющиваем
     // насколько угодно глубоко, иначе в блок попадёт сам массив.
@@ -226,15 +247,10 @@ function block(entry, severity, head, text, notice = false) {
         return null;
     }
 
-    return el('article', noticeAttrs(notice), [
-        // Полоска стоит между автором и текстом, а не рядом с автором: шапка
-        // выстроена в строку, и внутри неё полоска легла бы вбок.
-        el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
-        el('div', {class: 'msg__rule'}),
-        el('div', {class: 'msg__text'}, body.map((piece) => (
-            typeof piece === 'string' ? document.createTextNode(piece) : piece
-        ))),
-    ]);
+    const content = el('div', {class: 'msg__text'}, body.map((piece) => (
+        typeof piece === 'string' ? document.createTextNode(piece) : piece
+    )));
+    return framedMessage(notice, head, content);
 }
 
 // noticeAttrs — как выглядит служебное сообщение. Отметка нужна и на блоке,
