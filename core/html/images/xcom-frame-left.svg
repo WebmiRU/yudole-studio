@@ -1,0 +1,26 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 280 300" width="280" height="300">
+  <defs>
+    <filter id="glow" x="-30%" y="-30%" width="160%" height="160%" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="2.3"/>
+    </filter>
+    <linearGradient id="cyan" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#c9fdff"/>
+      <stop offset=".19" stop-color="#59e6ef"/>
+      <stop offset=".78" stop-color="#35bac7"/>
+      <stop offset="1" stop-color="#7ceef5"/>
+    </linearGradient>
+  </defs>
+  <g fill="none" stroke-linecap="square" stroke-linejoin="miter">
+    <g stroke="#4de3ed" stroke-width="5" opacity=".48" filter="url(#glow)">
+      <path d="M8 20 V3 H31 L64 12 L217 31 L239 36 L258 55 L280 64"/>
+      <path d="M8 20 V231 L42 268 L88 278 H280"/>
+    </g>
+    <g stroke="url(#cyan)" stroke-width="2.2">
+      <path d="M8 20 V3 H31 L64 12 L217 31 L239 36 L258 55 L280 64"/>
+      <path d="M8 20 V231 L42 268 L88 278 H280"/>
+    </g>
+    <path d="M10 5 H31 L64 14 L217 33" stroke="#d4fdff" stroke-width="1.1" opacity=".94"/>
+    <path d="M10 24 V226" stroke="#aaf8ff" stroke-width="1" opacity=".45"/>
+    <path d="M43 266 L88 276 H139" stroke="#aaf8ff" stroke-width="1" opacity=".6"/>
+  </g>
+</svg>
