@@ -1,0 +1,46 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="721" height="264" viewBox="0 0 721 264" fill="none">
+  <title>X-COM HUD frame outline</title>
+  <desc>Continuous geometric contour. Red segments are thick and glowing; blue segments are thinner and unlit.</desc>
+  <defs>
+    <filter id="red-glow" filterUnits="userSpaceOnUse" x="-24" y="-24" width="770" height="312" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="4.2" />
+    </filter>
+    <filter id="red-hot-glow" filterUnits="userSpaceOnUse" x="-24" y="-24" width="770" height="312" color-interpolation-filters="sRGB">
+      <feGaussianBlur stdDeviation="1.8" />
+    </filter>
+  </defs>
+
+  <!-- One complete blue underlay guarantees a connected outline at every join. -->
+  <path id="blue-outline-underlay"
+        d="M 24 14 H 204 L 232 42 H 667 L 694 69 V 249 H 539 L 520 230 H 56 L 24 198 Z"
+        stroke="#1100ff" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round" />
+
+  <!-- The red geometry is repeated for the soft halo and the tight light bloom. -->
+  <g id="red-glow-wide" stroke="#ff1010" stroke-width="18" stroke-linecap="round" stroke-linejoin="round" opacity="0.7" filter="url(#red-glow)">
+    <path d="M 24 14 H 46" />
+    <path d="M 184 14 H 204 L 232 42 H 256" />
+    <path d="M 642 42 H 667 L 694 69 V 249 H 539 L 520 230 H 488" />
+    <path d="M 77 230 H 56 L 24 198 V 14" />
+  </g>
+  <g id="red-glow-tight" stroke="#ff1515" stroke-width="12" stroke-linecap="round" stroke-linejoin="round" opacity="0.68" filter="url(#red-hot-glow)">
+    <path d="M 24 14 H 46" />
+    <path d="M 184 14 H 204 L 232 42 H 256" />
+    <path d="M 642 42 H 667 L 694 69 V 249 H 539 L 520 230 H 488" />
+    <path d="M 77 230 H 56 L 24 198 V 14" />
+  </g>
+
+  <!-- Crisp blue rails; no filter or glow is applied to these sections. -->
+  <g id="blue-rails" stroke="#1600ff" stroke-width="5.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 46 14 H 184" />
+    <path d="M 256 42 H 642" />
+    <path d="M 77 230 H 488" />
+  </g>
+
+  <!-- Red core is drawn last, so color changes overlap cleanly with the blue rails. -->
+  <g id="red-core" stroke="#ff1515" stroke-width="8.2" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 24 14 H 46" />
+    <path d="M 184 14 H 204 L 232 42 H 256" />
+    <path d="M 642 42 H 667 L 694 69 V 249 H 539 L 520 230 H 488" />
+    <path d="M 77 230 H 56 L 24 198 V 14" />
+  </g>
+</svg>
