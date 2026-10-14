@@ -265,13 +265,12 @@ func Validate(message Message) error {
 		message.Kind == KindLog || message.Kind == KindPluginChat ||
 		message.Kind == KindSetOptions
 
-	if len(message.Payload) == 0 || string(message.Payload) == "null" {
+	if len(message.Payload) == 0 {
 		if requiresPayload {
 			return fmt.Errorf("message %q requires a payload", message.Kind)
 		}
 		return nil
 	}
-
 	if string(message.Payload) == "null" {
 		return fmt.Errorf("message %q payload must be an object", message.Kind)
 	}
@@ -312,10 +311,20 @@ func Validate(message Message) error {
 	case KindMessagePublic, KindMessagePrivate:
 		if _, err := textBody(true); err != nil { return err }
 		if err := requireString("channel"); err != nil { return err }
-		user, _ := payload["user"].(map[string]any)
+		user, ok := payload["user"].(map[string]any)
+		if !ok {
+			return fmt.Errorf("message %q requires payload.user object", message.Kind)
+		}
 		name, _ := user["name"].(string)
 		if strings.TrimSpace(name) == "" {
 			return fmt.Errorf("message %q requires payload.user.name", message.Kind)
+		}
+		for _, field := range []string{"id", "login"} {
+			if value, present := user[field]; present {
+				if _, ok := value.(string); !ok {
+					return fmt.Errorf("message %q requires string payload.user.%s", message.Kind, field)
+				}
+			}
 		}
 	case KindSystemMessageWarning, KindError, KindWaiting, KindLog:
 		if _, err := textBody(true); err != nil { return err }

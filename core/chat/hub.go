@@ -163,7 +163,7 @@ func prepareDisplayMessage(kind string, payload map[string]any) {
 	case protocol.KindConnectionState:
 		text = connectionText(state, service, reason)
 	case protocol.KindChannelInfo:
-		text = channelInfoText(label, payload)
+		text = channelInfoText(channel, payload)
 	case protocol.KindMessageDeleted:
 		user, _ := payload["user"].(map[string]any)
 		name, _ := user["name"].(string)
