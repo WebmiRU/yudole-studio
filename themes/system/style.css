@@ -1,6 +1,6 @@
-html, body { min-height: 100%; margin: 0; background: #696969; color: #ededed; }
-.topbar, .statusbar { background: #242424; border-color: #494949; }
-.feed { background: #696969; }
+html, body { min-height: 100%; margin: 0; background: #2a2a2a; color: #ededed; }
+.topbar, .statusbar { background: #1c1c1c; border-color: #494949; }
+.feed { background: #2a2a2a; }
 .feed .msg { border: 1px solid #494949; border-left: 3px solid #8b9aa8; border-radius: 2px; background: #000; }
 .msg__author { color: #d9e2eb; }
 .msg__author--plugin { color: #aeb7c0; }

@@ -165,7 +165,9 @@ func TestProtocolAckRemainsValidJSON(t *testing.T) {
 	if err := json.Unmarshal(line, &envelope); err != nil {
 		t.Fatal(err)
 	}
-	if string(envelope["kind"]) != "\"ack\"" {
+	// Сверяемся с константой, а не с литералом: единый протокол переименовал
+	// kind, и строка "ack" здесь молча устарела бы вместе с ним.
+	if want, _ := json.Marshal(protocol.KindAck); string(envelope["kind"]) != string(want) {
 		t.Fatalf("unexpected protocol envelope: %s", line)
 	}
 }

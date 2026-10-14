@@ -271,7 +271,10 @@ func TestSupervisorKeepsGoingAfterAFailure(t *testing.T) {
 		t.Error("Find returned a plugin that failed to start")
 	}
 
-	supervisor.Broadcast(protocol.MustNew(protocol.KindSetOptions, nil))
+	// set_options обязан нести значения: без payload ядро такой вызов теперь
+// не собирает, и MustNew паникует. Раньше сюда передавался nil, и тест проходил
+// только потому, что проверки не было.
+supervisor.Broadcast(protocol.MustNew(protocol.KindSetOptions, protocol.SetOptionsPayload{}))
 	supervisor.StopAll()
 	if len(supervisor.Names()) != 0 {
 		t.Errorf("plugins after StopAll = %v, want none", supervisor.Names())
