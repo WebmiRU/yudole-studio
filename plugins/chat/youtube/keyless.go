@@ -41,7 +41,7 @@ func htmlEscape(text string) string { return html.EscapeString(text) }
 const (
 	ytBase      = "https://www.youtube.com"
 	ytWatch     = "https://www.youtube.com/watch?v="
-	ytFeeds     = "https://www.youtube.com/feeds/videos.xml?channel_id="
+	ytLivePage  = "https://www.youtube.com/channel/%s/live"
 	ytChatPath  = "/youtubei/v1/live_chat/get_live_chat"
 	ytPageLimit = 2 << 20 // страница эфира с вложениями
 )
@@ -146,83 +146,91 @@ func handleFromURL(raw string) string {
 	return path
 }
 
-// keylessFindLives looks for live streams through the channel's own feed.
+// keylessFindLives looks for live streams on the channels' own /live pages.
 //
-// Фид отдаёт последние пятнадцать видео и стоит копейки: страницу эфира качать
-// приходится только для тех, что в фиде появились впервые. Проверять «живой
-// или запись» приходится на странице: в самом фиде этого нет, а токен чата
-// находится и у завершённых трансляций.
+// Источник эфира — страница /live канала, а не RSS-фид. Фид YouTube отключил:
+// youtube.com/feeds/videos.xml отдаёт 404 на любой channel_id, и проверил это
+// ещё на заведомо верных каналах. На фиде держался весь резервный поиск, и с его
+// отключением плагин без ключа переставал находить эфир вообще — при живом
+// канале он молча крутил searchLoop и не писал в журнал ни слова.
+//
+// Каналов может быть несколько, и channelID — это их перечень через запятую.
+// Старый фид такой список принимал, а страница канала принимает ровно один: на
+// «UC…,…» YouTube отвечает 404. Поэтому спрашиваем каждый канал отдельно и
+// складываем найденное.
 func keylessFindLives(ctx context.Context, channelID string) ([]liveVideo, error) {
-	body, err := ytGet(ctx, ytFeeds+channelID)
-	if err != nil {
-		return nil, err
-	}
-
-	seen := map[string]bool{}
-	order := []string{}
-	titles := map[string]string{}
-	for _, m := range feedVideoRe.FindAllStringSubmatch(string(body), -1) {
-		id := m[1]
-		if seen[id] {
-			continue
+	ids := []string{}
+	for _, one := range strings.Split(channelID, ",") {
+		if one = strings.TrimSpace(one); one != "" {
+			ids = append(ids, one)
 		}
-		seen[id] = true
-		order = append(order, id)
-		titles[id] = m[2]
+	}
+	if len(ids) == 0 {
+		return nil, errChannelNotFound
 	}
 
-	// Свежие сверху, и смотреть дальше смысла нет: эфир, если он идёт, это
-	// одно из последних видео.
-	if len(order) > 4 {
-		order = order[:4]
-	}
-
-	// Проверяем несколько свежих видео параллельно. Последовательная проверка
-	// четырёх страниц добавляла задержки друг к другу: при медленном ответе
-	// YouTube первые сообщения могли ждать суммарное время всех запросов.
-	type pageResult struct {
+	type result struct {
 		page watchPage
 		err  error
 	}
-	pages := make([]pageResult, len(order))
+	results := make([]result, len(ids))
+
 	var wg sync.WaitGroup
-	for i, id := range order {
+	for i, id := range ids {
 		i, id := i, id
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			pages[i].page, pages[i].err = keylessWatchPage(ctx, id)
+
+			// Без &hl=en: с этим параметром YouTube отдаёт для /live облегчённую
+			// страницу — вдвое меньше и вообще без данных плеера, где помечен
+			// идущий эфир. С параметром страница выглядит живой, эфир на ней не
+			// находится, и плагин молча ждёт несуществующего.
+			body, err := ytGet(ctx, fmt.Sprintf(ytLivePage, url.PathEscape(id)))
+			if err != nil {
+				results[i].err = err
+				return
+			}
+			results[i].page = keylessParseWatchPage(string(body))
 		}()
 	}
 	wg.Wait()
+
 	if ctx.Err() != nil {
 		return nil, ctx.Err()
 	}
 
-	lives := make([]liveVideo, 0, len(order))
-	for i, id := range order {
-		result := pages[i]
-		if result.err != nil {
-			logInfo(fmt.Sprintf("Страница %s не открылась: %v", id, result.err))
+	// Канал не в эфире — не ошибка, а «ждать дальше»: searchLoop спросит снова
+	// через searchInterval. Ошибку же одного канала не поднимаем на весь поиск:
+	// второй канал в это время может вещать.
+	lives := make([]liveVideo, 0, len(ids))
+	for i, id := range ids {
+		if results[i].err != nil {
+			logInfo(fmt.Sprintf("Страница эфира канала %s не открылась: %v", id, results[i].err))
 			continue
 		}
-		if !result.page.isLive {
+
+		page := results[i].page
+		if !page.isLive || page.videoID == "" {
 			continue
 		}
-		title := titles[id]
+
+		title := page.title
 		if title == "" {
-			title = result.page.title
+			title = page.videoID
 		}
-		lives = append(lives, liveVideo{ID: id, Title: title, Page: &result.page})
+		lives = append(lives, liveVideo{ID: page.videoID, Title: title, Page: &results[i].page})
 	}
+
 	return lives, nil
 }
 
-var feedVideoRe = regexp.MustCompile(`<yt:videoId>([A-Za-z0-9_-]{11})</yt:videoId>(?s).*?<title>([^<]*)</title>`)
-
 type watchPage struct {
 	isLive bool
-	title  string
+	// videoID — о каком эфире страница. Нужен, когда страница пришла по адресу
+	// канала: на /live id лежит в разметке, а не в самом адресе.
+	videoID string
+	title   string
 	// owner и ownerID — канал, который вещает. Их показываем в ленте, иначе
 	// человек видит вместо канала пустое слово «Канал».
 	owner   string
@@ -236,14 +244,23 @@ type watchPage struct {
 // to read the chat: the liveness, the continuation token and the public
 // InnerTube key, which lies in the page in plain sight.
 func keylessWatchPage(ctx context.Context, videoID string) (watchPage, error) {
-	var page watchPage
-
 	body, err := ytGet(ctx, ytWatch+videoID+"&hl=en")
 	if err != nil {
-		return page, err
+		return watchPage{}, err
 	}
-	html := string(body)
+	return keylessParseWatchPage(string(body)), nil
+}
 
+// keylessParseWatchPage разбирает разметку страницы эфира — что по адресу
+// /watch, что по /live канала. Формат у них один, и отдельный разбор для
+// второго только разошёлся бы с первым.
+//
+// videoID берётся первым в разметке: на странице /live это и есть идущая
+// трансляция, а прошлые эфиры перечислены ниже и в разбор не попадают.
+func keylessParseWatchPage(html string) watchPage {
+	var page watchPage
+
+	page.videoID = firstSubmatch(videoIDRe, html)
 	// Живой эфир отличается двумя признаками сразу: длина нулевая, а рядом
 	// стоит broadcastId. Одного токена мало — он есть и у записей.
 	page.isLive = strings.Contains(html, `"isLive":true`) ||
@@ -259,7 +276,7 @@ func keylessWatchPage(ctx context.Context, videoID string) (watchPage, error) {
 		page.owner = firstSubmatch(legacyName, html)
 	}
 	page.ownerID = firstSubmatch(ownerIDRe, html)
-	return page, nil
+	return page
 }
 
 func firstSubmatch(re *regexp.Regexp, text string) string {
