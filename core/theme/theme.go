@@ -13,14 +13,21 @@ package theme
 import (
 	"encoding/json/v2"
 	"log/slog"
+	"net/http"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 )
 
-// FileName is the manifest inside a theme directory.
-const FileName = "theme.json"
+const (
+	// FileName is the manifest inside a theme directory.
+	FileName = "theme.json"
+
+	// StyleFile is the theme's own stylesheet: кусок разметки со стилем, который
+	// страница вставляет себе в голову.
+	StyleFile = "index.html"
+)
 
 // manifest is what theme.json holds. Только обязательное поле: остальное ядро не
 // знает и не проверяет — оформление разбирает браузер. Файл читается целиком и
@@ -122,6 +129,57 @@ func (c *Catalog) Dir() string {
 		return ""
 	}
 	return c.dir
+}
+
+// Handler отдаёт файлы тем по адресам /themes/<тема>/<файл>.
+//
+// Само оформление лежит в index.html темы — куске разметки со стилем, — а рядом
+// с ним картинки, на которые он ссылается. Отдавать их должен ядро: каталог тем
+// лежит рядом с ним, а не внутри раздаваемой папки html/, и без отдельного
+// маршрута стиль пришлось бы вшивать в сборку.
+//
+// Имя каталога проверяется по списку тем: это не только защита от выхода за
+// пределы themes/, но и запрет отдавать каталоги без theme.json — они не темы,
+// и в списке их нет.
+func Handler(c *Catalog) http.Handler {
+	return http.HandlerFunc(func(rw http.ResponseWriter, r *http.Request) {
+		rest := strings.Trim(strings.TrimPrefix(r.URL.Path, "/themes/"), "/")
+		name, file, _ := strings.Cut(rest, "/")
+
+		if name == "" || !c.Has(name) {
+			http.NotFound(rw, r)
+			return
+		}
+		// Файл не назван — отдаём стиль темы: адрес /themes/<тема> удобнее
+		// длинного index.html, а отдавать каталог списком не нужно.
+		if file == "" {
+			file = StyleFile
+		}
+		// Внутри темы пути не ходят: она плоская, а «../../..» в адресе — это
+		// уже не картинка темы, а чужой файл.
+		if strings.Contains(file, "/") || file == ".." {
+			http.NotFound(rw, r)
+			return
+		}
+
+		full := filepath.Join(c.dir, name, file)
+		info, err := os.Stat(full)
+		if err != nil || info.IsDir() {
+			http.NotFound(rw, r)
+			return
+		}
+
+		f, err := os.Open(full)
+		if err != nil {
+			slog.Error("theme: open file", "theme", name, "file", file, "err", err)
+			http.Error(rw, "theme file is unavailable", http.StatusInternalServerError)
+			return
+		}
+		defer f.Close()
+
+		rw.Header().Set("Cache-Control", "no-store")
+		http.ServeContent(rw, r, file, info.ModTime(), f)
+	})
 }
 
 // Has reports whether a theme with this id exists. Комната хранит тему по

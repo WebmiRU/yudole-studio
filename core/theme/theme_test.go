@@ -1,9 +1,12 @@
 package theme
 
 import (
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -22,6 +25,15 @@ func writeTheme(t *testing.T, dir, name, title string) string {
 		t.Fatalf("write %s: %v", FileName, err)
 	}
 	return full
+}
+
+// writeFile кладёт файл в каталог темы: картинки и стиль.
+func writeFile(t *testing.T, dir, name, file, body string) {
+	t.Helper()
+	full := filepath.Join(dir, name, file)
+	if err := os.WriteFile(full, []byte(body), 0o644); err != nil {
+		t.Fatalf("write %s: %v", file, err)
+	}
 }
 
 func quote(s string) string {
@@ -280,5 +292,47 @@ func TestDefaultDirReportsWhereToPutThemes(t *testing.T) {
 	want := filepath.Join(repo, "themes")
 	if got != want {
 		t.Errorf("DefaultDir: %s, want %s", got, want)
+	}
+}
+
+// Handler отдаёт стиль темы и её картинки, а всё, что не тема, — 404.
+func TestHandlerServesThemeFiles(t *testing.T) {
+	dir := t.TempDir()
+	writeTheme(t, dir, "alliance", `{"title": "Альянс"}`)
+	writeFile(t, dir, "alliance", StyleFile, `<style rel="stylesheet">.topbar{}</style>`)
+	writeFile(t, dir, "alliance", "emblem.svg", `<svg/>`)
+
+	handler := Handler(Scan(dir))
+
+	front := httptest.NewRecorder()
+	handler.ServeHTTP(front, httptest.NewRequest("GET", "/themes/alliance", nil))
+	if front.Code != http.StatusOK {
+		t.Fatalf("style: код %d, а нужен 200", front.Code)
+	}
+	if !strings.Contains(front.Body.String(), ".topbar") {
+		t.Errorf("style: в ответе нет стиля: %q", front.Body.String())
+	}
+
+	img := httptest.NewRecorder()
+	handler.ServeHTTP(img, httptest.NewRequest("GET", "/themes/alliance/emblem.svg", nil))
+	if img.Code != http.StatusOK {
+		t.Errorf("картинка: код %d, а нужен 200", img.Code)
+	}
+
+	// Каталог без theme.json — не тема, даже если файлы внутри есть.
+	writeTheme(t, dir, "no-manifest", "")
+	writeFile(t, dir, "no-manifest", StyleFile, `<style/>`)
+	for _, addr := range []string{
+		"/themes/no-manifest",
+		"/themes/absent",
+		// Выход за пределы каталога тем: theme.json и styles.css живут рядом.
+		"/themes/alliance/../theme.json",
+		"/themes/alliance/../../etc/passwd",
+	} {
+		bad := httptest.NewRecorder()
+		handler.ServeHTTP(bad, httptest.NewRequest("GET", addr, nil))
+		if bad.Code != http.StatusNotFound {
+			t.Errorf("%s: код %d, а нужен 404", addr, bad.Code)
+		}
 	}
 }

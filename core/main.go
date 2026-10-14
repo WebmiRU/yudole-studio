@@ -179,6 +179,9 @@ func run() error {
 	mux.Handle("GET /healthz", healthHandler(page))
 	mux.Handle("GET /api/chat", hub.Handler())
 	mux.Handle("/api/", api.Handler(manager, catalog))
+	// Файлы тем: каталог лежит рядом с ядром, а не внутри раздаваемой папки
+	// html/, и без этого маршрута выбранная тема не доберётся до страницы.
+	mux.Handle("GET /themes/", theme.Handler(catalog))
 	mux.Handle("/", page)
 
 	srv := &http.Server{
