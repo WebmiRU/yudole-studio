@@ -40,8 +40,17 @@ type Manager interface {
 	DeleteRoom(id string) error
 }
 
+// RoomsNotifier сообщает открытым лентам, что комната изменилась.
+//
+// Узкий интерфейс вместо указателя на chat.Hub: маршруты настроек не знают
+// ничего про сокеты ленты, и не должны. Нужно от них ровно одно — «скажи
+// страницам».
+type RoomsNotifier interface {
+	RoomsChanged(id string)
+}
+
 // Handler builds the routes of the options page.
-func Handler(manager Manager, themes *theme.Catalog) http.Handler {
+func Handler(manager Manager, themes *theme.Catalog, notifier RoomsNotifier) http.Handler {
 	mux := http.NewServeMux()
 
 	// Живое состояние плагинов. Страница настроек подписывается на него вместо
@@ -75,7 +84,10 @@ func Handler(manager Manager, themes *theme.Catalog) http.Handler {
 			writeError(w, http.StatusInternalServerError, err.Error())
 			return
 		}
+		// Сообщаем лентам после ответа: страница перечитает комнату, и к этому
+		// моменту она уже должна быть записана.
 		write(w, protocol.KindRoomCreated, room)
+		notifier.RoomsChanged(room.ID)
 	})
 
 	mux.HandleFunc("PUT /api/rooms/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -108,6 +120,9 @@ func Handler(manager Manager, themes *theme.Catalog) http.Handler {
 			return
 		}
 		write(w, protocol.KindRoomSaved, saved)
+		// Лента, открытая на эту комнату, применяет настройки сразу: тема,
+		// шрифт и размеры не должны ждать перезагрузки страницы.
+		notifier.RoomsChanged(saved.ID)
 	})
 
 	mux.HandleFunc("DELETE /api/rooms/{id}", func(w http.ResponseWriter, r *http.Request) {
@@ -120,6 +135,7 @@ func Handler(manager Manager, themes *theme.Catalog) http.Handler {
 			return
 		}
 		write(w, protocol.KindRoomDeleted, map[string]bool{"deleted": true})
+		notifier.RoomsChanged(r.PathValue("id"))
 	})
 
 	mux.HandleFunc("GET /api/plugins/chat", func(w http.ResponseWriter, r *http.Request) {
@@ -182,9 +198,12 @@ func Handler(manager Manager, themes *theme.Catalog) http.Handler {
 			return
 		}
 		var body *protocol.MessageContent
-		if done != "" { content := protocol.PlainMessage(done); body = &content }
+		if done != "" {
+			content := protocol.PlainMessage(done)
+			body = &content
+		}
 		write(w, protocol.KindPluginActionComplete, struct {
-			Done bool `json:"done"`
+			Done    bool                     `json:"done"`
 			Message *protocol.MessageContent `json:"message,omitempty"`
 		}{Done: true, Message: body})
 	})
@@ -221,15 +240,23 @@ func Handler(manager Manager, themes *theme.Catalog) http.Handler {
 
 func decodeRequest(r *http.Request, expectedKind string, payload any) (protocol.Message, error) {
 	body, err := io.ReadAll(io.LimitReader(r.Body, (1<<20)+1))
-	if err != nil { return protocol.Message{}, err }
-	if len(body) > 1<<20 { return protocol.Message{}, fmt.Errorf("request exceeds 1 MiB") }
+	if err != nil {
+		return protocol.Message{}, err
+	}
+	if len(body) > 1<<20 {
+		return protocol.Message{}, fmt.Errorf("request exceeds 1 MiB")
+	}
 	message, err := protocol.Decode(body)
-	if err != nil { return protocol.Message{}, err }
+	if err != nil {
+		return protocol.Message{}, err
+	}
 	if expectedKind != "" && message.Kind != expectedKind {
 		return protocol.Message{}, fmt.Errorf("kind %q is not %q", message.Kind, expectedKind)
 	}
 	if payload != nil {
-		if err := message.PayloadInto(payload); err != nil { return protocol.Message{}, err }
+		if err := message.PayloadInto(payload); err != nil {
+			return protocol.Message{}, err
+		}
 	}
 	return message, nil
 }
@@ -258,7 +285,9 @@ func writeStatus(w http.ResponseWriter, status int, kind string, payload any) {
 		return
 	}
 	w.WriteHeader(status)
-	if _, err := w.Write(data); err != nil { slog.Debug("api: write response", "kind", kind, "err", err) }
+	if _, err := w.Write(data); err != nil {
+		slog.Debug("api: write response", "kind", kind, "err", err)
+	}
 }
 
 // statusFor maps a manager error to a status code. A plugin that refuses its

@@ -67,7 +67,9 @@ type subscriber struct {
 // New builds a hub over the plugins.
 func New(source Source, catalogs ...*theme.Catalog) *Hub {
 	var catalog *theme.Catalog
-	if len(catalogs) > 0 { catalog = catalogs[0] }
+	if len(catalogs) > 0 {
+		catalog = catalogs[0]
+	}
 	hub := &Hub{
 		source:      source,
 		themes:      catalog,
@@ -115,23 +117,37 @@ func (h *Hub) watch() {
 func toMessage(event plugin.Event) (protocol.Message, error) {
 	payload := map[string]any{}
 	if len(event.Message.Payload) != 0 {
-		if err := json.Unmarshal(event.Message.Payload, &payload); err != nil { return protocol.Message{}, err }
+		if err := json.Unmarshal(event.Message.Payload, &payload); err != nil {
+			return protocol.Message{}, err
+		}
 	}
 	payload["plugin"] = event.Plugin
 	prepareDisplayMessage(event.Message.Kind, payload)
 	payload["at"] = time.Now()
 	raw, err := json.Marshal(payload, json.Deterministic(true))
-	if err != nil { return protocol.Message{}, err }
+	if err != nil {
+		return protocol.Message{}, err
+	}
 	return protocol.Message{Kind: event.Message.Kind, Payload: jsontext.Value(raw)}, nil
 }
 
 func (h *Hub) themeFor(id string) *theme.Theme {
-	if h.themes == nil { return nil }
-	if id == "" { id = "system" }
-	if item, ok := h.themes.Get(id); ok { return &item }
-	if item, ok := h.themes.Get("system"); ok { return &item }
+	if h.themes == nil {
+		return nil
+	}
+	if id == "" {
+		id = "system"
+	}
+	if item, ok := h.themes.Get(id); ok {
+		return &item
+	}
+	if item, ok := h.themes.Get("system"); ok {
+		return &item
+	}
 	items := h.themes.List()
-	if len(items) == 0 { return nil }
+	if len(items) == 0 {
+		return nil
+	}
 	return &items[0]
 }
 
@@ -139,15 +155,21 @@ func (h *Hub) themeFor(id string) *theme.Theme {
 // template as chat lines. Existing source text stays in message.src; the
 // canonical human-readable sentence goes to message.text.
 func prepareDisplayMessage(kind string, payload map[string]any) {
-	if protocol.IsChatKind(kind) || kind == protocol.KindSystemMessageWarning { return }
+	if protocol.IsChatKind(kind) || kind == protocol.KindSystemMessageWarning {
+		return
+	}
 	src := mapMessageText(payload, "src")
 	reason := mapMessageText(payload, "text")
 	channel, _ := payload["channel"].(string)
 	name, _ := payload["name"].(string)
 	label := name
-	if label == "" { label = channel }
+	if label == "" {
+		label = channel
+	}
 	service, _ := payload["service"].(string)
-	if service == "" { service, _ = payload["plugin"].(string) }
+	if service == "" {
+		service, _ = payload["plugin"].(string)
+	}
 	state, _ := payload["state"].(string)
 
 	var text string
@@ -167,13 +189,19 @@ func prepareDisplayMessage(kind string, payload map[string]any) {
 	case protocol.KindMessageDeleted:
 		user, _ := payload["user"].(map[string]any)
 		name, _ := user["name"].(string)
-		if name != "" { text = "Реплику удалил " + name } else { text = "Реплику удалили" }
+		if name != "" {
+			text = "Реплику удалил " + name
+		} else {
+			text = "Реплику удалили"
+		}
 	default:
 		return
 	}
 	body := protocol.PlainMessage(text)
-	if src != "" { body.Src = src }
-	payload["message"] = map[string]any{"src":body.Src, "text":body.Text, "html":body.Html}
+	if src != "" {
+		body.Src = src
+	}
+	payload["message"] = map[string]any{"src": body.Src, "text": body.Text, "html": body.Html}
 }
 
 func mapMessageText(payload map[string]any, field string) string {
@@ -183,27 +211,47 @@ func mapMessageText(payload map[string]any, field string) string {
 }
 
 func reasonSuffix(reason string) string {
-	if strings.TrimSpace(reason) == "" { return "" }
+	if strings.TrimSpace(reason) == "" {
+		return ""
+	}
 	return ": " + reason
 }
 
 func connectionText(state, service, reason string) string {
-	withReason := func(text string) string { if reason != "" { return text + ": " + reason }; return text }
+	withReason := func(text string) string {
+		if reason != "" {
+			return text + ": " + reason
+		}
+		return text
+	}
 	switch state {
-	case protocol.ConnectionOnline: return "Подключились к " + service
-	case protocol.ConnectionConnecting: return "Подключаемся к " + service
-	case protocol.ConnectionReconnecting: return withReason("Переподключаемся к " + service)
-	case protocol.ConnectionOffline: return withReason("Нет связи с " + service)
-	default: return withReason(service + ": " + state)
+	case protocol.ConnectionOnline:
+		return "Подключились к " + service
+	case protocol.ConnectionConnecting:
+		return "Подключаемся к " + service
+	case protocol.ConnectionReconnecting:
+		return withReason("Переподключаемся к " + service)
+	case protocol.ConnectionOffline:
+		return withReason("Нет связи с " + service)
+	default:
+		return withReason(service + ": " + state)
 	}
 }
 
 func channelInfoText(label string, payload map[string]any) string {
 	text := "Сведения о канале " + label
-	if name, _ := payload["name"].(string); name != "" { text += ": " + name }
-	if clients, ok := payload["clients"].(float64); ok && clients > 0 { text += ", " + strconv.Itoa(int(clients)) + " в канале" }
-	if premium, _ := payload["premiumOnly"].(bool); premium { text += ", только для подписчиков" }
-	if smileOnly, _ := payload["smileOnly"].(bool); smileOnly { text += ", только смайлики" }
+	if name, _ := payload["name"].(string); name != "" {
+		text += ": " + name
+	}
+	if clients, ok := payload["clients"].(float64); ok && clients > 0 {
+		text += ", " + strconv.Itoa(int(clients)) + " в канале"
+	}
+	if premium, _ := payload["premiumOnly"].(bool); premium {
+		text += ", только для подписчиков"
+	}
+	if smileOnly, _ := payload["smileOnly"].(bool); smileOnly {
+		text += ", только смайлики"
+	}
 	return text
 }
 
@@ -237,6 +285,33 @@ type Channel struct {
 	Title   string `json:"title,omitempty"`
 	State   string `json:"state"`
 	Problem string `json:"problem,omitempty"`
+}
+
+// RoomsChanged tells the open pages that a room was saved or deleted.
+//
+// Кадр уходит только подписчикам и в историю не попадает: это не реплика и не
+// событие чата, а объявление для самой страницы. В историю он попал бы двумя
+// способами сразу — мешал бы считать реплики и переживал бы перезагрузку,
+// хотя после неё комната и так прочитается заново.
+func (h *Hub) RoomsChanged(id string) {
+	message := protocol.MustNew(protocol.KindRoomsChanged, map[string]string{"id": id})
+
+	h.mu.Lock()
+	targets := make([]*subscriber, 0, len(h.subscribers))
+	for _, sub := range h.subscribers {
+		targets = append(targets, sub)
+	}
+	h.mu.Unlock()
+
+	for _, sub := range targets {
+		select {
+		case sub.events <- message:
+		default:
+			// Страница не слушает сокет — ей всё равно, что поменялось: она
+			// перечитает комнату при следующем открытии.
+			slog.Warn("chat page is behind, dropping a room change", "room", id)
+		}
+	}
 }
 
 // Handler serves the websocket of the chat page.
@@ -276,9 +351,9 @@ func (h *Hub) serve(rw http.ResponseWriter, r *http.Request) {
 	// Сначала то, что уже было, и только потом новое: иначе между «историей»
 	// и подпиской потерялось бы всё, что пришло за эти доли секунды.
 	snapshot := protocol.MustNew(protocol.KindChatSnapshot, struct {
-		Plugins []Channel `json:"plugins"`
+		Plugins []Channel          `json:"plugins"`
 		History []protocol.Message `json:"history"`
-		Theme *theme.Theme `json:"theme,omitempty"`
+		Theme   *theme.Theme       `json:"theme,omitempty"`
 	}{Plugins: h.Channels(), History: history, Theme: h.themeFor(r.URL.Query().Get("theme"))})
 	if err := write(ctx, conn, snapshot); err != nil {
 		return
@@ -303,7 +378,9 @@ func (h *Hub) serve(rw http.ResponseWriter, r *http.Request) {
 		case <-gone:
 			return
 		case message, ok := <-sub.events:
-			if !ok { return }
+			if !ok {
+				return
+			}
 			if err := write(ctx, conn, message); err != nil {
 				return
 			}
@@ -326,4 +403,3 @@ func write(ctx context.Context, conn *websocket.Conn, message protocol.Message) 
 	}
 	return nil
 }
-

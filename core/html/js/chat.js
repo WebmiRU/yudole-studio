@@ -9,6 +9,10 @@ const API_CHAT = '/api/chat';
 const state = {
     socket: null,
     themeId: 'system',
+    // Тема, заданная адресом (?theme=). Отличается от themeId, когда тема пришла
+    // из комнаты: адрес здесь главнее, иначе можно было бы неделю смотреть не
+    // на ту тему, которую просил.
+    themeFromURL: null,
     themeKey: '',
     templateSource: '',
     entries: [],
@@ -25,6 +29,14 @@ const state = {
 };
 
 const feedEl = document.getElementById('feed');
+
+// Настройки комнаты кладём на элемент, к которому относятся правила темы, а не
+// на #feed: в разметке .feed — это внешний main, а #feed вложен в него как
+// .messages. Переменная, заданная на потомке, вверх не поднимается, и
+// «font-family: var(--room-font)» на .feed брало бы заглушку. Размеры шрифта от
+// этого не ломались — их читают правила на самом тексте реплики, он ниже и
+// переменную наследует, но гарнитура задавалась на .feed и не работала.
+const roomTarget = feedEl.closest('.feed') ?? feedEl;
 const scrollEl = document.querySelector('.feed');
 const stateEl = document.getElementById('state');
 const stateTextEl = document.getElementById('state-text');
@@ -89,6 +101,13 @@ async function handle(message) {
         }
         redrawChannelFilter();
         redraw();
+        return;
+    }
+
+    // Настройки комнаты поменяли в другой вкладке. Лента не перерисовывается и
+    // переподключается: она перечитывает комнату и применяет её на живом месте.
+    if (message.kind === 'system.rooms.changed') {
+        await refreshRoom();
         return;
     }
 
@@ -368,18 +387,61 @@ function showProblem(text) {
     bar.hidden = !text;
 }
 
+// setupRoom — первый раз: прочитать комнату и подключиться к ядру.
 async function setupRoom() {
+    state.themeFromURL = new URLSearchParams(location.search).get('theme');
+    await refreshRoom();
+    connect(state.themeId);
+}
+
+// refreshRoom перечитывает комнату и применяет её целиком.
+//
+// Это единственное место, где комната доходит до страницы. Оно нужно и при
+// первом открытии, и когда настройки поменяли в другой вкладке — отличаются
+// только вызовы до и после.
+//
+// Добавлять настройку в механику не приходится: её читает resolveRoom и кладёт
+// в view, а apply разносит по странице. Страница узнаёт об изменении одним
+// кадром system.rooms.changed и перечитывает комнату целиком, а не по полям —
+// поэтому новая настройка не требует ни тут, ни там ничего трогать.
+async function refreshRoom() {
     const view = await resolveRoom('roomId');
+
     state.room = view.room;
     state.roomProblem = view.problem;
     state.shown = view.shown === null ? null : new Set(view.shown);
-    state.themeId = new URLSearchParams(location.search).get('theme') || view.theme || 'system';
-    apply(view, feedEl);
+
+    // Тема из адреса главнее темы комнаты: ?theme= — прямая просьба человека,
+    // и комната её не отменяет.
+    const wanted = state.themeFromURL || view.theme || 'system';
+    if (wanted !== state.themeId) {
+        state.themeId = wanted;
+        // Снимок сокета приносит описание темы, которая была при подключении.
+        // Тему сменили в настройках, а сокет не переоткрывался, поэтому описание
+        // берём сами — иначе новая тема была бы видна только после перезагрузки.
+        await applyTheme(await themeDescriptor(wanted));
+    }
+    apply(view, roomTarget);
 
     const titleEl = document.getElementById('room-title');
     if (titleEl) titleEl.textContent = view.room?.title || 'Все каналы';
     showProblem(view.problem);
-    connect(state.themeId);
+    redraw();
+}
+
+// themeDescriptor — описание темы по id: шаблон, стили и скрипты.
+async function themeDescriptor(id) {
+    try {
+        const response = await fetch('/api/themes', {cache: 'no-store'});
+        if (!response.ok) return undefined;
+        // Ответ — конверт: kind и payload, как у всякого ответа ядра.
+        const envelope = await response.json();
+        const themes = envelope?.payload?.themes ?? [];
+        return themes.find((item) => item.id === id);
+    } catch {
+        // applyTheme умеет и без описания: system подставляется сама.
+        return undefined;
+    }
 }
 
 setupRoom();
