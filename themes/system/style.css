@@ -1,11 +1,49 @@
-html, body { min-height: 100%; margin: 0; background: #2a2a2a; color: #ededed; }
-.topbar, .statusbar { background: #1c1c1c; border-color: #494949; }
-.feed { background: #2a2a2a; }
-.feed .msg { border: 1px solid #494949; border-left: 3px solid #8b9aa8; border-radius: 2px; background: #000; }
-.msg__author { color: #d9e2eb; }
-.msg__author--plugin { color: #aeb7c0; }
-.msg__text { color: #ededed; }
-.msg__rule { background: #4a525b; }
+/* Системная тема — это вид самой студии, а не отдельная палитра.
+ *
+ * Раньше здесь стоял серый #696969: страница грузилась, показывая тёмно-синий
+ * фон приложения, и через мгновение становилась серой. Мигание выглядело как
+ * поломка, тем более что тот же серый фон — на главной и в настройках.
+ *
+ * Поэтому здесь ровно те цвета, что заданы tokens.sass: тема повторяет
+ * собственный вид студии и не меняет его ни на секунду. Свои числа, а не
+ * ссылки на переменные: тема лежит на диске и читается браузером как есть.
+ */
+html, body { min-height: 100%; margin: 0; background: #0b0d10; color: #e6e8eb; }
+
+/* Шапка и подвал — то же полупрозрачное стекло, что в самом приложении:
+ * лента под ними видна, и она не рвётся на две части. */
+.topbar, .statusbar {
+  background: rgba(17, 20, 26, 0.85);
+  border-color: #232935;
+  color: #6a7280;
+}
+
+/* Ленту не красим: её фон — это фон страницы, иначе пришлось бы повторять
+ * его здесь, и однажды он разошёлся бы с телом. */
+.msg {
+  /* Рамки вокруг сообщения нет: в плотной ленте соседние рамки смыкаются в
+   * решётку, и она читается как таблица, а не как чат. Остаётся полоска слева
+   * — по ней видно вид сообщения. */
+  border: none;
+  border-left: 4px solid transparent;
+  border-radius: 0;
+  background: #000;
+}
+.msg[data-severity="info"] { border-left-color: #4da3ff; }
+.msg[data-severity="success"] { border-left-color: #46c46b; }
+.msg[data-severity="warning"] { border-left-color: #e0a458; }
+.msg[data-severity="error"] { border-left-color: #f0605d; }
+
+.msg__author { color: #9179ff; font-weight: 600; }
+.msg__author--plugin { color: #98a1b0; font-weight: 500; }
+.msg__text { color: #e6e8eb; }
+.msg__rule { background: #6e83a6; }
+
+.msg__service { display: inline-flex; flex: none; opacity: .85; line-height: 0; }
+.msg__service svg { display: block; }
+
+/* Служебное сообщение пишет плагин, а не человек: в квадратных скобках, чтобы
+ * ник не спутать с тем, кто пишет в чате. У реплик он лишний — там значок. */
 .msg[data-kind^="chat.message."] .msg__author--plugin { display: none; }
 .msg__author:empty { display: none; }
-.msg.is-notice { opacity: .8; }
+.msg.is-notice { opacity: .85; }

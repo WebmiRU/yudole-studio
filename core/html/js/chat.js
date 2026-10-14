@@ -2,6 +2,7 @@
 // {kind, payload}; внешний вид задают template.html и ресурсы выбранной темы.
 
 import '../sass/chat.sass';
+import {serviceLogo} from './service-icons.js';
 import {resolveRoom, apply} from './room-view.js';
 
 const API_CHAT = '/api/chat';
@@ -203,6 +204,18 @@ function renderTemplate(entry) {
     const source = state.templateSource || '<template><article class="msg"><div class="msg__text">{{payload.message.text}}</div></article></template>';
     const markup = source.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (token, path) => {
         const value = path.split('.').reduce((current, key) => current == null ? undefined : current[key], envelope);
+        // system.* — то, что даёт движок, а не пришло в конверте. payload.*
+        // достаётся из сообщения, system.* собирается на странице, и по
+        // названию видно, откуда взялось значение.
+        //
+        // system.service.icon — значок сервиса, откуда пришла реплика. Разметка,
+        // а не текст: по нику не видно, писали из VK или с YouTube, а тема сама
+        // решает, где ему стоять. Раньше его рисовал движок, и шаблон темы
+        // значка оставить не мог.
+        if (path === 'system.service.icon') {
+            const logo = serviceLogo(entry.plugin, 16);
+            return logo ? `<span class="msg__service">${logo.outerHTML}</span>` : '';
+        }
         if (path === 'payload.message.html') {
             if (typeof value === 'string' && value !== '') return value;
             const fallback = entry.message?.text ?? '';
