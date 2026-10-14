@@ -43,15 +43,15 @@ func captureLog(t *testing.T) *bytes.Buffer {
 
 // echoPlugin answers in NDJSON and mirrors every set_options with an ack.
 const echoPlugin = `#!/bin/sh
-echo '{"kind":"log","payload":{"level":"info","message":"Hello from fake plugin"}}'
-echo '{"kind":"plugin.chat","payload":{"title":"Fake","version":"0.1.0","description":"A fake plugin","options":[{"key":"nick","type":"text","label":"Nick","required":true},{"key":"words","type":"text/multiple","label":"Words"}]}}'
+echo '{"kind":"system.log","payload":{"level":"info","message":{"src":"Hello from fake plugin","text":"Hello from fake plugin","html":"Hello from fake plugin"}}}'
+echo '{"kind":"system.plugin.hello","payload":{"title":"Fake","version":"0.1.0","description":"A fake plugin","options":[{"key":"nick","type":"text","label":"Nick","required":true},{"key":"words","type":"text/multiple","label":"Words"}]}}'
 while IFS= read -r line; do
   case "$line" in
-    *get_info*)
-      echo '{"kind":"plugin.chat","payload":{"title":"Fake","version":"0.1.0","description":"A fake plugin","options":[{"key":"nick","type":"text","label":"Nick","required":true},{"key":"words","type":"text/multiple","label":"Words"}]}}'
+    *system.plugin.hello*)
+      echo '{"kind":"system.plugin.hello","payload":{"title":"Fake","version":"0.1.0","description":"A fake plugin","options":[{"key":"nick","type":"text","label":"Nick","required":true},{"key":"words","type":"text/multiple","label":"Words"}]}}'
       ;;
-    *set_options*) echo '{"kind":"ack"}' ;;
-    *quit*)        echo '{"kind":"ack"}'; exit 0 ;;
+    *system.plugin.options.set*) echo '{"kind":"system.message.ack"}' ;;
+    *system.plugin.quit*)        echo '{"kind":"system.message.ack"}'; exit 0 ;;
   esac
 done
 `
@@ -122,14 +122,14 @@ func TestPluginDescribeAndConfigure(t *testing.T) {
 // or a link into a channel id, and the config has to keep that, not the text
 // the user typed.
 const normalizePlugin = `#!/bin/sh
-echo '{"kind":"plugin.chat","payload":{"title":"Fake","version":"0.1.0","options":[{"key":"channels","type":"select/multiple","label":"Channels"}]}}'
+echo '{"kind":"system.plugin.hello","payload":{"title":"Fake","version":"0.1.0","options":[{"key":"channels","type":"select/multiple","label":"Channels"}]}}'
 while IFS= read -r line; do
   case "$line" in
-    *get_info*)
-      echo '{"kind":"plugin.chat","payload":{"title":"Fake","version":"0.1.0","options":[{"key":"channels","type":"select/multiple","label":"Channels"}]}}'
+    *system.plugin.hello*)
+      echo '{"kind":"system.plugin.hello","payload":{"title":"Fake","version":"0.1.0","options":[{"key":"channels","type":"select/multiple","label":"Channels"}]}}'
       ;;
-    *set_options*) echo '{"kind":"ack","payload":{"values":{"channels":[{"value":"53029","label":"E.Wolf"}]}}}' ;;
-    *quit*)        echo '{"kind":"ack"}'; exit 0 ;;
+    *system.plugin.options.set*) echo '{"kind":"system.message.ack","payload":{"values":{"channels":[{"value":"53029","label":"E.Wolf"}]}}}' ;;
+    *system.plugin.quit*)        echo '{"kind":"system.message.ack"}'; exit 0 ;;
   esac
 done
 `
@@ -201,7 +201,7 @@ func TestPluginIgnoresGarbage(t *testing.T) {
 
 	script := `#!/bin/sh
 echo 'not json at all'
-echo '{"kind":"log","payload":{"message":"still alive"}}'
+echo '{"kind":"system.log","payload":{"level":"info","message":{"src":"still alive","text":"still alive","html":"still alive"}}}'
 sleep 0.3
 `
 	p, err := Start(context.Background(), "chatty", fakePlugin(t, script))
