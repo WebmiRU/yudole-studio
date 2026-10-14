@@ -14,8 +14,8 @@ import (
 	"github.com/coder/websocket"
 
 	"studio/core/plugin"
-	"studio/core/settings"
 	"studio/core/protocol"
+	"studio/core/settings"
 )
 
 // fakeManager plays the part of the plugin manager for the states page needs.
@@ -79,14 +79,22 @@ func readState(t *testing.T, conn *websocket.Conn) protocol.Message {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, data, err := conn.Read(ctx)
-	if err != nil { t.Fatalf("read: %v", err) }
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
 	message, err := protocol.Decode(data)
-	if err != nil { t.Fatalf("not a protocol message: %v", err) }
+	if err != nil {
+		t.Fatalf("not a protocol message: %v", err)
+	}
 	return message
 }
 
-type testStatesSnapshot struct { Plugins []plugin.PluginView `json:"plugins"` }
-type testPluginState struct { Plugin plugin.PluginView `json:"plugin"` }
+type testStatesSnapshot struct {
+	Plugins []plugin.PluginView `json:"plugins"`
+}
+type testPluginState struct {
+	Plugin plugin.PluginView `json:"plugin"`
+}
 
 // При подключении страница получает все плагины разом: с этого начинается её
 // работа, спрашивать список отдельно незачем.
@@ -110,11 +118,19 @@ func TestStatesPageGetsEveryPluginOnOpen(t *testing.T) {
 	t.Cleanup(func() { _ = conn.CloseNow() })
 
 	hello := readState(t, conn)
-	if hello.Kind != protocol.KindPluginsSnapshot { t.Fatalf("kind = %q", hello.Kind) }
+	if hello.Kind != protocol.KindPluginsSnapshot {
+		t.Fatalf("kind = %q", hello.Kind)
+	}
 	var snapshot testStatesSnapshot
-	if err := hello.PayloadInto(&snapshot); err != nil { t.Fatal(err) }
-	if len(snapshot.Plugins) != 2 { t.Fatalf("плагинов %d, want 2", len(snapshot.Plugins)) }
-	if snapshot.Plugins[0].ID != "goodgame" || snapshot.Plugins[0].Title != "GoodGame" { t.Errorf("плагины = %+v", snapshot.Plugins) }
+	if err := hello.PayloadInto(&snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Plugins) != 2 {
+		t.Fatalf("плагинов %d, want 2", len(snapshot.Plugins))
+	}
+	if snapshot.Plugins[0].ID != "goodgame" || snapshot.Plugins[0].Title != "GoodGame" {
+		t.Errorf("плагины = %+v", snapshot.Plugins)
+	}
 }
 
 // Изменение приходит сразу после того, как произошло, — без опроса.
@@ -137,11 +153,19 @@ func TestStatesPageGetsChangesAsTheyHappen(t *testing.T) {
 	fake.states <- plugin.PluginView{ID: "goodgame", State: "running", Waiting: true, WaitingText: "Спрашиваю GoodGame"}
 
 	live := readState(t, conn)
-	if live.Kind != protocol.KindPluginState { t.Fatalf("kind = %q", live.Kind) }
+	if live.Kind != protocol.KindPluginState {
+		t.Fatalf("kind = %q", live.Kind)
+	}
 	var update testPluginState
-	if err := live.PayloadInto(&update); err != nil { t.Fatal(err) }
-	if update.Plugin.ID != "goodgame" || update.Plugin.State != "running" { t.Errorf("состояние = %+v", update.Plugin) }
-	if !update.Plugin.Waiting || update.Plugin.WaitingText != "Спрашиваю GoodGame" { t.Errorf("занятость не доехала: %+v", update.Plugin) }
+	if err := live.PayloadInto(&update); err != nil {
+		t.Fatal(err)
+	}
+	if update.Plugin.ID != "goodgame" || update.Plugin.State != "running" {
+		t.Errorf("состояние = %+v", update.Plugin)
+	}
+	if !update.Plugin.Waiting || update.Plugin.WaitingText != "Спрашиваю GoodGame" {
+		t.Errorf("занятость не доехала: %+v", update.Plugin)
+	}
 }
 
 // Настроек, а с ними и паролей, в потоке быть не должно: он живёт весь день и
@@ -167,10 +191,16 @@ func TestStatesStreamCarriesNoValues(t *testing.T) {
 	t.Cleanup(func() { _ = conn.CloseNow() })
 
 	hello := readState(t, conn)
-	if hello.Kind != protocol.KindPluginsSnapshot { t.Fatalf("kind = %q", hello.Kind) }
+	if hello.Kind != protocol.KindPluginsSnapshot {
+		t.Fatalf("kind = %q", hello.Kind)
+	}
 	var snapshot testStatesSnapshot
-	if err := hello.PayloadInto(&snapshot); err != nil { t.Fatal(err) }
-	if len(snapshot.Plugins) != 1 { t.Fatalf("приветствие = %+v", snapshot) }
+	if err := hello.PayloadInto(&snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.Plugins) != 1 {
+		t.Fatalf("приветствие = %+v", snapshot)
+	}
 
 	line, err := marshal(hello)
 	if err != nil {

@@ -267,17 +267,29 @@ func TestNilCatalogIsUsable(t *testing.T) {
 func TestScanRequiresTemplateAndKeepsAssetOrder(t *testing.T) {
 	dir := t.TempDir()
 	full := filepath.Join(dir, "ordered")
-	if err := os.MkdirAll(full, 0o755); err != nil { t.Fatal(err) }
+	if err := os.MkdirAll(full, 0o755); err != nil {
+		t.Fatal(err)
+	}
 	manifest := `{"title":"Ordered","styles":["base.css","detail.css"],"scripts":["first.js","second.js"]}`
-	if err := os.WriteFile(filepath.Join(full, FileName), []byte(manifest), 0o644); err != nil { t.Fatal(err) }
+	if err := os.WriteFile(filepath.Join(full, FileName), []byte(manifest), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	for _, file := range []string{"base.css", "detail.css", "first.js", "second.js"} {
-		if err := os.WriteFile(filepath.Join(full, file), []byte(""), 0o644); err != nil { t.Fatal(err) }
+		if err := os.WriteFile(filepath.Join(full, file), []byte(""), 0o644); err != nil {
+			t.Fatal(err)
+		}
 	}
 	// No template: not a valid theme.
-	if len(Scan(dir).List()) != 0 { t.Fatal("theme without template was accepted") }
-	if err := os.WriteFile(filepath.Join(full, TemplateFile), []byte("<template/>"), 0o644); err != nil { t.Fatal(err) }
+	if len(Scan(dir).List()) != 0 {
+		t.Fatal("theme without template was accepted")
+	}
+	if err := os.WriteFile(filepath.Join(full, TemplateFile), []byte("<template/>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	item, ok := Scan(dir).Get("ordered")
-	if !ok { t.Fatal("valid theme not found") }
+	if !ok {
+		t.Fatal("valid theme not found")
+	}
 	if len(item.Styles) != 2 || !strings.HasSuffix(item.Styles[0], "/base.css") || !strings.HasSuffix(item.Styles[1], "/detail.css") {
 		t.Errorf("styles lost order: %#v", item.Styles)
 	}

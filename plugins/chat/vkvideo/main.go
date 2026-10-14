@@ -957,12 +957,12 @@ func processPush(raw json.RawMessage, byID map[string]vkChannel, seen *seenIDs, 
 			return
 		}
 		send(protocol.KindChannelInfo, protocol.ChannelInfoPayload{
-			Channel:  channel.Slug,
-			Name:     event.Title,
-			User: &protocol.ChatUser{Name: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick)},
-			Started:  state.started,
-			Clients:  event.Viewers,
-			Users:    event.Viewers,
+			Channel: channel.Slug,
+			Name:    event.Title,
+			User:    &protocol.ChatUser{Name: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick)},
+			Started: state.started,
+			Clients: event.Viewers,
+			Users:   event.Viewers,
 		})
 	case "stream_start":
 		state := states[channel.ID]
@@ -975,17 +975,17 @@ func processPush(raw json.RawMessage, byID map[string]vkChannel, seen *seenIDs, 
 		}
 		state.announced = true
 		send(protocol.KindChannelInfo, protocol.ChannelInfoPayload{
-			Channel:  channel.Slug,
-			User: &protocol.ChatUser{Name: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick)},
-			Started:  state.started,
+			Channel: channel.Slug,
+			User:    &protocol.ChatUser{Name: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick)},
+			Started: state.started,
 		})
 	case "stream_end":
 		delete(states, channel.ID)
 		send(protocol.KindChannelInfo, protocol.ChannelInfoPayload{
-			Channel:  channel.Slug,
-			User: &protocol.ChatUser{Name: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick)},
-			Clients:  0,
-			Users:    0,
+			Channel: channel.Slug,
+			User:    &protocol.ChatUser{Name: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick)},
+			Clients: 0,
+			Users:   0,
 		})
 	}
 }

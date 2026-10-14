@@ -87,14 +87,18 @@ func read(t *testing.T, conn *websocket.Conn) protocol.Message {
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	_, data, err := conn.Read(ctx)
-	if err != nil { t.Fatalf("read: %v", err) }
+	if err != nil {
+		t.Fatalf("read: %v", err)
+	}
 	message, err := protocol.Decode(data)
-	if err != nil { t.Fatalf("not a protocol message: %v", err) }
+	if err != nil {
+		t.Fatalf("not a protocol message: %v", err)
+	}
 	return message
 }
 
 type snapshotPayload struct {
-	Plugins []Channel `json:"plugins"`
+	Plugins []Channel          `json:"plugins"`
 	History []protocol.Message `json:"history"`
 }
 
@@ -125,19 +129,31 @@ func TestPageGetsTheHistoryOnOpen(t *testing.T) {
 
 	conn := dial(t, hub)
 	hello := read(t, conn)
-	if hello.Kind != protocol.KindChatSnapshot { t.Fatalf("kind = %q", hello.Kind) }
+	if hello.Kind != protocol.KindChatSnapshot {
+		t.Fatalf("kind = %q", hello.Kind)
+	}
 	var snapshot snapshotPayload
-	if err := hello.PayloadInto(&snapshot); err != nil { t.Fatal(err) }
-	if len(snapshot.History) != 3 { t.Fatalf("в истории %d событий, want 3", len(snapshot.History)) }
-	if len(snapshot.Plugins) != 1 || snapshot.Plugins[0].Title != "GoodGame" { t.Errorf("плагины = %+v", snapshot.Plugins) }
+	if err := hello.PayloadInto(&snapshot); err != nil {
+		t.Fatal(err)
+	}
+	if len(snapshot.History) != 3 {
+		t.Fatalf("в истории %d событий, want 3", len(snapshot.History))
+	}
+	if len(snapshot.Plugins) != 1 || snapshot.Plugins[0].Title != "GoodGame" {
+		t.Errorf("плагины = %+v", snapshot.Plugins)
+	}
 	last := snapshot.History[2]
 	var payload struct {
-		Channel string `json:"channel"`
-		User protocol.ChatUser `json:"user"`
+		Channel string            `json:"channel"`
+		User    protocol.ChatUser `json:"user"`
 		Message protocol.ChatLine `json:"message"`
 	}
-	if err := last.PayloadInto(&payload); err != nil { t.Fatal(err) }
-	if payload.Message.Text != "привет" || payload.User.Name != "E.Wolf" || payload.Channel != "53029" { t.Errorf("реплика = %+v", payload) }
+	if err := last.PayloadInto(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Message.Text != "привет" || payload.User.Name != "E.Wolf" || payload.Channel != "53029" {
+		t.Errorf("реплика = %+v", payload)
+	}
 }
 
 // Что пришло после подключения — приходит сразу.
@@ -148,21 +164,31 @@ func TestPageGetsNewEvents(t *testing.T) {
 
 	conn := dial(t, hub)
 	snapshot := read(t, conn)
-	if snapshot.Kind != protocol.KindChatSnapshot { t.Fatalf("kind = %q", snapshot.Kind) }
+	if snapshot.Kind != protocol.KindChatSnapshot {
+		t.Fatalf("kind = %q", snapshot.Kind)
+	}
 
 	source.events <- line(protocol.KindMessagePublic, "53029", "E.Wolf", "строка")
 
 	live := read(t, conn)
-	if live.Kind != protocol.KindMessagePublic { t.Fatalf("kind = %q", live.Kind) }
+	if live.Kind != protocol.KindMessagePublic {
+		t.Fatalf("kind = %q", live.Kind)
+	}
 	var payload struct {
-		Plugin string `json:"plugin"`
-		Channel string `json:"channel"`
-		User protocol.ChatUser `json:"user"`
+		Plugin  string            `json:"plugin"`
+		Channel string            `json:"channel"`
+		User    protocol.ChatUser `json:"user"`
 		Message protocol.ChatLine `json:"message"`
 	}
-	if err := live.PayloadInto(&payload); err != nil { t.Fatal(err) }
-	if payload.Message.Text != "строка" || payload.Channel != "53029" { t.Errorf("событие = %+v", payload) }
-	if payload.Plugin != "goodgame" { t.Errorf("плагин = %q, want goodgame", payload.Plugin) }
+	if err := live.PayloadInto(&payload); err != nil {
+		t.Fatal(err)
+	}
+	if payload.Message.Text != "строка" || payload.Channel != "53029" {
+		t.Errorf("событие = %+v", payload)
+	}
+	if payload.Plugin != "goodgame" {
+		t.Errorf("плагин = %q, want goodgame", payload.Plugin)
+	}
 }
 
 // Закрывшаяся страница не должна оставлять после себя подписку: иначе её

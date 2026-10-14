@@ -18,8 +18,12 @@ func (e Event) Kind() string { return e.Message.Kind }
 // Channel is the channel the event is about, when it is about one. A chat line
 // names its channel; a connection state names none.
 func (e Event) Channel() string {
-	var payload struct { Channel string `json:"channel"` }
-	if err := e.Message.PayloadInto(&payload); err != nil { return "" }
+	var payload struct {
+		Channel string `json:"channel"`
+	}
+	if err := e.Message.PayloadInto(&payload); err != nil {
+		return ""
+	}
 	return payload.Channel
 }
 

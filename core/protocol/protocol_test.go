@@ -127,24 +127,38 @@ func TestPayloadIntoComplainsWhenEmpty(t *testing.T) {
 
 func TestEnvelopeAllowsKindWithoutPayload(t *testing.T) {
 	line, err := Encode(MustNew(KindQuit, nil))
-	if err != nil { t.Fatal(err) }
-	if strings.Contains(string(line), "payload") { t.Fatalf("unexpected payload: %s", line) }
-	if _, err := Decode(line); err != nil { t.Fatalf("Decode: %v", err) }
+	if err != nil {
+		t.Fatal(err)
+	}
+	if strings.Contains(string(line), "payload") {
+		t.Fatalf("unexpected payload: %s", line)
+	}
+	if _, err := Decode(line); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
 }
 
 func TestTextMessagesUseSharedMessageContent(t *testing.T) {
 	line, err := Encode(MustNew(KindError, ErrorPayload{Message: "bad <value>"}))
-	if err != nil { t.Fatal(err) }
+	if err != nil {
+		t.Fatal(err)
+	}
 	var envelope map[string]any
-	if err := json.Unmarshal(line, &envelope); err != nil { t.Fatal(err) }
+	if err := json.Unmarshal(line, &envelope); err != nil {
+		t.Fatal(err)
+	}
 	payload := envelope["payload"].(map[string]any)
 	body := payload["message"].(map[string]any)
 	if body["src"] != "bad <value>" || body["text"] != "bad <value>" || body["html"] != "bad &lt;value&gt;" {
 		t.Fatalf("message body = %#v", body)
 	}
 	var decoded ErrorPayload
-	if err := (Message{Kind: KindError, Payload: jsontext.Value(payloadJSON(payload))}).PayloadInto(&decoded); err != nil { t.Fatal(err) }
-	if decoded.Message != "bad <value>" { t.Errorf("decoded message = %q", decoded.Message) }
+	if err := (Message{Kind: KindError, Payload: jsontext.Value(payloadJSON(payload))}).PayloadInto(&decoded); err != nil {
+		t.Fatal(err)
+	}
+	if decoded.Message != "bad <value>" {
+		t.Errorf("decoded message = %q", decoded.Message)
+	}
 }
 
 func payloadJSON(value any) []byte {
@@ -155,16 +169,20 @@ func payloadJSON(value any) []byte {
 func TestChatMessageRequiresSharedIdentityAndTextFields(t *testing.T) {
 	good := MustNew(KindMessagePublic, ChatPayload{
 		Channel: "42",
-		User: ChatUser{Name: "Danil"},
+		User:    ChatUser{Name: "Danil"},
 		Message: ChatLine{Src: "hi", Text: "hi", Html: "hi"},
 	})
-	if err := Validate(good); err != nil { t.Fatalf("valid chat message: %v", err) }
+	if err := Validate(good); err != nil {
+		t.Fatalf("valid chat message: %v", err)
+	}
 	bad := Message{Kind: KindMessagePublic, Payload: jsontext.Value([]byte(`{"channel":"42","user":{"id":"1"},"message":{"text":"hi"}}`))}
-	if err := Validate(bad); err == nil { t.Fatal("invalid chat message was accepted") }
+	if err := Validate(bad); err == nil {
+		t.Fatal("invalid chat message was accepted")
+	}
 }
 
 func TestWarningRequiresText(t *testing.T) {
-	if _, err := New(KindSystemMessageWarning, MessagePayload{Message: MessageContent{Text:""}}); err == nil {
+	if _, err := New(KindSystemMessageWarning, MessagePayload{Message: MessageContent{Text: ""}}); err == nil {
 		t.Fatal("empty warning was accepted")
 	}
 	if _, err := New(KindSystemMessageWarning, MessagePayload{Message: PlainMessage("Внимание")}); err != nil {
