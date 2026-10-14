@@ -54,6 +54,12 @@ var (
 	// официальный путь нерабочим. Три попытки за полторы минуты: мигание сети
 	// обрывы дают, а вот «открылся и сразу умер» — это уже не сеть.
 	maxStreamRestarts = 3
+	// streamBrokenWindow — за какой срок столько обрывов подряд говорят о поломке
+	// потока. Обрывы в тихом чате нормальны: streamList держится, пока не придёт
+	// сообщение, и закрывается сам примерно раз в полминуты. Три обрыва за минуту
+	// — это уже не тишина, а отказ: поломанный поток в наших наблюдениях рвался
+	// каждые одиннадцать секунд.
+	streamBrokenWindow = time.Minute
 
 	// backlogWindow — сколько истории показывать при первом подключении.
 	// Эфир идёт часами, и без этого окна плагин при каждом старте выкладывал в
@@ -986,16 +992,27 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 	// сообщений, в которых никто уже не участвует.
 	caughtUp := false
 
-	// restarts считает подряд идущие попытки, в которых сервер не вернул
-	// ни одного ответа. Если ответ пришёл — соединение работает, даже когда
-	// в тихом чате в нём нет сообщений.
+	// restarts считает попытки подряд, а brokenSince — с какого момента они идут.
+	// Сбрасывается счётчик не на любом ответе сервера, а на сообщении: ответ
+	// может быть и пустым, и при этом поток, отдавший его, тут же умирает.
+	// Раньше счётчик обнулялся на каждом ответе, и поток, который отвечал пустотой
+	// и через десять секунд отваливался, переподключался вечно: обрыв ни разу не
+	// дотягивал до отметки «слишком часто», и резервный путь не включался.
 	restarts := 0
+	brokenSince := time.Time{}
 	gotAny := false
 	connectedReported := false
 
-	// Поток, который несколько раз подряд не смог вернуть даже ответ, не
-	// держим на экспоненциальных паузах бесконечно: пора попробовать резерв.
-	brokeTooOften := func() bool { return restarts >= maxStreamRestarts }
+	// Поток, который несколько раз подряд не дал ни сообщения, держим на
+	// экспоненциальных паузах не бесконечно: пора попробовать резерв. Разрыв
+	// считается поломкой и когда ответов не было вовсе, и когда они были, но
+	// поток всё равно умирает раньше, чем в нём что-то есть.
+	brokeTooOften := func() bool {
+		if restarts < maxStreamRestarts {
+			return false
+		}
+		return time.Since(brokenSince) < streamBrokenWindow
+	}
 
 	// Логируем, с чем именно идём в официальный API. Пустой id чата — самая
 	// вероятная причина того, что поток открывается и сразу умирает, а по
@@ -1043,6 +1060,9 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			// Не тратим 5 + 10 + 20 секунд, прежде чем признать, что gRPC
 			// вообще не может открыть поток. Это и есть случай для keyless fallback.
 			restarts++
+			if brokenSince.IsZero() {
+				brokenSince = time.Now()
+			}
 			if brokeTooOften() {
 				return fmt.Errorf("%w: StreamList: %v", errOfficialReadBroken, err)
 			}
@@ -1074,10 +1094,12 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 					return fmt.Errorf("YouTube live chat %q: %w", video.Title, recvErr)
 				}
 				logInfo("Соединение с чатом потеряно, восстанавливаю поток: " + recvErr.Error())
-				if !received {
-					restarts++
-				} else {
-					restarts = 0
+				// Обрыв считается всегда, а не только когда ответа не было:
+				// поломанный поток успевает отдать пустой ответ и тут же умирает,
+				// и при «received» счётчик не двигался ни разу.
+				restarts++
+				if brokenSince.IsZero() {
+					brokenSince = time.Now()
 				}
 				if brokeTooOften() {
 					return fmt.Errorf("%w: обрыв %v", errOfficialReadBroken, recvErr)
@@ -1099,7 +1121,6 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 			// exponential backoff и счётчик неудачных открытий. В тихом чате
 			// ответ может быть пустым — это не повод считать его ошибкой.
 			attempt = 0
-			restarts = 0
 			if !connectedReported {
 				onConnected()
 				connectedReported = true
@@ -1126,6 +1147,9 @@ func readOneChat(ctx context.Context, client ytproto.V3DataLiveChatMessageServic
 				if err := emitChatMessage(channel, item); err != nil {
 					logInfo("Не удалось обработать сообщение YouTube: " + err.Error())
 				}
+				// Сообщение пришло — поток жив, счётчик обрывов можно забыть.
+				restarts = 0
+				brokenSince = time.Time{}
 				if item.GetSnippet() != nil &&
 					item.GetSnippet().GetType() == ytproto.LiveChatMessageSnippet_TypeWrapper_CHAT_ENDED_EVENT {
 					return errChatEnded
