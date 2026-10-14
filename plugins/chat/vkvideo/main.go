@@ -1208,7 +1208,12 @@ func logInfo(message string) {
 func send(kind string, payload any) {
 	sendMu.Lock()
 	defer sendMu.Unlock()
-	line, err := protocol.Encode(protocol.MustNew(kind, payload))
+	message, err := protocol.New(kind, payload)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "vkvideo: invalid %s message: %v\n", kind, err)
+		return
+	}
+	line, err := protocol.Encode(message)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "vkvideo:", err)
 		return

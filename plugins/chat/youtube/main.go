@@ -1340,7 +1340,12 @@ func send(kind string, payload any) {
 	stdoutMu.Lock()
 	defer stdoutMu.Unlock()
 
-	line, err := protocol.Encode(protocol.MustNew(kind, payload))
+	message, err := protocol.New(kind, payload)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "youtube: invalid %s message: %v\n", kind, err)
+		return
+	}
+	line, err := protocol.Encode(message)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "youtube:", err)
 		return

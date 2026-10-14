@@ -255,26 +255,84 @@ func canonicalKind(kind string) string {
 // Validate enforces only the semantics that are intrinsic to a kind. Unknown
 // kinds remain extensible; their payload schemas belong to their producers.
 func Validate(message Message) error {
-	if message.Kind == "" { return fmt.Errorf("message without a kind") }
-	if !IsChatKind(message.Kind) && message.Kind != KindSystemMessageWarning { return nil }
-	var payload map[string]any
-	if len(message.Payload) == 0 || string(message.Payload) == "null" { return fmt.Errorf("message %q requires a payload", message.Kind) }
-	if err := json.Unmarshal(message.Payload, &payload); err != nil { return fmt.Errorf("message %q payload: %w", message.Kind, err) }
-	body, _ := payload["message"].(map[string]any)
-	if body == nil { return fmt.Errorf("message %q requires payload.message", message.Kind) }
-	for _, key := range []string{"src", "text", "html"} {
-		if _, ok := body[key]; !ok { return fmt.Errorf("message %q requires payload.message.%s", message.Kind, key) }
+	if message.Kind == "" {
+		return fmt.Errorf("message without a kind")
 	}
-	if message.Kind == KindSystemMessageWarning {
-		text, _ := body["text"].(string)
-		if strings.TrimSpace(text) == "" { return fmt.Errorf("message %q requires non-empty payload.message.text", message.Kind) }
+
+	requiresPayload := IsChatKind(message.Kind) ||
+		message.Kind == KindSystemMessageWarning ||
+		message.Kind == KindError || message.Kind == KindWaiting ||
+		message.Kind == KindLog || message.Kind == KindPluginChat ||
+		message.Kind == KindSetOptions
+
+	if len(message.Payload) == 0 || string(message.Payload) == "null" {
+		if requiresPayload {
+			return fmt.Errorf("message %q requires a payload", message.Kind)
+		}
 		return nil
 	}
-	channel, _ := payload["channel"].(string)
-	if strings.TrimSpace(channel) == "" { return fmt.Errorf("message %q requires payload.channel", message.Kind) }
-	user, _ := payload["user"].(map[string]any)
-	name, _ := user["name"].(string)
-	if strings.TrimSpace(name) == "" { return fmt.Errorf("message %q requires payload.user.name", message.Kind) }
+
+	var payload map[string]any
+	if err := json.Unmarshal(message.Payload, &payload); err != nil {
+		return fmt.Errorf("message %q payload must be an object: %w", message.Kind, err)
+	}
+
+	textBody := func(required bool) (map[string]any, error) {
+		body, ok := payload["message"].(map[string]any)
+		if !ok {
+			if required { return nil, fmt.Errorf("message %q requires payload.message", message.Kind) }
+			return nil, nil
+		}
+		for _, key := range []string{"src", "text", "html"} {
+			if _, ok := body[key]; !ok {
+				return nil, fmt.Errorf("message %q requires payload.message.%s", message.Kind, key)
+			}
+		}
+		text, _ := body["text"].(string)
+		if required && strings.TrimSpace(text) == "" {
+			return nil, fmt.Errorf("message %q requires non-empty payload.message.text", message.Kind)
+		}
+		return body, nil
+	}
+	stringField := func(name string) string {
+		value, _ := payload[name].(string)
+		return value
+	}
+	requireString := func(name string) error {
+		if strings.TrimSpace(stringField(name)) == "" {
+			return fmt.Errorf("message %q requires payload.%s", message.Kind, name)
+		}
+		return nil
+	}
+
+	switch message.Kind {
+	case KindMessagePublic, KindMessagePrivate:
+		if _, err := textBody(true); err != nil { return err }
+		if err := requireString("channel"); err != nil { return err }
+		user, _ := payload["user"].(map[string]any)
+		name, _ := user["name"].(string)
+		if strings.TrimSpace(name) == "" {
+			return fmt.Errorf("message %q requires payload.user.name", message.Kind)
+		}
+	case KindSystemMessageWarning, KindError, KindWaiting, KindLog:
+		if _, err := textBody(true); err != nil { return err }
+	case KindChannelJoinFailed, KindChannelUnjoinFailed:
+		if err := requireString("channel"); err != nil { return err }
+		if _, err := textBody(true); err != nil { return err }
+	case KindChannelJoinSuccess, KindChannelUnjoinSuccess, KindChannelInfo, KindMessageDeleted:
+		if err := requireString("channel"); err != nil { return err }
+		if message.Kind == KindMessageDeleted && strings.TrimSpace(stringField("messageId")) == "" {
+			return fmt.Errorf("message %q requires payload.messageId", message.Kind)
+		}
+	case KindConnectionState:
+		if err := requireString("state"); err != nil { return err }
+	case KindPluginChat:
+		if err := requireString("title"); err != nil { return err }
+	case KindSetOptions:
+		if _, ok := payload["values"].(map[string]any); !ok {
+			return fmt.Errorf("message %q requires payload.values", message.Kind)
+		}
+	}
 	return nil
 }
 
