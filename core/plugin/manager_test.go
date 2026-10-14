@@ -49,15 +49,15 @@ const enabledConfig = `{"kind":"config","version":"1.0","plugins":{"chat":{"fake
 // busyPlugin greets, takes the options, and then says it is busy whenever it is
 // asked to: it stands in for a plugin that went to the network.
 const busyPlugin = `#!/bin/sh
-echo '{"kind":"plugin.chat","payload":{"title":"Fake","version":"0.1.0","options":[{"key":"nick","type":"text","label":"Nick"}]}}'
+echo '{"kind":"system.plugin.hello","payload":{"title":"Fake","version":"0.1.0","options":[{"key":"nick","type":"text","label":"Nick"}]}}'
 while IFS= read -r line; do
   case "$line" in
-    *system.*)
-      echo '{"kind":"waiting","payload":{"message":"Спрашиваю сервис"}}'
-      echo '{"kind":"ack","payload":{"message":"готово"}}'
+    *system.fake.work*)
+      echo '{"kind":"system.message.waiting","payload":{"message":{"src":"Спрашиваю сервис","text":"Спрашиваю сервис","html":"Спрашиваю сервис"}}}'
+      echo '{"kind":"system.message.ack","payload":{"message":"готово"}}'
       ;;
-    *set_options*) echo '{"kind":"ack"}' ;;
-    *quit*)        echo '{"kind":"ack"}'; exit 0 ;;
+    *system.plugin.options.set*) echo '{"kind":"system.message.ack"}' ;;
+    *system.plugin.quit*)        echo '{"kind":"system.message.ack"}'; exit 0 ;;
   esac
 done
 `
@@ -156,11 +156,11 @@ func TestWatcherSeesThePluginDie(t *testing.T) {
 	// упавший. Подтверждение обязательно: без него ядро честно ждёт все
 	// двадцать секунд configureTimeout, и тест ничего не проверяет.
 	quitAfterGreeting := `#!/bin/sh
-echo '{"kind":"plugin.chat","payload":{"title":"Fake","version":"0.1.0","options":[]}}'
+echo '{"kind":"system.plugin.hello","payload":{"title":"Fake","version":"0.1.0","options":[]}}'
 while IFS= read -r line; do
   case "$line" in
-    *set_options*) echo '{"kind":"ack"}' ;;
-    *quit*)        exit 0 ;;
+    *system.plugin.options.set*) echo '{"kind":"system.message.ack"}' ;;
+    *system.plugin.quit*)        exit 0 ;;
   esac
   # Ответили на настройки — и сразу уходим, как упавший процесс.
   exit 0
