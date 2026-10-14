@@ -272,6 +272,9 @@ func Validate(message Message) error {
 		return nil
 	}
 
+	if string(message.Payload) == "null" {
+		return fmt.Errorf("message %q payload must be an object", message.Kind)
+	}
 	var payload map[string]any
 	if err := json.Unmarshal(message.Payload, &payload); err != nil {
 		return fmt.Errorf("message %q payload must be an object: %w", message.Kind, err)
@@ -284,8 +287,8 @@ func Validate(message Message) error {
 			return nil, nil
 		}
 		for _, key := range []string{"src", "text", "html"} {
-			if _, ok := body[key]; !ok {
-				return nil, fmt.Errorf("message %q requires payload.message.%s", message.Kind, key)
+			if _, ok := body[key].(string); !ok {
+				return nil, fmt.Errorf("message %q requires string payload.message.%s", message.Kind, key)
 			}
 		}
 		text, _ := body["text"].(string)
