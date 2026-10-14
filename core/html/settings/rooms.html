@@ -48,18 +48,18 @@
 
         <div class="panels">
             <section class="panel panel--rooms" aria-label="Список комнат">
+                <!-- Свой заголовок, а не пустая шапка панели: плитки выглядят
+                     как меню, и подписью им служит этот заголовок. -->
                 <div class="panel__head">
-                    <h2 class="panel__title">Комнаты</h2>
+                    <h2 class="panel__title">Все комнаты</h2>
                     <span class="panel__count" id="rooms-count">0</span>
                 </div>
 
-                <!-- Панель действий над списком. Кнопка «Добавить» пока без
-                     обработчика: список комнат ещё не подключён к ядру. -->
                 <div class="rooms__bar">
                     <button type="button" class="btn btn--primary" id="rooms-add">Добавить</button>
                 </div>
 
-                <ul class="rooms" id="rooms"></ul>
+                <div class="cards rooms" id="rooms"></div>
             </section>
 
             <section class="panel panel--options" id="room-options" aria-label="Настройки комнаты" aria-live="polite"></section>

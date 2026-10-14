@@ -77,27 +77,48 @@ function render() {
 
 function renderRooms() {
     if (state.rooms.length === 0) {
-        roomsEl.replaceChildren(el('li', {class: 'rooms__empty'},
-            ['Комнат пока нет. Добавьте первую.']));
+        roomsEl.replaceChildren(el('p', {class: 'rooms__empty'},
+            ['Комнат пока нет. Нажмите «Добавить».']));
         return;
     }
 
+    // Плитка, а не строка списка: те же карточки, что на главной. Плитка
+    // сделана кнопкой, потому что она не уводит со страницы, а открывает
+    // настройки под собой.
     roomsEl.replaceChildren(...state.rooms.map((room) => {
         const selectedNow = room.id === state.selectedId;
 
         const button = el('button', {
             type: 'button',
-            // is-selected ставится на саму строку, а не на li: оформление
-            // выбранной строки живёт в _rooms-list на .room-row.is-selected,
-            // и класс на li его не задевал бы. Так же сделано у чат-клиентов.
-            class: `room-row${selectedNow ? ' is-selected' : ''}`,
+            class: `card${selectedNow ? ' is-selected' : ''}`,
             'aria-pressed': String(selectedNow),
             'data-room': room.id,
-        }, [el('span', {class: 'room__name'}, [room.title || UNTITLED])]);
+        }, [
+            el('span', {class: 'card__title'}, [room.title || UNTITLED]),
+            el('span', {class: 'card__note'}, [roomNote(room)]),
+            el('span', {class: 'card__link'}, [chatURL(room.id)]),
+        ]);
         button.addEventListener('click', () => select(room.id));
 
-        return el('li', {}, [button]);
+        return button;
     }));
+}
+
+// roomNote — коротко о том, как комната выглядит: сколько событий она
+// показывает и какая тема. Без этого плитки с одинаковыми названиями
+// не отличить друг от друга.
+function roomNote(room) {
+    const events = room.events?.length ?? 0;
+    const themes = new Map(state.themes.map((t) => [t.id, t.title]));
+    const theme = themes.get(room.theme) ?? room.theme ?? 'системная';
+    const shown = events === 0 ? 'без событий' : `событий: ${events}`;
+    return `${shown} · ${theme}`;
+}
+
+// chatURL собирает полный адрес ленты: плитка показывает его, чтобы человек не
+// искал его в настройках выбранной комнаты.
+function chatURL(id) {
+    return new URL(`/chat?roomId=${encodeURIComponent(id)}`, location.origin).href;
 }
 
 function renderOptions() {
@@ -119,12 +140,14 @@ function renderOptions() {
     // забытая буква в id молча отменяла бы отправку: кнопка нажимается, ничего
     // не происходит. Внутри формы submit достаётся ей сам.
     const form = el('form', {}, [
-        el('div', {class: 'options__head'}, [
-            el('div', {}, [
+        el('div', {class: 'options__head options__head--room'}, [
+            el('div', {class: 'options__head-text'}, [
                 el('h2', {class: 'options__title'}, [room.title || UNTITLED]),
                 el('p', {class: 'options__desc'}, ['Как эта комната выглядит в ленте сообщений.']),
-                chatLink(room.id),
             ]),
+            // Ссылка справа от названия, а не под ним: в широком окне подвал
+            // панели уводил бы её за пределы видимой части.
+            chatLink(room.id),
         ]),
         el('div', {class: 'options__body'}, [
             field('Заголовок', 'Как комната называется в ленте',
@@ -163,13 +186,31 @@ function renderOptions() {
 // текст: по ней можно кликнуть и открыть ленту, а правой кнопкой — скопировать,
 // и человек получит ровно то, что сам открыл.
 function chatLink(id) {
-    return el('a', {
+    // Полный адрес, а не путь: ссылку копируют и отправляют кому-то, а
+    // «/chat?roomId=2» без хоста ни о чём не говорит. Хост берём свой же, так
+    // что на :1080 получится localhost:1080, на :1081 — localhost:1081.
+    const url = new URL(`/chat?roomId=${encodeURIComponent(id)}`, location.origin).href;
+
+    const link = el('a', {
         class: 'room-link',
-        href: `/chat?roomId=${encodeURIComponent(id)}`,
-        target: '_blank',
+        href: url,
         rel: 'noopener',
         title: 'Открыть ленту этой комнаты',
-    }, [`/chat?roomId=${id}`]);
+    }, [url]);
+
+    // Открываем сами, а не через target="_blank": нужны размеры и «без
+    // панелей». href остаётся — из-за него работает «копировать адрес ссылки»
+    // в контекстном меню.
+    link.addEventListener('click', (event) => {
+        event.preventDefault();
+        // 400x800: узкое высокое окно — лента читается в него, как в панель
+        // стрима. popup=yes обязателен: без него браузер откроет вкладку и
+        // размеры проигнорирует.
+        window.open(url, 'studio-chat',
+            'popup=yes,width=400,height=800,left=80,top=60,noopener,noreferrer');
+    });
+
+    return link;
 }
 
 // eventsField — крышки событий. Список берётся из реестра, а не из самой

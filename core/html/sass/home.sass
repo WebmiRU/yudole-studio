@@ -8,6 +8,9 @@
 // base — общий каркас темы: тёмный фон, сбросы, шрифт. Без него страница
 // остаётся белой: фон задаётся именно там, а не в разделе.
 @use "base"
+// Плитки разделов: их показывают и главная, и список комнат. Копия стилей через
+// месяц разошлась бы, а отличаться они не должны.
+@use "cards"
 
 // Каркас как у настроек: тот же фон с отсводом, тот же акцент.
 .page-home
@@ -47,66 +50,3 @@
   margin: 4px 0 28px
   color: tokens.$text-dim
   font-size: 14px
-
-// --- Плитки -----------------------------------------------------------------
-
-.home__grid
-  display: grid
-  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr))
-  gap: 16px
-
-// Плитка — это и ссылка, и кнопка. Оформление одно, чтобы меню читалось как
-// одно меню, а не как «ссылки, а рядом кнопки».
-.home__card
-  display: flex
-  flex-direction: column
-  gap: 6px
-  padding: 18px
-  border: 1px solid tokens.$border
-  border-radius: tokens.$radius
-  background: tokens.$surface
-  color: inherit
-  font: inherit
-  text-align: left
-  text-decoration: none
-  cursor: pointer
-  transition: border-color 0.12s ease, background 0.12s ease, transform 0.12s ease
-
-.home__card:hover:not(:disabled)
-  border-color: tokens.$border-hi
-  background: tokens.$surface-hi
-  transform: translateY(-1px)
-
-.home__card:focus-visible
-  outline: 2px solid tokens.$accent-hi
-  outline-offset: 2px
-
-.home__card--soon
-  cursor: default
-  opacity: .55
-
-.home__card-title
-  display: flex
-  align-items: center
-  gap: 9px
-  font-size: 16px
-  font-weight: 600
-
-.home__card-note
-  color: tokens.$text-faint
-  font-size: 13px
-
-// Метка «скоро» на заглушке: без неё плитка выглядит сломанной, а не
-// недостроенной.
-.home__badge
-  margin-left: auto
-  padding: 2px 8px
-  border-radius: tokens.$radius-pill
-  background: tokens.$surface-hi
-  color: tokens.$text-faint
-  font-size: 11px
-  font-weight: 500
-
-@media (max-width: 560px)
-  .home__grid
-    grid-template-columns: 1fr

@@ -15,54 +15,8 @@
   padding: 14px 16px
   border-bottom: 1px solid tokens.$border
 
-// Список комнат — тот же внутренний отступ, что у списка чат-клиентов: панель
-// должна читаться одной колонкой с любым другим списком в настройках.
-.rooms
-  display: flex
-  flex-direction: column
-  padding: 8px
-
-// Строка комнаты. Пока это кнопка, потому что комнату предстоит выбирать:
-// выбранная подсвечивается, и переключатель настроек справа покажет её
-// параметры. Неинтерактивным её делать незачем.
-.room-row
-  display: flex
-  align-items: center
-  gap: 10px
-  width: 100%
-  padding: 9px 12px
-  border: 1px solid transparent
-  border-radius: tokens.$radius-sm
-  background: none
-  color: inherit
-  text-align: left
-  cursor: pointer
-  transition: background 0.12s ease, border-color 0.12s ease
-
-.room-row:hover
-  background: tokens.$surface-hi
-
-.room-row.is-selected
-  background: tokens.$surface-max
-  border-color: tokens.$accent
-
-// Имя комнаты — то же начертание, что у названия чат-клиента: список один,
-// и разные вещи в одном столбце выглядели бы опечаткой, а не разными типами.
-.room__name
-  font-size: 14px
-  font-weight: 600
-  color: tokens.$text
-  overflow: hidden
-  text-overflow: ellipsis
-  white-space: nowrap
-
-// Подпись под именем: сколько каналов в комнате. Пока пустая — заготовка под
-// будущие счётчики, пустой элемент не занимает места, поэтому резервировать
-// под него высоту заранее не нужно.
-.room__meta
-  margin-top: 2px
-  font-size: 12px
-  color: tokens.$text-faint
+// Плитки берут оформление из _cards — тех же плиток, что на главной. Здесь
+// только отступы внутри панели: как у любого списка в настройках.
 
 // Пустой список: панель с заголовком и полосой кнопок не должна выглядеть
 // обрезанной.
@@ -89,3 +43,11 @@
 .room-link:hover
   color: tokens.$accent-hi
   border-color: tokens.$border-hi
+
+// Шапка настроек комнаты: название слева, ссылка справа. justify-content
+// разводит их по краям панели.
+.options__head--room
+  align-items: center
+
+.options__head-text
+  min-width: 0

@@ -1,0 +1,78 @@
+// Плитки разделов: сетка карточек-переходов. Живут в отдельном партиале,
+// потому что их показывают две страницы — главная со списком разделов и
+// настройки со списком комнат. Раньше стили были частью home и разделению не
+// подлежали: чтобы взять такие же плитки в комнатах, пришлось бы их
+// скопировать, и через месяц они бы разошлись.
+
+@use "tokens"
+
+.cards
+  display: grid
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr))
+  gap: 16px
+
+// Плитка — это и ссылка, и кнопка. Оформление одно, чтобы меню читалось как
+// одно меню, а не как «ссылки, а рядом кнопки».
+.card
+  display: flex
+  flex-direction: column
+  gap: 6px
+  padding: 18px
+  border: 1px solid tokens.$border
+  border-radius: tokens.$radius
+  background: tokens.$surface
+  color: inherit
+  font: inherit
+  text-align: left
+  text-decoration: none
+  cursor: pointer
+  transition: border-color 0.12s ease, background 0.12s ease, transform 0.12s ease
+
+.card:hover:not(:disabled)
+  border-color: tokens.$border-hi
+  background: tokens.$surface-hi
+  transform: translateY(-1px)
+
+.card:focus-visible
+  outline: 2px solid tokens.$accent-hi
+  outline-offset: 2px
+
+// Плитка, которая ещё не сделана: видна, но не нажимается.
+.card--soon
+  cursor: default
+  opacity: .55
+
+.card__title
+  display: flex
+  align-items: center
+  gap: 9px
+  font-size: 16px
+  font-weight: 600
+
+.card__note
+  color: tokens.$text-faint
+  font-size: 13px
+
+// Метка «скоро» на заглушке: без неё плитка выглядит сломанной, а не
+// недостроенной.
+.card__badge
+  margin-left: auto
+  padding: 2px 8px
+  border-radius: tokens.$radius-pill
+  background: tokens.$surface-hi
+  color: tokens.$text-faint
+  font-size: 11px
+  font-weight: 500
+
+// Адрес ленты внутри плитки. Моноширинный и приглушённый: это данные, а не
+// часть названия, но копировать их нужно.
+.card__link
+  margin-top: 4px
+  color: tokens.$text-faint
+  font-family: tokens.$mono
+  font-size: 11px
+  word-break: break-all
+
+@media (max-width: 560px)
+  .cards
+    grid-template-columns: 1fr
