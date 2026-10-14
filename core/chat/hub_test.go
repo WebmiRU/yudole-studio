@@ -2,7 +2,6 @@ package chat
 
 import (
 	"context"
-	"encoding/json/v2"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -82,22 +81,21 @@ func dial(t *testing.T, hub *Hub) *websocket.Conn {
 	return conn
 }
 
-// read waits for one message of the page's protocol and returns it.
-func read(t *testing.T, conn *websocket.Conn) envelope {
+// read waits for one protocol envelope from the chat websocket.
+func read(t *testing.T, conn *websocket.Conn) protocol.Message {
 	t.Helper()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
 	_, data, err := conn.Read(ctx)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	var message envelope
-	if err := json.Unmarshal(data, &message); err != nil {
-		t.Fatalf("not a message of the page: %v", err)
-	}
+	if err != nil { t.Fatalf("read: %v", err) }
+	message, err := protocol.Decode(data)
+	if err != nil { t.Fatalf("not a protocol message: %v", err) }
 	return message
+}
+
+type snapshotPayload struct {
+	Plugins []Channel `json:"plugins"`
+	History []protocol.Message `json:"history"`
 }
 
 // Страница, открытая позже, должна увидеть то, что было до неё: иначе чат на
@@ -127,20 +125,19 @@ func TestPageGetsTheHistoryOnOpen(t *testing.T) {
 
 	conn := dial(t, hub)
 	hello := read(t, conn)
-	if hello.Hello == nil {
-		t.Fatal("первым пришло не приветствие")
+	if hello.Kind != protocol.KindChatSnapshot { t.Fatalf("kind = %q", hello.Kind) }
+	var snapshot snapshotPayload
+	if err := hello.PayloadInto(&snapshot); err != nil { t.Fatal(err) }
+	if len(snapshot.History) != 3 { t.Fatalf("в истории %d событий, want 3", len(snapshot.History)) }
+	if len(snapshot.Plugins) != 1 || snapshot.Plugins[0].Title != "GoodGame" { t.Errorf("плагины = %+v", snapshot.Plugins) }
+	last := snapshot.History[2]
+	var payload struct {
+		Channel string `json:"channel"`
+		User protocol.ChatUser `json:"user"`
+		Message protocol.ChatLine `json:"message"`
 	}
-	if len(hello.Hello.History) != 3 {
-		t.Fatalf("в истории %d событий, want 3", len(hello.Hello.History))
-	}
-	if len(hello.Hello.Plugins) != 1 || hello.Hello.Plugins[0].Title != "GoodGame" {
-		t.Errorf("плагины = %+v", hello.Hello.Plugins)
-	}
-
-	last := hello.Hello.History[2]
-	if last.Text != "привет" || last.User != "E.Wolf" || last.Channel != "53029" {
-		t.Errorf("реплика в истории = %+v", last)
-	}
+	if err := last.PayloadInto(&payload); err != nil { t.Fatal(err) }
+	if payload.Message.Text != "привет" || payload.User.Name != "E.Wolf" || payload.Channel != "53029" { t.Errorf("реплика = %+v", payload) }
 }
 
 // Что пришло после подключения — приходит сразу.
@@ -150,20 +147,22 @@ func TestPageGetsNewEvents(t *testing.T) {
 	t.Cleanup(func() { waitFor(2*time.Second, func() bool { return source.subbed == 1 }) })
 
 	conn := dial(t, hub)
-	read(t, conn) // приветствие
+	snapshot := read(t, conn)
+	if snapshot.Kind != protocol.KindChatSnapshot { t.Fatalf("kind = %q", snapshot.Kind) }
 
 	source.events <- line(protocol.KindMessagePublic, "53029", "E.Wolf", "строка")
 
 	live := read(t, conn)
-	if live.Event == nil {
-		t.Fatal("пришло не событие")
+	if live.Kind != protocol.KindMessagePublic { t.Fatalf("kind = %q", live.Kind) }
+	var payload struct {
+		Plugin string `json:"plugin"`
+		Channel string `json:"channel"`
+		User protocol.ChatUser `json:"user"`
+		Message protocol.ChatLine `json:"message"`
 	}
-	if live.Event.Text != "строка" || live.Event.Channel != "53029" {
-		t.Errorf("событие = %+v", live.Event)
-	}
-	if live.Event.Plugin != "goodgame" {
-		t.Errorf("плагин = %q, want goodgame", live.Event.Plugin)
-	}
+	if err := live.PayloadInto(&payload); err != nil { t.Fatal(err) }
+	if payload.Message.Text != "строка" || payload.Channel != "53029" { t.Errorf("событие = %+v", payload) }
+	if payload.Plugin != "goodgame" { t.Errorf("плагин = %q, want goodgame", payload.Plugin) }
 }
 
 // Закрывшаяся страница не должна оставлять после себя подписку: иначе её
@@ -174,7 +173,7 @@ func TestUnsubscribeIsEnoughOnce(t *testing.T) {
 	t.Cleanup(func() { waitFor(2*time.Second, func() bool { return source.subbed == 1 }) })
 
 	conn := dial(t, hub)
-	read(t, conn)
+	_ = read(t, conn)
 	_ = conn.CloseNow()
 
 	if !waitFor(3*time.Second, func() bool {

@@ -17,6 +17,7 @@ import (
 	"github.com/coder/websocket"
 
 	"studio/core/plugin"
+	"studio/core/protocol"
 )
 
 const (
@@ -28,18 +29,12 @@ const (
 	stateQueue = 16
 )
 
-// stateMessage is one message of the options page's websocket: what is going on
-// with the plugins right now.
-type stateMessage struct {
-	// Hello is the full picture on connect: every plugin found on disk.
-	Hello *stateHello `json:"hello,omitempty"`
-	// Plugin is what changed: one plugin's state, right after the change.
-	Plugin *plugin.PluginView `json:"plugin,omitempty"`
+type stateSnapshot struct {
+	Plugins []plugin.PluginView `json:"plugins"`
 }
 
-// stateHello is what a page gets when it opens.
-type stateHello struct {
-	Plugins []plugin.PluginView `json:"plugins"`
+type pluginStatePayload struct {
+	Plugin plugin.PluginView `json:"plugin"`
 }
 
 // watchHandler serves the websocket of the options page.
@@ -70,7 +65,7 @@ func watchHandler(manager Manager) http.HandlerFunc {
 			known[i] = known[i].WithoutValues()
 		}
 
-		hello := stateMessage{Hello: &stateHello{Plugins: known}}
+		hello := protocol.MustNew(protocol.KindPluginsSnapshot, stateSnapshot{Plugins: known})
 		if err := writeState(ctx, conn, hello); err != nil {
 			return
 		}
@@ -98,7 +93,7 @@ func watchHandler(manager Manager) http.HandlerFunc {
 				if !ok {
 					return
 				}
-				if err := writeState(ctx, conn, stateMessage{Plugin: &view}); err != nil {
+				if err := writeState(ctx, conn, protocol.MustNew(protocol.KindPluginState, pluginStatePayload{Plugin: view})); err != nil {
 					return
 				}
 			}
@@ -106,7 +101,7 @@ func watchHandler(manager Manager) http.HandlerFunc {
 	}
 }
 
-func writeState(ctx context.Context, conn *websocket.Conn, message stateMessage) error {
+func writeState(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
 	line, err := json.Marshal(message, json.Deterministic(true))
 	if err != nil {
 		slog.Error("options: cannot encode a state", "err", err)

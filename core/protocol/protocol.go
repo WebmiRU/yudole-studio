@@ -1,12 +1,12 @@
 // Package protocol is the contract between the kernel and its plugins.
 //
-// Every line is one JSON object: a kind and a payload. The envelope has
-// exactly two fields and never grows, so adding a new kind of message cannot
-// pollute the namespace of the others.
+// Every line is one JSON object: kind is required; payload may be omitted. Any text
+// uses the shared message.src/text/html shape, while channel, user and message
+// keep the same meaning across services and transports.
 //
-//	{"kind":"plugin.chat","payload":{"title":"GoodGame","options":[...]}}
-//	{"kind":"set_options","payload":{"values":{"channels":["42"]}}}
-//	{"kind":"chat.message.public","payload":{"channel":"42","user":{...},"message":{...}}}
+//	{"kind":"system.plugin.hello","payload":{"title":"GoodGame","options":[...]}}
+//	{"kind":"system.plugin.options.set","payload":{"values":{"channels":["42"]}}}
+//	{"kind":"chat.message.public","payload":{"channel":"42","user":{...},"message":{"src":"...","text":"...","html":"..."}}}
 //
 // The kernel and the plugins import this package instead of keeping their own
 // copies of the shapes: a mistake here then breaks both sides at once, rather
@@ -124,7 +124,12 @@ type Message struct {
 // New builds an envelope with a payload of any shape.
 func New(kind string, payload any) (Message, error) {
 	if kind == "" { return Message{}, fmt.Errorf("message without a kind") }
-	if payload == nil { return Message{Kind: kind}, nil }
+	kind = canonicalKind(kind)
+	if payload == nil {
+		message := Message{Kind: kind}
+		if err := Validate(message); err != nil { return Message{}, err }
+		return message, nil
+	}
 	raw, err := json.Marshal(wirePayload(payload), json.Deterministic(true))
 	if err != nil { return Message{}, fmt.Errorf("encode the %s payload: %w", kind, err) }
 	message := Message{Kind: kind, Payload: raw}
@@ -208,6 +213,7 @@ func messageBody(text string) *MessageContent {
 
 // Encode renders a message as one protocol line.
 func Encode(message Message) ([]byte, error) {
+	message.Kind = canonicalKind(message.Kind)
 	if err := Validate(message); err != nil { return nil, err }
 	data, err := json.Marshal(message, json.Deterministic(true))
 	if err != nil {
@@ -342,8 +348,8 @@ type ChatPayload struct {
 // ChatUser is who wrote the line.
 type ChatUser struct {
 	Name  string `json:"name"`
-	ID    string `json:"id"`
-	Login string `json:"login"`
+	ID    string `json:"id,omitempty"`
+	Login string `json:"login,omitempty"`
 }
 
 // ChatLine is an alias for the shared text representation.

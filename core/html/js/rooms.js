@@ -55,10 +55,13 @@ async function load() {
 async function fetchJSON(url, options) {
     try {
         const response = await fetch(url, options);
+        const envelope = await response.json();
         if (!response.ok) {
-            throw new Error(`HTTP ${response.status}`);
+            const body = envelope?.payload?.message;
+            throw new Error(body?.text || `HTTP ${response.status}`);
         }
-        return await response.json();
+        if (!envelope?.kind) throw new Error('Ответ ядра без kind');
+        return envelope.payload ?? {};
     } catch (error) {
         state.error = `${url}: ${error.message}`;
         return null;
@@ -335,7 +338,7 @@ async function save(event) {
     const saved = await fetchJSON(`${ROOMS_API}/${encodeURIComponent(room.id)}`, {
         method: 'PUT',
         headers: {'Content-Type': 'application/json'},
-        body: JSON.stringify(body),
+        body: JSON.stringify({kind: 'system.room.save', payload: body}),
     });
 
     state.saving = false;
@@ -369,7 +372,11 @@ async function remove() {
     }
 
     state.error = '';
-    const done = await fetchJSON(`${ROOMS_API}/${encodeURIComponent(room.id)}`, {method: 'DELETE'});
+    const done = await fetchJSON(`${ROOMS_API}/${encodeURIComponent(room.id)}`, {
+        method: 'DELETE',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({kind: 'system.room.delete'}),
+    });
 
     if (!done?.deleted) {
         toast(state.error || 'Не удалось удалить', 'error', 8);
@@ -386,7 +393,11 @@ async function remove() {
 // add создаёт комнату. Имя даёт ядро — оно знает, какие номера уже заняты.
 async function add() {
     state.error = '';
-    const room = await fetchJSON(ROOMS_API, {method: 'POST'});
+    const room = await fetchJSON(ROOMS_API, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({kind: 'system.room.create'}),
+    });
 
     if (room?.id) {
         state.rooms.push(room);

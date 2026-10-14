@@ -15,6 +15,7 @@ import (
 
 	"studio/core/plugin"
 	"studio/core/settings"
+	"studio/core/protocol"
 )
 
 // fakeManager plays the part of the plugin manager for the states page needs.
@@ -72,23 +73,20 @@ func (f *fakeManager) CreateRoom() (settings.Room, error)                 { retu
 func (f *fakeManager) SaveRoom(room settings.Room) (settings.Room, error) { return room, nil }
 func (f *fakeManager) DeleteRoom(string) error                            { return nil }
 
-// readState waits for one message of the states page.
-func readState(t *testing.T, conn *websocket.Conn) stateMessage {
+// readState waits for one protocol envelope from the states websocket.
+func readState(t *testing.T, conn *websocket.Conn) protocol.Message {
 	t.Helper()
-
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
-
 	_, data, err := conn.Read(ctx)
-	if err != nil {
-		t.Fatalf("read: %v", err)
-	}
-	var message stateMessage
-	if err := json.Unmarshal(data, &message); err != nil {
-		t.Fatalf("not a message of the states page: %v", err)
-	}
+	if err != nil { t.Fatalf("read: %v", err) }
+	message, err := protocol.Decode(data)
+	if err != nil { t.Fatalf("not a protocol message: %v", err) }
 	return message
 }
+
+type testStatesSnapshot struct { Plugins []plugin.PluginView `json:"plugins"` }
+type testPluginState struct { Plugin plugin.PluginView `json:"plugin"` }
 
 // При подключении страница получает все плагины разом: с этого начинается её
 // работа, спрашивать список отдельно незачем.
@@ -112,15 +110,11 @@ func TestStatesPageGetsEveryPluginOnOpen(t *testing.T) {
 	t.Cleanup(func() { _ = conn.CloseNow() })
 
 	hello := readState(t, conn)
-	if hello.Hello == nil {
-		t.Fatal("первым пришло не приветствие")
-	}
-	if len(hello.Hello.Plugins) != 2 {
-		t.Fatalf("плагинов %d, want 2", len(hello.Hello.Plugins))
-	}
-	if hello.Hello.Plugins[0].ID != "goodgame" || hello.Hello.Plugins[0].Title != "GoodGame" {
-		t.Errorf("плагины = %+v", hello.Hello.Plugins)
-	}
+	if hello.Kind != protocol.KindPluginsSnapshot { t.Fatalf("kind = %q", hello.Kind) }
+	var snapshot testStatesSnapshot
+	if err := hello.PayloadInto(&snapshot); err != nil { t.Fatal(err) }
+	if len(snapshot.Plugins) != 2 { t.Fatalf("плагинов %d, want 2", len(snapshot.Plugins)) }
+	if snapshot.Plugins[0].ID != "goodgame" || snapshot.Plugins[0].Title != "GoodGame" { t.Errorf("плагины = %+v", snapshot.Plugins) }
 }
 
 // Изменение приходит сразу после того, как произошло, — без опроса.
@@ -138,20 +132,16 @@ func TestStatesPageGetsChangesAsTheyHappen(t *testing.T) {
 	}
 	t.Cleanup(func() { _ = conn.CloseNow() })
 
-	readState(t, conn) // приветствие
+	_ = readState(t, conn) // приветствие
 
 	fake.states <- plugin.PluginView{ID: "goodgame", State: "running", Waiting: true, WaitingText: "Спрашиваю GoodGame"}
 
 	live := readState(t, conn)
-	if live.Plugin == nil {
-		t.Fatal("пришло не состояние плагина")
-	}
-	if live.Plugin.ID != "goodgame" || live.Plugin.State != "running" {
-		t.Errorf("состояние = %+v", live.Plugin)
-	}
-	if !live.Plugin.Waiting || live.Plugin.WaitingText != "Спрашиваю GoodGame" {
-		t.Errorf("занятость не доехала: %+v", live.Plugin)
-	}
+	if live.Kind != protocol.KindPluginState { t.Fatalf("kind = %q", live.Kind) }
+	var update testPluginState
+	if err := live.PayloadInto(&update); err != nil { t.Fatal(err) }
+	if update.Plugin.ID != "goodgame" || update.Plugin.State != "running" { t.Errorf("состояние = %+v", update.Plugin) }
+	if !update.Plugin.Waiting || update.Plugin.WaitingText != "Спрашиваю GoodGame" { t.Errorf("занятость не доехала: %+v", update.Plugin) }
 }
 
 // Настроек, а с ними и паролей, в потоке быть не должно: он живёт весь день и
@@ -177,9 +167,10 @@ func TestStatesStreamCarriesNoValues(t *testing.T) {
 	t.Cleanup(func() { _ = conn.CloseNow() })
 
 	hello := readState(t, conn)
-	if hello.Hello == nil || len(hello.Hello.Plugins) != 1 {
-		t.Fatalf("приветствие = %+v", hello.Hello)
-	}
+	if hello.Kind != protocol.KindPluginsSnapshot { t.Fatalf("kind = %q", hello.Kind) }
+	var snapshot testStatesSnapshot
+	if err := hello.PayloadInto(&snapshot); err != nil { t.Fatal(err) }
+	if len(snapshot.Plugins) != 1 { t.Fatalf("приветствие = %+v", snapshot) }
 
 	line, err := marshal(hello)
 	if err != nil {
@@ -194,7 +185,7 @@ func TestStatesStreamCarriesNoValues(t *testing.T) {
 }
 
 // marshal is how the page would see one message.
-func marshal(message stateMessage) (string, error) {
+func marshal(message protocol.Message) (string, error) {
 	data, err := json.Marshal(message, json.Deterministic(true))
 	return string(data), err
 }

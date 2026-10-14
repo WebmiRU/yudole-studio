@@ -50,16 +50,22 @@ async function api(path, options = {}) {
     });
 
     const text = await response.text();
-    let data = {};
+    let envelope = {};
     if (text) {
         try {
-            data = JSON.parse(text);
+            envelope = JSON.parse(text);
         } catch {
             throw new Error('ядро ответило не JSON');
         }
     }
+    if (typeof envelope.kind !== 'string' || !envelope.kind) {
+        throw new Error('ядро ответило без kind');
+    }
+    const data = envelope.payload ?? {};
     if (!response.ok) {
-        const error = new Error(data.error || `HTTP ${response.status}`);
+        const body = data.message;
+        const message = typeof body === 'string' ? body : body?.text;
+        const error = new Error(message || `HTTP ${response.status}`);
         error.fields = data.fields ?? null;
         error.items = data.items ?? null;
         error.status = response.status;
@@ -94,8 +100,8 @@ function listenStates() {
             return;
         }
 
-        if (message.hello) {
-            for (const view of message.hello.plugins ?? []) {
+        if (message.kind === "system.plugins.snapshot") {
+            for (const view of message.payload?.plugins ?? []) {
                 applyView(view);
             }
 
@@ -118,7 +124,7 @@ function listenStates() {
             return;
         }
 
-        if (message.plugin && applyView(message.plugin)) {
+        if (message.kind === "system.plugin.state" && message.payload?.plugin && applyView(message.payload.plugin)) {
             render();
         }
     });
@@ -604,7 +610,7 @@ async function runAction(plugin, button) {
         replacePlugin(view);
         // Что именно вышло, сказал сам плагин: «готово» после кнопки про
         // смайлы не значит ничего.
-        toast(answer.message || 'Готово', 'success');
+        toast(answer.message?.text || 'Готово', 'success');
     } catch (error) {
         toast(error.message, 'error');
     } finally {
@@ -881,7 +887,11 @@ async function toggle(plugin, enabled) {
     const name = plugin.title || plugin.id;
     try {
         const action = enabled ? 'enable' : 'disable';
-        const view = await api(`${API}/${plugin.id}/${action}`, {method: 'POST'});
+        const kind = enabled ? 'system.plugin.enable' : 'system.plugin.disable';
+        const view = await api(`${API}/${plugin.id}/${action}`, {
+            method: 'POST',
+            body: JSON.stringify({kind}),
+        });
         replacePlugin(view);
 
         if (view.state === 'failed') {
@@ -933,7 +943,7 @@ function save(plugin) {
     // оживает без всякого опроса.
     api(`${API}/${plugin.id}/options`, {
         method: 'PUT',
-        body: JSON.stringify({values: state.values}),
+        body: JSON.stringify({kind: 'system.plugin.options.save', payload: {values: state.values}}),
     }).then((view) => {
         replacePlugin(view);
         state.fieldError = null;

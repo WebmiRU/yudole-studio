@@ -37,7 +37,8 @@ export async function resolveRoom(param = 'roomId') {
     if (!response.ok) {
       throw new Error(`HTTP ${response.status}`);
     }
-    rooms = (await response.json()).rooms ?? [];
+    const envelope = await response.json();
+    rooms = envelope.payload?.rooms ?? [];
   } catch (error) {
     // Ядро недоступно — лента всё равно получит события по websocket, и
     // показывать их все разумнее, чем молчать.
@@ -77,7 +78,8 @@ async function fromRoom(room) {
   let themeMissing = false;
   try {
     const response = await fetch('/api/themes');
-    const themes = response.ok ? ((await response.json()).themes ?? []) : [];
+    const envelope = response.ok ? await response.json() : {};
+    const themes = envelope.payload?.themes ?? [];
     if (!themes.some((item) => item.id === theme)) {
       theme = DEFAULT_THEME;
       themeMissing = true;

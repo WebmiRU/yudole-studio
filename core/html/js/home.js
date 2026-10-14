@@ -45,7 +45,9 @@ async function load() {
 async function fetchJSON(url) {
     try {
         const response = await fetch(url);
-        return response.ok ? await response.json() : null;
+        if (!response.ok) return null;
+        const envelope = await response.json();
+        return envelope.payload ?? null;
     } catch {
         return null;
     }

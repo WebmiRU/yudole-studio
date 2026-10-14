@@ -87,29 +87,32 @@ function connect() {
 }
 
 function handle(message) {
-    if (message.hello) {
+    if (message.kind === 'system.chat.snapshot') {
+        const snapshot = message.payload ?? {};
         state.plugins.clear();
         state.names.clear();
-        for (const plugin of message.hello.plugins ?? []) {
+        for (const plugin of snapshot.plugins ?? []) {
             state.plugins.set(plugin.plugin, plugin);
         }
         state.entries = [];
         state.channels.clear();
-        for (const entry of message.hello.history ?? []) {
+        for (const entry of snapshot.history ?? []) {
             take(entry);
         }
         redrawChannelFilter();
         redraw();
         return;
     }
-    if (message.event) {
-        take(message.event);
+    if (message.kind) {
+        take(message);
         redraw();
     }
 }
 
 // take records one entry and remembers its channel.
-function take(entry) {
+function take(message) {
+    // Keep the wire contract nested; flatten only for rendering within the page.
+    const entry = {kind: message.kind, ...(message.payload ?? {})};
     state.entries.push(entry);
     state.seen++;
 
@@ -119,15 +122,15 @@ function take(entry) {
     // Только из событий входа и выхода: там name — это имя канала из
     // настроек. А у chat.channel.info name значит другое: там название
     // трансляции, и оно названием канала не является.
-    if (entry.channel && entry.payload?.name && namesChannel(entry.kind)) {
-        state.names.set(entry.channel, entry.payload.name);
+    if (entry.channel && entry.name && namesChannel(entry.kind)) {
+        state.names.set(entry.channel, entry.name);
     }
 
     if (entry.channel) {
         const known = state.channels.get(entry.channel) ?? {name: '', plugin: entry.plugin, count: 0};
         known.count++;
-        if (entry.kind === 'chat.channel.info' && entry.payload?.name) {
-            known.name = entry.payload.name;
+        if (entry.kind === 'chat.channel.info' && entry.name) {
+            known.name = entry.name;
         }
         known.plugin = entry.plugin;
         state.channels.set(entry.channel, known);
@@ -195,14 +198,14 @@ function line(entry) {
 
 function render(entry) {
     if (isLine(entry)) {
-        const message = entry.payload?.message ?? {};
+        const message = entry.message ?? {};
         const head = authorHead(entry);
         // Html приходит только если плагин нашёл в строке смайлы и подставил
         // картинки; иначе это тот же самый текст без единой разметки, и
         // разбирать его как html незачем.
         // Подписка или рейд — это писал сервис, а не человек. Отмечаем: в ленте
         // оно стоит среди реплик, как у самой Twitch, но спутать нельзя.
-        const notice = Boolean(entry.payload?.notice);
+        const notice = Boolean(entry.notice);
         if (message.html) {
             return richBlock(entry, 'neutral', head, message.html, notice);
         }
@@ -217,7 +220,7 @@ function render(entry) {
 // видно, кто именно написал: одно и то же имя может быть и в Twitch, и в
 // YouTube, а разные ники читаются одинаково.
 function authorHead(entry) {
-    const name = entry.user ?? '—';
+    const name = entry.user?.name ?? '—';
     const logo = serviceLogo(entry.plugin, 16);
     if (!logo) {
         return el('span', {class: 'msg__author'}, [name]);
@@ -308,7 +311,7 @@ function author(entry) {
 function severityOf(entry) {
     switch (entry.kind) {
         case 'chat.connection.state': {
-            const state = entry.payload?.state;
+            const state = entry.state;
             if (state === 'online') {
                 return 'success';
             }
@@ -326,7 +329,7 @@ function severityOf(entry) {
         case 'chat.channel.unjoin.failed':
             return 'warning';
         case 'chat.message.deleted':
-            // Кто-то удалил чужую реплику: чат живёт, но человек это заметит.
+        case 'system.message.warning':
             return 'warning';
         default:
             return 'info';
@@ -337,12 +340,12 @@ function severityOf(entry) {
 // название канала внутри фразы выделяется жирным, а для этого нужен узел.
 function describe(entry) {
     const name = channelName(entry.channel);
-    const reason = entry.payload?.reason;
-    const service = entry.payload?.service ?? 'чат';
+    const reason = entry.message?.text;
+    const service = entry.service ?? 'чат';
 
     switch (entry.kind) {
         case 'chat.connection.state':
-            return [connectionPhrase(entry.payload?.state, service, reason)];
+            return [connectionPhrase(entry.state, service, reason)];
         case 'chat.channel.join.success':
             return ['Канал ', strong(name), ' подключён'];
         case 'chat.channel.join.failed':
@@ -354,9 +357,11 @@ function describe(entry) {
         case 'chat.channel.info':
             // Счётчики и название трансляции. Пока их не шлём, но когда
             // начнём — покажем, а не выкинем.
-            return [strong(name), channelInfo(entry.payload)];
+            return [strong(name), channelInfo(entry)];
         case 'chat.message.deleted':
-            return [deletedPhrase(entry.payload)];
+            return [deletedPhrase(entry.user?.name)];
+        case 'system.message.warning':
+            return [entry.message?.text ?? ''];
         default:
             // Неизвестный вид события не показываем протоколом: в ленте
             // «chat.channel.join.success» — это мусор, а не сообщение.
@@ -406,8 +411,8 @@ function channelInfo(payload) {
     return parts.flat();
 }
 
-function deletedPhrase(payload) {
-    return payload?.by ? `Реплику удалил ${payload.by}` : 'Реплику удалили';
+function deletedPhrase(name) {
+    return name ? `Реплику удалил ${name}` : 'Реплику удалили';
 }
 
 // strong is what makes a channel name stand out inside a sentence.

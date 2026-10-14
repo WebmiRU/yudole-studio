@@ -22,6 +22,7 @@ import (
 	"github.com/coder/websocket"
 
 	"studio/core/plugin"
+	"studio/core/protocol"
 )
 
 const (
@@ -48,27 +49,15 @@ type Hub struct {
 	source Source
 
 	mu      sync.Mutex
-	history []Entry
+	history []protocol.Message
 
 	subscribers map[int]*subscriber
 	next        int
 }
 
-// Entry is one event with the time it happened, ready for the page.
-type Entry struct {
-	At      time.Time      `json:"at"`
-	Plugin  string         `json:"plugin"`
-	Kind    string         `json:"kind"`
-	Channel string         `json:"channel,omitempty"`
-	Payload jsontext.Value `json:"payload"`
-	// Text is the line as plain text, for the page to show without decoding.
-	Text string `json:"text,omitempty"`
-	User string `json:"user,omitempty"`
-}
-
 // subscriber is one connected page.
 type subscriber struct {
-	events chan Entry
+	events chan protocol.Message
 }
 
 // New builds a hub over the plugins.
@@ -87,17 +76,16 @@ func (h *Hub) watch() {
 	defer unsubscribe()
 
 	for event := range events {
-		entry := toEntry(event)
-		if entry == nil {
+		message, err := toMessage(event)
+		if err != nil {
+			slog.Warn("chat: cannot normalize plugin event", "plugin", event.Plugin, "kind", event.Kind(), "err", err)
 			continue
 		}
 
 		h.mu.Lock()
-		h.history = append(h.history, *entry)
+		h.history = append(h.history, message)
 		if len(h.history) > HistoryLimit {
-			// Подрезаем с начала, но не по кускам: страница получит столько
-			// старых строк, сколько поместилось.
-			h.history = append([]Entry(nil), h.history[len(h.history)-HistoryLimit:]...)
+			h.history = append([]protocol.Message(nil), h.history[len(h.history)-HistoryLimit:]...)
 		}
 		targets := make([]*subscriber, 0, len(h.subscribers))
 		for _, sub := range h.subscribers {
@@ -107,33 +95,26 @@ func (h *Hub) watch() {
 
 		for _, sub := range targets {
 			select {
-			case sub.events <- *entry:
+			case sub.events <- message:
 			default:
-				slog.Warn("chat page is behind, dropping an event",
-					"kind", entry.Kind, "channel", entry.Channel)
+				slog.Warn("chat page is behind, dropping an event", "kind", message.Kind)
 			}
 		}
 	}
 }
 
-// toEntry turns a plugin event into what the page needs, or nil when there is
-// nothing to show.
-func toEntry(event plugin.Event) *Entry {
-	entry := &Entry{
-		At:      time.Now(),
-		Plugin:  event.Plugin,
-		Kind:    event.Kind(),
-		Channel: event.Channel(),
-		Payload: event.Message.Payload,
+// toMessage preserves the plugin's kind and payload and adds source metadata
+// inside payload so every websocket frame remains one protocol envelope.
+func toMessage(event plugin.Event) (protocol.Message, error) {
+	payload := map[string]any{}
+	if len(event.Message.Payload) != 0 {
+		if err := json.Unmarshal(event.Message.Payload, &payload); err != nil { return protocol.Message{}, err }
 	}
-
-	// Строку чата показываем сразу готовой: странице не нужно знать, где в
-	// полезной нагрузке лежит текст.
-	if chat, err := event.Chat(); err == nil {
-		entry.Text = chat.Message.Text
-		entry.User = chat.User.Name
-	}
-	return entry
+	payload["plugin"] = event.Plugin
+	payload["at"] = time.Now()
+	raw, err := json.Marshal(payload, json.Deterministic(true))
+	if err != nil { return protocol.Message{}, err }
+	return protocol.Message{Kind: event.Message.Kind, Payload: jsontext.Value(raw)}, nil
 }
 
 // Channels tells which plugins are and how they are doing. The page shows it
@@ -187,7 +168,7 @@ func (h *Hub) serve(rw http.ResponseWriter, r *http.Request) {
 	ctx, cancel := context.WithCancel(r.Context())
 	defer cancel()
 
-	sub := &subscriber{events: make(chan Entry, sendQueue)}
+	sub := &subscriber{events: make(chan protocol.Message, sendQueue)}
 
 	h.mu.Lock()
 	id := h.next
@@ -204,10 +185,11 @@ func (h *Hub) serve(rw http.ResponseWriter, r *http.Request) {
 
 	// Сначала то, что уже было, и только потом новое: иначе между «историей»
 	// и подпиской потерялось бы всё, что пришло за эти доли секунды.
-	if err := write(ctx, conn, envelope{Hello: &Hello{
-		Plugins: h.Channels(),
-		History: history,
-	}}); err != nil {
+	snapshot := protocol.MustNew(protocol.KindChatSnapshot, struct {
+		Plugins []Channel `json:"plugins"`
+		History []protocol.Message `json:"history"`
+	}{Plugins: h.Channels(), History: history})
+	if err := write(ctx, conn, snapshot); err != nil {
 		return
 	}
 	// Соединение надо ещё и читать — и не для сообщений (страница их не шлёт),
@@ -229,32 +211,16 @@ func (h *Hub) serve(rw http.ResponseWriter, r *http.Request) {
 			return
 		case <-gone:
 			return
-		case entry, ok := <-sub.events:
-			if !ok {
-				return
-			}
-			if err := write(ctx, conn, envelope{Event: &entry}); err != nil {
+		case message, ok := <-sub.events:
+			if !ok { return }
+			if err := write(ctx, conn, message); err != nil {
 				return
 			}
 		}
 	}
 }
 
-// Hello is what a page gets when it opens: the plugins and what has already
-// been said.
-type Hello struct {
-	Plugins []Channel `json:"plugins"`
-	History []Entry   `json:"history"`
-}
-
-// envelope is one message of the page's websocket. Exactly one of the fields is
-// filled: what has just happened, or what has just joined.
-type envelope struct {
-	Hello *Hello `json:"hello,omitempty"`
-	Event *Entry `json:"event,omitempty"`
-}
-
-func write(ctx context.Context, conn *websocket.Conn, message envelope) error {
+func write(ctx context.Context, conn *websocket.Conn, message protocol.Message) error {
 	line, err := json.Marshal(message, json.Deterministic(true))
 	if err != nil {
 		return err
@@ -270,6 +236,3 @@ func write(ctx context.Context, conn *websocket.Conn, message envelope) error {
 	return nil
 }
 
-func slicesClone(list []Entry) []Entry {
-	return append([]Entry(nil), list...)
-}

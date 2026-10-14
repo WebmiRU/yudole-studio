@@ -19,6 +19,7 @@ export const EVENT_GROUPS = [
             {kind: 'chat.message.public', label: 'Публичное сообщение'},
             {kind: 'chat.message.private', label: 'Личное сообщение'},
             {kind: 'chat.message.deleted', label: 'Сообщение удалено модератором'},
+            {kind: 'system.message.warning', label: 'Системное предупреждение'},
         ],
     },
     {

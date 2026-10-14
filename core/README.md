@@ -96,18 +96,27 @@ make clean      # убрать бинарники
 
 ## Протокол ядро ↔ плагин
 
-NDJSON: одно JSON-сообщение в строке, `\n` — разделитель. У сообщения ровно
-два поля: `kind` — что это, `payload` — содержимое.
+NDJSON: одно JSON-сообщение в строке, `\n` — разделитель. `kind` обязателен,
+а `payload` необязателен. Это единый конверт для stdin/stdout плагинов, HTTP API
+и WebSocket-потоков браузера.
+
+Если в сообщении есть текст, его значение передаётся объектом
+`payload.message` с полями `src`, `text` и `html`. Общие поля не меняют
+смысл от типа события к типу: `payload.user.name` — имя, `payload.user.id` —
+идентификатор, `payload.user.login` — логин, `payload.channel` — канал.
+Необязательные поля могут отсутствовать, но конкретные виды сообщений проверяют
+свои обязательные данные: например, чат требует имя автора и все три формы
+текста, а системное предупреждение — непустой `payload.message.text`.
 
 ```
-ядро → плагин   {"kind":"plugin.chat"}
-плагин → ядро   {"kind":"plugin.chat","payload":{"title":"GoodGame","version":"1.0","description":"…","options":[…]}}
-ядро → плагин   {"kind":"set_options","payload":{"values":{"channels":[…]}}}
-плагин → ядро   {"kind":"ack","payload":{"values":{"channels":[…]}}}
-плагин → ядро   {"kind":"error","payload":{"message":"…","fields":{…},"items":{…}}}
-плагин → ядро   {"kind":"waiting","payload":{"message":"спрашиваю GoodGame"}}
-плагин → ядро   {"kind":"log","payload":{"level":"info","message":"…"}}
-ядро → плагин   {"kind":"quit"}
+ядро → плагин   {"kind":"system.plugin.hello"}
+плагин → ядро   {"kind":"system.plugin.hello","payload":{"title":"GoodGame","version":"1.0","description":"…","options":[…]}}
+ядро → плагин   {"kind":"system.plugin.options.set","payload":{"values":{"channels":[…]}}}
+плагин → ядро   {"kind":"system.message.ack","payload":{"values":{"channels":[…]}}}
+плагин → ядро   {"kind":"system.message.error","payload":{"message":{"src":"…","text":"…","html":"…"},"fields":{…},"items":{…}}}
+плагин → ядро   {"kind":"system.message.waiting","payload":{"message":{"src":"Спрашиваю GoodGame","text":"Спрашиваю GoodGame","html":"Спрашиваю GoodGame"}}}
+плагин → ядро   {"kind":"system.log","payload":{"level":"info","message":{"src":"…","text":"…","html":"…"}}}
+ядро → плагин   {"kind":"system.plugin.quit"}
 ```
 
 Имя плагина ядру не сообщают: идентификатор — это имя каталога в
@@ -132,7 +141,7 @@ NDJSON: одно JSON-сообщение в строке, `\n` — раздел�
 Плагин вправе привести значения к своему виду и положить итог в `ack`:
 
 ```json
-{"kind":"ack","payload":{"values":{"channels":[{"value":"53029","label":"E.Wolf"}]}}}
+{"kind":"system.message.ack","payload":{"values":{"channels":[{"value":"53029","label":"E.Wolf"}]}}}
 ```
 
 Человек ввёл `https://goodgame.ru/E.Wolf` — в конфиг ляжет `53029` и `E.Wolf`.
@@ -146,7 +155,7 @@ NDJSON: одно JSON-сообщение в строке, `\n` — раздел�
 показывает, что поправить:
 
 ```json
-{"kind":"error","payload":{
+{"kind":"system.message.error","payload":{
   "message":"Не удалось добавить 1 канал",
   "fields":{"channels":"Не удалось добавить 1 канал"},
   "items":{"channels":{"https://goodgame.ru/E.Wolf":"Канал не найден"}}
