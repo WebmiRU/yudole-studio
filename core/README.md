@@ -109,12 +109,11 @@ NDJSON: одно JSON-сообщение в строке, `\n` — раздел�
 текста, а системное предупреждение — непустой `payload.message.text`.
 
 ```
-ядро → плагин   {"kind":"system.plugin.hello"}
-плагин → ядро   {"kind":"system.plugin.hello","payload":{"title":"GoodGame","version":"1.0","description":"…","options":[…]}}
+плагин → ядро   {"kind":"system.plugin.hello","payload":{"title":"GoodGame","version":"1.0","options":[…]}}
 ядро → плагин   {"kind":"system.plugin.options.set","payload":{"values":{"channels":[…]}}}
 плагин → ядро   {"kind":"system.message.ack","payload":{"values":{"channels":[…]}}}
 плагин → ядро   {"kind":"system.message.error","payload":{"message":{"src":"…","text":"…","html":"…"},"fields":{…},"items":{…}}}
-плагин → ядро   {"kind":"system.message.waiting","payload":{"message":{"src":"Спрашиваю GoodGame","text":"Спрашиваю GoodGame","html":"Спрашиваю GoodGame"}}}
+плагин → ядро   {"kind":"system.message.waiting","payload":{"message":{"src":"спрашиваю GoodGame","text":"спрашиваю GoodGame","html":"спрашиваю GoodGame"}}}
 плагин → ядро   {"kind":"system.log","payload":{"level":"info","message":{"src":"…","text":"…","html":"…"}}}
 ядро → плагин   {"kind":"system.plugin.quit"}
 ```
@@ -156,7 +155,7 @@ NDJSON: одно JSON-сообщение в строке, `\n` — раздел�
 
 ```json
 {"kind":"system.message.error","payload":{
-  "message":"Не удалось добавить 1 канал",
+  "message":{"src":"Не удалось добавить 1 канал","text":"Не удалось добавить 1 канал","html":"Не удалось добавить 1 канал"},
   "fields":{"channels":"Не удалось добавить 1 канал"},
   "items":{"channels":{"https://goodgame.ru/E.Wolf":"Канал не найден"}}
 }}
@@ -174,6 +173,35 @@ NDJSON: одно JSON-сообщение в строке, `\n` — раздел�
 
 Неизвестные ядру типы сообщений и ключи опций не считаются ошибкой: старый
 ядро не должен падать на новом плагине.
+
+
+## Темы сообщений
+
+Каждая тема — каталог в `themes/<id>/` с обязательными `theme.json` и
+`template.html`. В манифесте задаются заголовок и, при необходимости,
+упорядоченные файлы оформления и поведения:
+
+```json
+{
+  "title": "Системная",
+  "styles": ["reset.css", "style.css"],
+  "scripts": ["helpers.js", "theme.js"]
+}
+```
+
+`styles` и `scripts` необязательны; если они указаны, файлы должны находиться
+в каталоге темы и иметь соответственно расширение `.css` или `.js`.
+Порядок элементов массива — порядок загрузки. Шаблон загружается по адресу,
+который ядро присылает в начальном сообщении WebSocket `system.chat.snapshot`,
+вместе со ссылками на стили и скрипты. Общий движок чата читает WebSocket,
+подставляет макросы `{{payload.user.name}}` и другие пути из конверта сообщения
+и вставляет готовый элемент в `div.messages`. Несуществующее поле даёт пустую
+строку. `payload.message.html` вставляется как HTML; остальные значения
+экранируются как текст.
+
+Скрипты темы загружаются по порядку. Они могут слушать событие
+`yudole:theme-ready` (в `detail.theme` лежит описание темы) и
+`yudole:message` (в `detail` приходит исходный конверт сообщения).
 
 ## Флаги ядра
 

@@ -1,0 +1,10 @@
+<template>
+  <article class="msg" data-severity="neutral">
+    <div class="msg__head">
+      <span class="msg__author">{{payload.user.name}}</span>
+      <span class="msg__author msg__author--plugin">[{{payload.plugin}}]</span>
+    </div>
+    <div class="msg__rule"></div>
+    <div class="msg__text">{{payload.message.html}}</div>
+  </article>
+</template>

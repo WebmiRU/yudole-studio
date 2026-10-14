@@ -1,0 +1,12 @@
+:root { color-scheme: dark; --theme-bg: #07131d; --theme-surface: #0f2833; --theme-border: #205666; --theme-accent: #63d9e8; --theme-text: #defaff; --theme-muted: #a8b3bf; }
+html, body { min-height: 100%; margin: 0; background: var(--theme-bg); color: var(--theme-text); }
+.topbar, .statusbar { background: var(--theme-surface); border-color: var(--theme-border); }
+.feed { background: var(--theme-bg); }
+.feed .msg { border: 1px solid var(--theme-border); border-left: 3px solid var(--theme-accent); border-radius: 2px; background: var(--theme-surface); }
+.msg__author { color: var(--theme-accent); }
+.msg__author--plugin { color: var(--theme-muted); }
+.msg__text { color: var(--theme-text); }
+.msg__rule { background: var(--theme-border); }
+.msg[data-kind^="chat.message."] .msg__author--plugin { display: none; }
+.msg__author:empty { display: none; }
+.msg.is-notice { opacity: .8; }

@@ -1,0 +1,11 @@
+html, body { min-height: 100%; margin: 0; background: #303030; color: #ededed; }
+.topbar, .statusbar { background: #242424; border-color: #494949; }
+.feed { background: #303030; }
+.feed .msg { border: 1px solid #494949; border-left: 3px solid #8b9aa8; border-radius: 2px; background: #222426; }
+.msg__author { color: #d9e2eb; }
+.msg__author--plugin { color: #aeb7c0; }
+.msg__text { color: #ededed; }
+.msg__rule { background: #4a525b; }
+.msg[data-kind^="chat.message."] .msg__author--plugin { display: none; }
+.msg__author:empty { display: none; }
+.msg.is-notice { opacity: .8; }

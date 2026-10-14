@@ -1,5 +1,3 @@
-<!-- Red Alert 2 — Советы. Faction-inspired CSS theme built on the system theme format. -->
-<style rel="stylesheet">
 /* Red Alert 2 inspired faction theme: Soviet industrial war machine. */
 :root {
   color-scheme: dark;
@@ -104,4 +102,6 @@ a { color: #ef7668; }
   .feed .msg { padding: 9px 11px 11px; }
   .feed .msg::after { width: 48px; height: 48px; right: 4px; top: 4px; }
 }
-</style>
+
+.msg[data-kind^="chat.message."] .msg__author--plugin { display: none; }
+.msg__author:empty { display: none; }

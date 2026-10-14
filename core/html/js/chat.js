@@ -1,55 +1,30 @@
-// Страница живого чата: всё, что пишут плагины, из всех каналов и всех
-// чатов, в одной ленте.
-//
-// Данные приходят по websocket с ядра: страница ничего не опрашивает и не
-// знает, какие плагины вообще есть — что пришло, то и показали.
+// Универсальный движок чат-ленты. Все сообщения остаются конвертами
+// {kind, payload}; внешний вид задают template.html и ресурсы выбранной темы.
 
 import '../sass/chat.sass';
-import {serviceLogo} from './service-icons.js';
-import {labelOf} from './events.js';
 import {resolveRoom, apply} from './room-view.js';
 
 const API_CHAT = '/api/chat';
-const API_ROOMS = '/api/rooms';
-const API_THEMES = '/api/themes';
-
-// Комната приходит адресом: /chat?roomId=123. Так ссылку можно скопировать и
-// передать кому угодно — она сама несёт и внешний вид ленты, и набор событий.
-const ROOM_PARAM = 'roomId';
-
 const state = {
     socket: null,
-    // entries — то, что уже на экране, по порядку прихода.
+    themeId: 'system',
+    themeKey: '',
+    templateSource: '',
     entries: [],
-    // channels — какие каналы мы видели, чтобы в списке был выбор.
     channels: new Map(),
-    // names — как называть канал. Приходит из событий плагина: настройки его
-    // мы не видим, и он сам кладёт имя в каждое своё событие.
     names: new Map(),
-    // plugins — кто пишет: имя плагина и его заголовок.
     plugins: new Map(),
-    // filter — канал, который выбран в списке; пустая строка означает «все».
     filter: '',
-    // onlyLines — прятать события о каналах и соединении, оставив реплики.
     onlyLines: false,
-    // stuck — прижата ли лента к низу.
     stuck: true,
     seen: 0,
-
-    // room — комната из адреса; null, когда её указать нечем.
     room: null,
-    // roomProblem — что не нашлось: «id не указан», «комнаты 999 нет». Показывается
-    // сообщением в ленте, а не молчалив откатом на умолчания.
     roomProblem: '',
-    // shown — какие события комната показывает. null означает «все»: так работает
-    // лента без комнаты и комната, у которой список событий пуст не должен
-    // означать пустую ленту.
     shown: null,
-    // fonts — гарнитуры по названию, из списка настроек комнаты.
-    fonts: new Set(),
 };
 
 const feedEl = document.getElementById('feed');
+const scrollEl = document.querySelector('.feed');
 const stateEl = document.getElementById('state');
 const stateTextEl = document.getElementById('state-text');
 const summaryEl = document.getElementById('summary');
@@ -59,14 +34,17 @@ const onlyChatsEl = document.getElementById('only-chats');
 const LINE = 'chat.message.public';
 const PRIVATE = 'chat.message.private';
 
-// --- Подключение -----------------------------------------------------------
+// --- Подключение к ядру ------------------------------------------------------
 
-function connect() {
+function connect(themeId = state.themeId) {
+    state.themeId = themeId || 'system';
     const url = new URL(API_CHAT, location.href);
     url.protocol = location.protocol === 'https:' ? 'wss:' : 'ws:';
+    url.searchParams.set('theme', state.themeId);
 
     const socket = new WebSocket(url);
     state.socket = socket;
+    let incoming = Promise.resolve();
 
     socket.addEventListener('open', () => setConnection('online', 'на связи'));
     socket.addEventListener('message', (event) => {
@@ -76,19 +54,27 @@ function connect() {
         } catch {
             return;
         }
-        handle(message);
+        // Снимок должен закончить загрузку темы до того, как отрисуем историю
+        // или следующую живую реплику. Поэтому обработка конвертов строго по очереди.
+        incoming = incoming.then(() => handle(message)).catch((error) => {
+            console.error('chat: не удалось обработать сообщение ядра', error);
+        });
     });
     socket.addEventListener('close', () => {
+        if (state.socket !== socket) return;
         setConnection('offline', 'нет связи');
-        // Ядро может перезапускаться: пробуем сами, но не часто.
-        setTimeout(connect, 2000);
+        setTimeout(() => {
+            if (state.socket === socket) connect(state.themeId);
+        }, 2000);
     });
     socket.addEventListener('error', () => socket.close());
 }
 
-function handle(message) {
+async function handle(message) {
     if (message.kind === 'system.chat.snapshot') {
         const snapshot = message.payload ?? {};
+        await applyTheme(snapshot.theme);
+
         state.plugins.clear();
         state.names.clear();
         for (const plugin of snapshot.plugins ?? []) {
@@ -96,6 +82,7 @@ function handle(message) {
         }
         state.entries = [];
         state.channels.clear();
+        state.seen = 0;
         for (const entry of snapshot.history ?? []) {
             take(entry);
         }
@@ -103,25 +90,20 @@ function handle(message) {
         redraw();
         return;
     }
+
     if (message.kind) {
         take(message);
         redraw();
     }
 }
 
-// take records one entry and remembers its channel.
 function take(message) {
-    // Keep the wire contract nested; flatten only for rendering within the page.
+    // Здесь payload разворачивается только для логики фильтров. Шаблону передаём
+    // обратно обычный конверт с вложенным payload, ничего не переименовывая.
     const entry = {kind: message.kind, ...(message.payload ?? {})};
     state.entries.push(entry);
     state.seen++;
 
-    // Плагин назвал канал в своём событии — запоминаем, чтобы следующие
-    // сообщения о нём тоже называть по-человечески.
-    //
-    // Только из событий входа и выхода: там name — это имя канала из
-    // настроек. А у chat.channel.info name значит другое: там название
-    // трансляции, и оно названием канала не является.
     if (entry.channel && entry.name && namesChannel(entry.kind)) {
         state.names.set(entry.channel, entry.name);
     }
@@ -129,307 +111,168 @@ function take(message) {
     if (entry.channel) {
         const known = state.channels.get(entry.channel) ?? {name: '', plugin: entry.plugin, count: 0};
         known.count++;
-        if (entry.kind === 'chat.channel.info' && entry.name) {
-            known.name = entry.name;
-        }
+        if (entry.kind === 'chat.channel.info' && entry.name) known.name = entry.name;
         known.plugin = entry.plugin;
         state.channels.set(entry.channel, known);
         redrawChannelFilterSoon();
     }
 
-    if (isLine(entry)) {
-        markSeen();
-    }
+    if (isLine(entry)) markSeen();
+    // Скрипты темы могут подключать обработчики событий, но не подменяют протокол.
+    document.dispatchEvent(new CustomEvent('yudole:message', {detail: message}));
 }
 
-// isLine reports whether the entry is a chat line.
 function isLine(entry) {
     return entry.kind === LINE || entry.kind === PRIVATE;
 }
 
-// --- Отрисовка --------------------------------------------------------------
+// --- Загрузка темы -----------------------------------------------------------
 
-function redraw() {
-    const shown = state.entries.filter(passes);
+async function applyTheme(descriptor) {
+    // Старый сервер/отсутствующая тема не должны превращать чат в пустую страницу.
+    const theme = descriptor ?? {
+        id: 'system',
+        title: 'Системная',
+        template: '/themes/system/template.html',
+        styles: ['/themes/system/style.css'],
+        scripts: [],
+    };
+    const key = JSON.stringify(theme);
+    if (key === state.themeKey && state.templateSource) return;
 
-    // Держим не больше сотни строк: иначе страница растёт бесконечно.
-    // Неизвестные события не дают блока, поэтому null убираем.
-    const trimmed = shown.slice(-100).map(line).filter(Boolean);
-
-    feedEl.replaceChildren(...trimmed);
-
-    if (state.stuck) {
-        feedEl.scrollTop = feedEl.scrollHeight;
+    let templateSource = '';
+    try {
+        const response = await fetch(theme.template || '/themes/system/template.html', {cache: 'no-store'});
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        templateSource = await response.text();
+    } catch (error) {
+        console.warn('chat: шаблон темы не загрузился', error);
+        templateSource = '<template><article class="msg"><div class="msg__text">{{payload.message.text}}</div></article></template>';
     }
-    updateSummary(trimmed);
+
+    document.querySelectorAll('[data-theme-style], [data-theme-script]').forEach((node) => node.remove());
+    state.templateSource = templateSource;
+    state.themeKey = key;
+
+    for (const href of theme.styles ?? []) {
+        await loadStyle(href);
+    }
+    for (const src of theme.scripts ?? []) {
+        await loadScript(src);
+    }
+    document.dispatchEvent(new CustomEvent('yudole:theme-ready', {detail: {theme}}));
 }
 
-// passes is the filter: the chosen channel, and whether service messages are
-// shown at all.
-function passes(entry) {
-    if (state.onlyLines && !isLine(entry)) {
-        return false;
-    }
-    if (state.filter && entry.channel !== state.filter) {
-        return false;
-    }
-    return true;
+function loadStyle(href) {
+    return new Promise((resolve) => {
+        const link = document.createElement('link');
+        link.rel = 'stylesheet';
+        link.href = href;
+        link.dataset.themeStyle = '';
+        link.addEventListener('load', resolve, {once: true});
+        link.addEventListener('error', resolve, {once: true});
+        document.head.append(link);
+    });
 }
 
-// Виды сообщений: рамка слева. Всё, что не реплика, — служебное, и у служебного
-// есть важность: об одном человек стоит знать, другое он и сам увидит.
-const SEVERITIES = ['neutral', 'info', 'success', 'warning', 'error'];
+function loadScript(src) {
+    return new Promise((resolve) => {
+        const script = document.createElement('script');
+        script.src = src;
+        script.async = false;
+        script.dataset.themeScript = '';
+        script.addEventListener('load', resolve, {once: true});
+        script.addEventListener('error', resolve, {once: true});
+        document.body.append(script);
+    });
+}
 
-// line is one block: a chat line, or a note about a channel.
+// --- Рендер сообщений из template.html --------------------------------------
+
+// Макросы — dot-path в исходном конверте. Неизвестный путь/поле возвращает
+// пустую строку; единственное поле, вставляемое как HTML, — message.html.
 function line(entry) {
-    const node = render(entry);
-    if (!node) {
-        return null;
-    }
-
-    // Событие, которого комната не показывает, прячем, а не выкидываем: узел
-    // остаётся в ленте на своём месте и просто не виден. Так разбор «куда делось
-    // сообщение» упирается в узел, а не в пустоту.
-    if (state.shown && !state.shown.has(entry.kind)) {
-        node.style.display = 'none';
-    }
+    const node = renderTemplate(entry);
+    if (!node) return null;
+    if (state.shown && !state.shown.has(entry.kind)) node.style.display = 'none';
     return node;
 }
 
-function render(entry) {
-    if (isLine(entry)) {
-        const message = entry.message ?? {};
-        const head = authorHead(entry);
-        // Html приходит только если плагин нашёл в строке смайлы и подставил
-        // картинки; иначе это тот же самый текст без единой разметки, и
-        // разбирать его как html незачем.
-        // Подписка или рейд — это писал сервис, а не человек. Отмечаем: в ленте
-        // оно стоит среди реплик, как у самой Twitch, но спутать нельзя.
-        const notice = Boolean(entry.notice);
-        if (message.html) {
-            return richBlock(entry, 'neutral', head, message.html, notice);
+function renderTemplate(entry) {
+    const envelope = {kind: entry.kind, payload: entry};
+    const source = state.templateSource || '<template><article class="msg"><div class="msg__text">{{payload.message.text}}</div></article></template>';
+    const markup = source.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (token, path) => {
+        const value = path.split('.').reduce((current, key) => current == null ? undefined : current[key], envelope);
+        if (path === 'payload.message.html') {
+            if (typeof value === 'string' && value !== '') return value;
+            const fallback = entry.message?.text ?? '';
+            return escapeHTML(String(fallback));
         }
-        return block(entry, 'neutral', head, message.text ?? '', notice);
-    }
+        if (value === null || value === undefined) return '';
+        if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+            return escapeHTML(String(value));
+        }
+        return '';
+    });
 
-    return block(entry, severityOf(entry), author(entry), describe(entry));
+    const fragment = document.createElement('template');
+    fragment.innerHTML = markup;
+    let root = fragment.content.firstElementChild;
+    if (root?.tagName === 'TEMPLATE') root = root.content.firstElementChild;
+    if (!root) return null;
+
+    const node = root.cloneNode(true);
+    node.classList.add('msg');
+    node.dataset.kind = entry.kind;
+    node.dataset.severity = severityOf(entry);
+    if (entry.notice) node.classList.add('is-notice');
+    return node;
 }
 
-// authorHead is the name of the person who wrote, with the service's mark to
-// the left of it. В одной ленте сидят сразу несколько сервисов, и без значка не
-// видно, кто именно написал: одно и то же имя может быть и в Twitch, и в
-// YouTube, а разные ники читаются одинаково.
-function authorHead(entry) {
-    const name = entry.user?.name ?? '—';
-    const logo = serviceLogo(entry.plugin, 16);
-    if (!logo) {
-        return el('span', {class: 'msg__author'}, [name]);
-    }
-
-    const icon = el('span', {class: 'msg__service', title: serviceTitle(entry)});
-    icon.append(logo);
-
-    return el('span', {class: 'msg__author'}, [icon, name]);
+function escapeHTML(value) {
+    return value.replace(/[&<>"']/g, (char) => ({
+        '&': '&amp;',
+        '<': '&lt;',
+        '>': '&gt;',
+        '"': '&quot;',
+        "'": '&#39;',
+    })[char]);
 }
 
-// serviceTitle is the name of the service for the tooltip: значок без подписи —
-// просто пятнышко, а с подписью человек понимает, что это за площадка.
-function serviceTitle(entry) {
-    const plugin = state.plugins.get(entry.plugin);
-    return plugin?.title || entry.plugin || '';
+function redraw() {
+    const shown = state.entries.filter(passes);
+    const trimmed = shown.slice(-100).map(line).filter(Boolean);
+    feedEl.replaceChildren(...trimmed);
+    if (state.stuck) scrollEl.scrollTop = scrollEl.scrollHeight;
+    updateSummary(trimmed);
 }
 
-// richBlock is a block whose text the plugin already turned into markup —
-// смайлы вместо их кодов. Разметку ставим целиком: плагин её собрал сам и
-// экранировал всё, что не разметка.
-function richBlock(entry, severity, head, html, notice = false) {
-    const text = el('div', {class: 'msg__text'});
-    text.innerHTML = html;
-
-    return el('article', noticeAttrs(notice), [
-        el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
-        el('div', {class: 'msg__rule'}),
-        text,
-    ]);
+function passes(entry) {
+    if (state.onlyLines && !isLine(entry)) return false;
+    if (state.filter && entry.channel !== state.filter) return false;
+    return true;
 }
 
-// block is the shape of every message: who wrote it, a rule under the name, and
-// then the text itself.
-function block(entry, severity, head, text, notice = false) {
-    // Текст собирается из кусков, а куски лежат в массивах: расплющиваем
-    // насколько угодно глубоко, иначе в блок попадёт сам массив.
-    const body = [...[text].flat(Infinity)].filter(
-        (piece) => piece !== null && piece !== undefined && piece !== '',
-    );
-    if (body.length === 0) {
-        return null;
-    }
-
-    return el('article', noticeAttrs(notice), [
-        // Полоска стоит между автором и текстом, а не рядом с автором: шапка
-        // выстроена в строку, и внутри неё полоска легла бы вбок.
-        el('div', {class: 'msg__head'}, [...[head].flat().filter(Boolean)]),
-        el('div', {class: 'msg__rule'}),
-        el('div', {class: 'msg__text'}, body.map((piece) => (
-            typeof piece === 'string' ? document.createTextNode(piece) : piece
-        ))),
-    ]);
-}
-
-// noticeAttrs — как выглядит служебное сообщение. Отметка нужна и на блоке,
-// и в атрибутах: по одному цвету полоски не отличить, а тег показывает, что
-// реплику писал сервис, а не человек.
-function noticeAttrs(notice) {
-    if (notice) {
-        return {class: 'msg is-notice', 'data-severity': 'info'};
-    }
-    return {class: 'msg', 'data-severity': 'neutral'};
-}
-
-// author is who the service message is from: the plugin that sent it, in
-// brackets, so it never gets confused with a person in the chat.
-function author(entry) {
-    const plugin = state.plugins.get(entry.plugin);
-    const name = plugin?.title || entry.plugin || 'чат';
-
-    // Значок тут — тем же, что и у реплик. В ленте вперемешку идут сообщения
-    // Twitch, YouTube и VK Видео, и служебная строка «YouTube: в сети» должна
-    // выглядеть так же, как и реплика оттуда же.
-    const logo = serviceLogo(entry.plugin, 16);
-    if (!logo) {
-        return el('span', {class: 'msg__author msg__author--plugin'}, [`[${name}]`]);
-    }
-    const icon = el('span', {class: 'msg__service', title: name});
-    icon.append(logo);
-    return el('span', {class: 'msg__author msg__author--plugin'}, [icon, `[${name}]`]);
-}
-
-// severityOf says how much a service event matters.
-//
-// Разбивка не «на глаз»: важность выводится из того, что произошло, чтобы одна
-// и та же строка всегда выглядела одинаково — и на странице, и в тестах.
 function severityOf(entry) {
     switch (entry.kind) {
-        case 'chat.connection.state': {
-            const state = entry.state;
-            if (state === 'online') {
-                return 'success';
-            }
-            // Пока переподключаемся — это ещё не беда; когда связи нет совсем,
-            // человек должен это заметить.
-            return state === 'offline' ? 'error' : 'info';
-        }
+        case 'chat.connection.state':
+            if (entry.state === 'online') return 'success';
+            return entry.state === 'offline' ? 'error' : 'info';
         case 'chat.channel.join.success':
             return 'success';
         case 'chat.channel.join.failed':
             return 'error';
         case 'chat.channel.unjoin.success':
-            // Мы вышли сами, по настройкам: это было задумано, а не поломка.
             return 'info';
         case 'chat.channel.unjoin.failed':
-            return 'warning';
         case 'chat.message.deleted':
         case 'system.message.warning':
             return 'warning';
         default:
-            return 'info';
+            return 'neutral';
     }
 }
 
-// describe is the text of a service message. It returns pieces, not one string:
-// название канала внутри фразы выделяется жирным, а для этого нужен узел.
-function describe(entry) {
-    const name = channelName(entry.channel);
-    const reason = entry.message?.text;
-    const service = entry.service ?? 'чат';
-
-    switch (entry.kind) {
-        case 'chat.connection.state':
-            return [connectionPhrase(entry.state, service, reason)];
-        case 'chat.channel.join.success':
-            return ['Канал ', strong(name), ' подключён'];
-        case 'chat.channel.join.failed':
-            return ['Не удалось подключить канал ', strong(name), `: ${reason ?? '?'}`];
-        case 'chat.channel.unjoin.success':
-            return ['Канал ', strong(name), ' отключён'];
-        case 'chat.channel.unjoin.failed':
-            return ['Не удалось отключить канал ', strong(name), `: ${reason ?? '?'}`];
-        case 'chat.channel.info':
-            // Счётчики и название трансляции. Пока их не шлём, но когда
-            // начнём — покажем, а не выкинем.
-            return [strong(name), channelInfo(entry)];
-        case 'chat.message.deleted':
-            return [deletedPhrase(entry.user?.name)];
-        case 'system.message.warning':
-            return [entry.message?.text ?? ''];
-        default:
-            // Неизвестный вид события не показываем протоколом: в ленте
-            // «chat.channel.join.success» — это мусор, а не сообщение.
-            console.warn('chat: неизвестное событие', entry.kind, entry);
-            return null;
-    }
-}
-
-// connectionPhrase says how the connection to the service is. Каждое состояние
-// читается как отдельная фраза, а не как слово в столбце.
-function connectionPhrase(state, service, reason) {
-    const withReason = (text) => (reason ? `${text}: ${reason}` : text);
-
-    switch (state) {
-        case 'online':
-            return `Подключились к ${service}`;
-        case 'connecting':
-            return `Подключаемся к ${service}`;
-        case 'reconnecting':
-            return withReason(`Переподключаемся к ${service}`);
-        case 'offline':
-            return `Нет связи с ${service}`;
-        default:
-            return `${service}: ${stateWord(state)}`;
-    }
-}
-
-// channelInfo adds what the plugin told about the channel. Приходит не всегда:
-// если название трансляции совпало с названием канала, повторять его смысла
-// нет, и плагин молчит.
-function channelInfo(payload) {
-    const parts = [];
-
-    if (payload?.name) {
-        parts.push([' — ', strong(payload.name)]);
-    }
-    if (payload?.clients) {
-        parts.push([`, ${payload.clients} в канале`]);
-    }
-    if (payload?.premiumOnly) {
-        parts.push([`, только для подписчиков`]);
-    }
-    if (payload?.smileOnly) {
-        parts.push([`, только смайлики`]);
-    }
-
-    return parts.flat();
-}
-
-function deletedPhrase(name) {
-    return name ? `Реплику удалил ${name}` : 'Реплику удалили';
-}
-
-// strong is what makes a channel name stand out inside a sentence.
-function strong(text) {
-    return el('b', {class: 'msg__channel'}, [text]);
-}
-
-function stateWord(value) {
-    return {
-        connecting: 'подключаемся',
-        online: 'на связи',
-        reconnecting: 'переподключаемся',
-        offline: 'нет связи',
-    }[value] ?? value ?? '';
-}
-
-// namesChannel reports whether the event's name is the channel's own name.
 function namesChannel(kind) {
     return kind === 'chat.channel.join.success'
         || kind === 'chat.channel.join.failed'
@@ -437,29 +280,15 @@ function namesChannel(kind) {
         || kind === 'chat.channel.unjoin.failed';
 }
 
-// channelName is what we call a channel in the text. First the name the user
-// gave it in the settings, then the title the service knows it by, and only
-// в конце — номер: назвать канал его номером значит сказать человеку «как
-// зовут».
 function channelName(id) {
-    if (!id) {
-        return '';
-    }
-    const fromSettings = state.names.get(id);
-    if (fromSettings) {
-        return fromSettings;
-    }
-    const known = state.channels.get(id);
-    return known?.name || id;
+    if (!id) return '';
+    return state.names.get(id) || state.channels.get(id)?.name || id;
 }
 
-// channelTitle is the long form, for places with room to explain.
 function channelTitle(id) {
     const known = state.channels.get(id);
     const name = channelName(id);
-    if (!known || !known.name || known.name === name) {
-        return name;
-    }
+    if (!known || !known.name || known.name === name) return name;
     return `${name} — «${known.name}»`;
 }
 
@@ -467,23 +296,13 @@ function updateSummary(shown) {
     const lines = shown.filter(isLine).length;
     const total = state.entries.filter(isLine).length;
     const hidden = total - lines;
-
     const parts = [`реплик: ${total}`];
-    if (hidden > 0) {
-        parts.push(`показано: ${lines}`);
-    }
-    if (state.channels.size) {
-        parts.push(`каналов: ${state.channels.size}`);
-    }
+    if (hidden > 0) parts.push(`показано: ${lines}`);
+    if (state.channels.size) parts.push(`каналов: ${state.channels.size}`);
     summaryEl.textContent = parts.join(' · ');
 }
 
-// --- Каналы -----------------------------------------------------------------
-
-// redrawChannelFilter is called on every event, but the list itself changes
-// rarely: rebuilding a select while the person picks from it would be rude.
 let filterTimer = 0;
-
 function redrawChannelFilterSoon() {
     clearTimeout(filterTimer);
     filterTimer = setTimeout(redrawChannelFilter, 500);
@@ -492,11 +311,9 @@ function redrawChannelFilterSoon() {
 function redrawChannelFilter() {
     const chosen = state.filter;
     const options = [el('option', {value: ''}, ['все каналы'])];
-
-    for (const [id, known] of [...state.channels].sort()) {
+    for (const [id] of [...state.channels].sort()) {
         options.push(el('option', {value: id}, [channelTitle(id)]));
     }
-
     channelEl.replaceChildren(...options);
     channelEl.value = state.channels.has(chosen) || chosen === '' ? chosen : '';
     state.filter = channelEl.value;
@@ -506,80 +323,50 @@ channelEl.addEventListener('change', () => {
     state.filter = channelEl.value;
     redraw();
 });
-
 onlyChatsEl.addEventListener('change', () => {
     state.onlyLines = onlyChatsEl.checked;
     redraw();
 });
-
-// --- Прокрутка --------------------------------------------------------------
-
-// follow the tail, but only while the person is already at the bottom: иначе
-// новая строка выбивала бы то, что он читает.
-feedEl.addEventListener('scroll', () => {
-    const gap = feedEl.scrollHeight - feedEl.scrollTop - feedEl.clientHeight;
+scrollEl.addEventListener('scroll', () => {
+    const gap = scrollEl.scrollHeight - scrollEl.scrollTop - scrollEl.clientHeight;
     state.stuck = gap < 40;
 });
 
 function markSeen() {
-    document.title = `studio — чат`;
+    document.title = 'Yudole studio light — чат';
 }
-
-// --- Прочее -----------------------------------------------------------------
-
 function setConnection(name, text) {
     stateEl.dataset.state = name;
     stateTextEl.textContent = text;
 }
-
 function el(tag, attrs = {}, children = []) {
     const node = document.createElement(tag);
     for (const [name, value] of Object.entries(attrs)) {
-        if (name === 'class') {
-            node.className = value;
-        } else if (value !== undefined && value !== null) {
-            node.setAttribute(name, value);
-        }
+        if (name === 'class') node.className = value;
+        else if (value !== undefined && value !== null) node.setAttribute(name, value);
     }
-    for (const child of children) {
-        node.append(child);
-    }
+    for (const child of children) node.append(child);
     return node;
 }
-
-// showProblem выводит строку о том, что с комнатой не так, — под шапкой, а не в
-// ленте. В ленте она уезжала бы за верхний край: та прокручивается вниз.
 function showProblem(text) {
     const bar = document.getElementById('room-problem');
-    if (!bar) {
-        return;
-    }
+    if (!bar) return;
     bar.textContent = text;
     bar.hidden = !text;
 }
 
-// setupRoom читает комнату из адреса и накрывает ею ленту.
-//
-// Разбор идёт параллельно с подключением: пока он ходит в ядро за комнатами,
-// websocket уже набирает историю, и она не потеряется — события придут в state
-// раньше, чем покажется, а redraw пройдёт по ним позже с уже готовой комнатой.
 async function setupRoom() {
     const view = await resolveRoom('roomId');
-
     state.room = view.room;
     state.roomProblem = view.problem;
     state.shown = view.shown === null ? null : new Set(view.shown);
+    state.themeId = new URLSearchParams(location.search).get('theme') || view.theme || 'system';
     apply(view, feedEl);
 
-    // Заголовок: с комнатой — её название, без — как было.
     const titleEl = document.getElementById('room-title');
-    if (titleEl) {
-        titleEl.textContent = view.room?.title || 'Все каналы';
-    }
-
+    if (titleEl) titleEl.textContent = view.room?.title || 'Все каналы';
     showProblem(view.problem);
-    redraw();
+    connect(state.themeId);
 }
 
-connect();
 setupRoom();

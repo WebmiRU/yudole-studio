@@ -24,6 +24,9 @@ func writeTheme(t *testing.T, dir, name, title string) string {
 	if err := os.WriteFile(filepath.Join(full, FileName), []byte(manifest), 0o644); err != nil {
 		t.Fatalf("write %s: %v", FileName, err)
 	}
+	if err := os.WriteFile(filepath.Join(full, TemplateFile), []byte(`<template><article>{{payload.message.text}}</article></template>`), 0o644); err != nil {
+		t.Fatalf("write %s: %v", TemplateFile, err)
+	}
 	return full
 }
 
@@ -169,6 +172,9 @@ func TestScanToleratesExtraKeys(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(full, FileName), []byte(data), 0o644); err != nil {
 		t.Fatalf("write: %v", err)
 	}
+	if err := os.WriteFile(filepath.Join(full, TemplateFile), []byte("<template><article/></template>"), 0o644); err != nil {
+		t.Fatalf("write template: %v", err)
+	}
 
 	if got := titles(Scan(dir)); !slices.Equal(got, []string{"StarCraft"}) {
 		t.Errorf("Scan titles: %v, want [StarCraft]", got)
@@ -257,6 +263,28 @@ func TestNilCatalogIsUsable(t *testing.T) {
 }
 
 // Темы ищутся рядом с ядром, а если его там нет — в корне репозитория.
+
+func TestScanRequiresTemplateAndKeepsAssetOrder(t *testing.T) {
+	dir := t.TempDir()
+	full := filepath.Join(dir, "ordered")
+	if err := os.MkdirAll(full, 0o755); err != nil { t.Fatal(err) }
+	manifest := `{"title":"Ordered","styles":["base.css","detail.css"],"scripts":["first.js","second.js"]}`
+	if err := os.WriteFile(filepath.Join(full, FileName), []byte(manifest), 0o644); err != nil { t.Fatal(err) }
+	for _, file := range []string{"base.css", "detail.css", "first.js", "second.js"} {
+		if err := os.WriteFile(filepath.Join(full, file), []byte(""), 0o644); err != nil { t.Fatal(err) }
+	}
+	// No template: not a valid theme.
+	if len(Scan(dir).List()) != 0 { t.Fatal("theme without template was accepted") }
+	if err := os.WriteFile(filepath.Join(full, TemplateFile), []byte("<template/>"), 0o644); err != nil { t.Fatal(err) }
+	item, ok := Scan(dir).Get("ordered")
+	if !ok { t.Fatal("valid theme not found") }
+	if len(item.Styles) != 2 || !strings.HasSuffix(item.Styles[0], "/base.css") || !strings.HasSuffix(item.Styles[1], "/detail.css") {
+		t.Errorf("styles lost order: %#v", item.Styles)
+	}
+	if len(item.Scripts) != 2 || !strings.HasSuffix(item.Scripts[0], "/first.js") || !strings.HasSuffix(item.Scripts[1], "/second.js") {
+		t.Errorf("scripts lost order: %#v", item.Scripts)
+	}
+}
 func TestDefaultDirPrefersBase(t *testing.T) {
 	base := t.TempDir()
 	repo := t.TempDir()
@@ -298,19 +326,24 @@ func TestDefaultDirReportsWhereToPutThemes(t *testing.T) {
 // Handler отдаёт стиль темы и её картинки, а всё, что не тема, — 404.
 func TestHandlerServesThemeFiles(t *testing.T) {
 	dir := t.TempDir()
-	writeTheme(t, dir, "alliance", `{"title": "Альянс"}`)
-	writeFile(t, dir, "alliance", StyleFile, `<style rel="stylesheet">.topbar{}</style>`)
-	writeFile(t, dir, "alliance", "emblem.svg", `<svg/>`)
+	writeTheme(t, dir, "alliance", "Альянс")
+	writeFile(t, dir, "alliance", StyleFile, ".topbar{}")
+	writeFile(t, dir, "alliance", "emblem.svg", "<svg/>")
 
 	handler := Handler(Scan(dir))
 
-	front := httptest.NewRecorder()
-	handler.ServeHTTP(front, httptest.NewRequest("GET", "/themes/alliance", nil))
-	if front.Code != http.StatusOK {
-		t.Fatalf("style: код %d, а нужен 200", front.Code)
+	template := httptest.NewRecorder()
+	handler.ServeHTTP(template, httptest.NewRequest("GET", "/themes/alliance", nil))
+	if template.Code != http.StatusOK {
+		t.Fatalf("template: код %d, а нужен 200", template.Code)
 	}
-	if !strings.Contains(front.Body.String(), ".topbar") {
-		t.Errorf("style: в ответе нет стиля: %q", front.Body.String())
+	if !strings.Contains(template.Body.String(), "payload.message.text") {
+		t.Errorf("template: в ответе нет шаблона: %q", template.Body.String())
+	}
+	style := httptest.NewRecorder()
+	handler.ServeHTTP(style, httptest.NewRequest("GET", "/themes/alliance/style.css", nil))
+	if style.Code != http.StatusOK || !strings.Contains(style.Body.String(), ".topbar") {
+		t.Errorf("style: status=%d body=%q", style.Code, style.Body.String())
 	}
 
 	img := httptest.NewRecorder()
@@ -321,11 +354,11 @@ func TestHandlerServesThemeFiles(t *testing.T) {
 
 	// Каталог без theme.json — не тема, даже если файлы внутри есть.
 	writeTheme(t, dir, "no-manifest", "")
-	writeFile(t, dir, "no-manifest", StyleFile, `<style/>`)
+	writeFile(t, dir, "no-manifest", TemplateFile, "<template/>")
 	for _, addr := range []string{
 		"/themes/no-manifest",
 		"/themes/absent",
-		// Выход за пределы каталога тем: theme.json и styles.css живут рядом.
+		// Выход за пределы каталога тем: assets must stay within a theme.
 		"/themes/alliance/../theme.json",
 		"/themes/alliance/../../etc/passwd",
 	} {

@@ -173,7 +173,7 @@ func run() error {
 	}
 
 	// Живой чат: одна подписка на все плагины, из неё кормятся все страницы.
-	hub := chat.New(manager)
+	hub := chat.New(manager, catalog)
 
 	mux := http.NewServeMux()
 	mux.Handle("GET /healthz", healthHandler(page))

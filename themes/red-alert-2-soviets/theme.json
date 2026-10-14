@@ -1,3 +1,6 @@
 {
-  "title": "Red Alert 2 — Советы"
+  "title": "Red Alert 2 — Советы",
+  "styles": [
+    "style.css"
+  ]
 }
