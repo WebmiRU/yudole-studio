@@ -283,9 +283,11 @@ func (s *socket) sync(ctx context.Context, client *chat.Client, live map[chat.ID
 		// уже названо выше, и если название трансляции совпадает с ним —
 		// повторять нечего. Счётчики придут сами из update_channel_info.
 		info := protocol.ChannelInfoPayload{
-			Channel:     string(id),
-			Name:        joined.ChannelName,
-			Streamer:    joined.ChannelKey,
+			Channel: string(id),
+			Name:    joined.ChannelName,
+			// ChannelKey — ник стримера, поэтому идёт и в имя, и в логин:
+			// раньше здесь было отдельное поле Streamer.
+			User:        &protocol.ChatUser{Name: joined.ChannelKey, Login: joined.ChannelKey},
 			Clients:     joined.Clients,
 			Users:       joined.Users,
 			PremiumOnly: joined.PremiumOnly != 0,
@@ -349,7 +351,9 @@ func (s *socket) forward(message *chat.Message) {
 		s.send(protocol.KindMessageDeleted, protocol.DeletedMessagePayload{
 			Channel:   string(removed.Channel),
 			MessageID: string(removed.MessageID),
-			By:        removed.AdminName,
+			// Раньше moderator сюда клался в поле By, теперь это тот же
+			// ChatUser, что и у остальных событий.
+			User: &protocol.ChatUser{Name: removed.AdminName},
 		})
 
 	case chat.TypeUnjoin:

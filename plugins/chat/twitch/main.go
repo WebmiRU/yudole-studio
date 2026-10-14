@@ -580,10 +580,13 @@ func runSession(parent context.Context, current settings) error {
 
 		case "CLEARMSG":
 			if len(message.Params) > 0 && message.Tags["target-msg-id"] != "" {
+				login := userLogin(message.Prefix)
 				send(protocol.KindMessageDeleted, protocol.DeletedMessagePayload{
 					Channel:   channelName(message.Params[0]),
 					MessageID: message.Tags["target-msg-id"],
-					By:        userLogin(message.Prefix),
+					// Раньше модератор сюда клался в поле By, теперь это тот же
+					// ChatUser, что и у остальных событий.
+					User: &protocol.ChatUser{Name: login, Login: login},
 				})
 			}
 
