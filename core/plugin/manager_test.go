@@ -54,7 +54,7 @@ while IFS= read -r line; do
   case "$line" in
     *system.fake.work*)
       echo '{"kind":"system.message.waiting","payload":{"message":{"src":"Спрашиваю сервис","text":"Спрашиваю сервис","html":"Спрашиваю сервис"}}}'
-      echo '{"kind":"system.message.ack","payload":{"message":"готово"}}'
+      echo '{"kind":"system.message.ack","payload":{"message":{"src":"готово","text":"готово","html":"готово"}}}'
       ;;
     *system.plugin.options.set*) echo '{"kind":"system.message.ack"}' ;;
     *system.plugin.quit*)        echo '{"kind":"system.message.ack"}'; exit 0 ;;
