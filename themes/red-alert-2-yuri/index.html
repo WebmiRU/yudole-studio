@@ -1,0 +1,109 @@
+<!-- Red Alert 2 — Юрий. Faction-inspired CSS theme built on the system theme format. -->
+<style rel="stylesheet">
+/* Red Alert 2 inspired faction theme: Yuri's psionic, unsettling control network. */
+:root {
+  color-scheme: dark;
+  --ra-bg: #100a1a;
+  --ra-surface: #1b1028;
+  --ra-panel: #21132f;
+  --ra-border: #553166;
+  --ra-border-hi: #8654a3;
+  --ra-accent: #9b51dc;
+  --ra-accent-hi: #e3b7ff;
+  --ra-cold: #68dfd0;
+  --ra-text: #f0e3f7;
+  --ra-dim: #b29bbf;
+  --ra-shadow: rgba(0, 0, 0, .7);
+}
+html, body {
+  min-height: 100%;
+  margin: 0;
+  background-color: var(--ra-bg);
+  background-image: radial-gradient(ellipse at 50% -20%, rgba(111, 50, 151, .2), transparent 55%), linear-gradient(135deg, rgba(16, 8, 27, .92), rgba(14, 8, 22, .95)), url("./texture.svg");
+  background-repeat: repeat;
+  color: var(--ra-text);
+  font-family: "Bank Gothic", "Trebuchet MS", system-ui, sans-serif;
+}
+body.page-chat { background-attachment: fixed; }
+.topbar {
+  background: linear-gradient(180deg, #321747 0%, #21102f 48%, #11091b 100%);
+  border-bottom: 1px solid #774194;
+  box-shadow: 0 3px 18px rgba(0, 0, 0, .55), inset 0 1px 0 rgba(229, 188, 255, .12);
+}
+.brand { color: #f1dcff; letter-spacing: .055em; text-transform: uppercase; }
+.brand__mark {
+  color: transparent; font-size: 0; line-height: 0;
+  background: url("./emblem.svg") center / contain no-repeat;
+  border: 1px solid #9151ba; border-radius: 50%;
+  box-shadow: 0 0 0 2px #1a0e25, 0 0 15px rgba(171, 81, 233, .24);
+}
+.topbar__title { color: #c19bda; border-left-color: #57316c; }
+.topbar__state { color: #b8a0c8; }
+.topbar__state .dot { background: #766584; }
+.topbar__state[data-state="online"] .dot { background: #70e7d3; box-shadow: 0 0 0 3px rgba(112, 231, 211, .12), 0 0 9px rgba(112, 231, 211, .42); }
+.topbar__state[data-state="connecting"] .dot,
+.topbar__state[data-state="reconnecting"] .dot { background: #bd7df1; }
+.topbar__state[data-state="offline"] .dot { background: #ed638c; }
+.select__label, .switch__label { color: #b09abd; }
+.select__input {
+  color: #f2e1ff; border: 1px solid #5e3973; border-radius: 9px;
+  background: linear-gradient(#2b173c, #170d22); box-shadow: inset 0 0 0 1px rgba(211, 160, 255, .035);
+}
+.switch__track { border: 1px solid #63387a; border-radius: 999px; background: #21122f; }
+.switch__knob { border-radius: 50%; background: #9a7eac; }
+.switch__input:checked + .switch__track { background: #4d1c70; border-color: #ba76ef; box-shadow: 0 0 10px rgba(155, 81, 220, .22); }
+.switch__input:checked + .switch__track .switch__knob { background: #e6c8ff; }
+.feed { background: radial-gradient(ellipse at 50% 0, rgba(87, 41, 121, .08), transparent 70%); }
+.feed .msg {
+  position: relative; overflow: hidden; isolation: isolate;
+  margin: 0 0 16px; padding: 12px 16px 13px;
+  border: 1px solid #4c2c64; border-left: 3px solid var(--ra-accent);
+  border-radius: 8px 2px 8px 2px;
+  background: linear-gradient(120deg, rgba(33, 19, 48, .98), rgba(16, 10, 26, .99) 55%, rgba(30, 16, 42, .98));
+  box-shadow: 0 6px 17px var(--ra-shadow), inset 0 1px 0 rgba(230, 191, 255, .08), inset 0 0 22px rgba(122, 51, 166, .08);
+}
+.feed .msg::before {
+  content: ""; position: absolute; z-index: 0; inset: 0 0 auto 0; height: 2px;
+  background: linear-gradient(90deg, #dcb1ff, #9145cb 35%, rgba(104, 44, 146, .05) 85%);
+  pointer-events: none;
+}
+.feed .msg::after {
+  content: ""; position: absolute; z-index: 0; right: 8px; top: 7px;
+  width: 76px; height: 76px; background: url("./emblem.svg") center / contain no-repeat;
+  opacity: .09; pointer-events: none;
+}
+.feed .msg__head, .feed .msg__rule, .feed .msg__text { position: relative; z-index: 1; }
+.msg__head { display: flex; align-items: center; gap: 8px; min-height: 20px; }
+.msg__author { color: #e7cbff; font-size: 14px; font-weight: 650; text-shadow: 0 0 8px rgba(175, 95, 235, .2); }
+.msg__author--plugin { color: #bda0d2; font-weight: 550; }
+.msg__service { display: inline-flex; flex: none; opacity: .96; filter: drop-shadow(0 0 3px rgba(105, 226, 212, .35)); }
+.msg__rule {
+  height: 2px; margin: 8px 0 10px; border: 0;
+  background: linear-gradient(90deg, #8642b0, rgba(107, 219, 208, .68) 23%, rgba(150, 84, 197, .55) 53%, rgba(83, 44, 111, .18) 85%, transparent);
+  box-shadow: 0 1px 0 rgba(0,0,0,.75);
+}
+.msg__rule::after {
+  content: ""; display: block; position: relative; top: -3px; left: 17px;
+  width: 7px; height: 7px; border: 1px solid #dcb4ff; border-radius: 50%;
+  background: radial-gradient(circle, #b5fff0 0 1px, #7840a2 2px);
+  box-shadow: 0 0 8px rgba(166, 90, 232, .6);
+}
+.msg__text { color: var(--ra-text); font-size: 15px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.msg__channel { color: #7ce7d5; font-weight: 700; }
+.msg[data-severity="info"] { --severity: #a86be0; }
+.msg[data-severity="success"] { --severity: #62d8c4; }
+.msg[data-severity="warning"] { --severity: #d9b86c; }
+.msg[data-severity="error"] { --severity: #f06391; }
+.msg[data-severity="info"], .msg[data-severity="success"], .msg[data-severity="warning"], .msg[data-severity="error"] { border-left-color: var(--severity); }
+.msg.is-notice { opacity: .82; }
+.smile, .chat-emote { filter: drop-shadow(0 0 3px rgba(172, 99, 233, .18)); }
+.statusbar { color: #a990ba; border-top: 1px solid #4c2c64; background: linear-gradient(#1b1029, #0f0819); }
+a { color: #c995f4; }
+::selection { background: #66318b; color: #fff2ff; }
+*:focus-visible { outline: 2px solid #cf9cff; outline-offset: 2px; }
+@media (max-width: 720px) {
+  .topbar { border-bottom-width: 1px; }
+  .feed .msg { padding: 9px 11px 11px; }
+  .feed .msg::after { width: 48px; height: 48px; right: 4px; top: 4px; }
+}
+</style>

@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs>
+    <pattern id="plate" width="64" height="64" patternUnits="userSpaceOnUse">
+      <path d="M-16 64 64-16M16 80 80 16" stroke="#b92e36" stroke-width="7" stroke-opacity=".08"/>
+      <path d="M0 0H64V64H0Z" stroke="#ba9766" stroke-opacity=".08"/>
+      <circle cx="7" cy="7" r="1.5" fill="#d4b77f" fill-opacity=".22"/>
+      <circle cx="57" cy="57" r="1.5" fill="#d4b77f" fill-opacity=".18"/>
+    </pattern>
+  </defs>
+  <rect width="256" height="256" fill="url(#plate)"/>
+  <path d="M0 126H256M126 0V256" stroke="#d02a34" stroke-opacity=".045"/>
+</svg>

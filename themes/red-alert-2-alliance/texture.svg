@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs><pattern id="radar" width="128" height="128" patternUnits="userSpaceOnUse">
+    <path d="M0 16H128M0 64H128M0 112H128M16 0V128M64 0V128M112 0V128" stroke="#56c7f3" stroke-opacity=".065"/>
+    <circle cx="64" cy="64" r="24" stroke="#60d9ff" stroke-opacity=".12"/>
+    <circle cx="64" cy="64" r="43" stroke="#60d9ff" stroke-opacity=".07"/>
+    <path d="M64 11V64L101 44" stroke="#84eaff" stroke-opacity=".12"/>
+    <circle cx="64" cy="64" r="2" fill="#bff8ff" fill-opacity=".24"/>
+  </pattern></defs>
+  <rect width="256" height="256" fill="url(#radar)"/>
+  <path d="M0 127H256M127 0V256" stroke="#4cafd8" stroke-opacity=".035"/>
+</svg>
