@@ -64,6 +64,32 @@
   font-size: 11px
   font-weight: 500
 
+// Выбранная плитка. Без неё нажатая комната ничем не отличается от остальных:
+// выглядит так, будто клик не сработал, и приходится гадать, открылись настройки
+// или нет.
+.card.is-selected
+  border-color: tokens.$accent-hi
+  background: tokens.$surface-hi
+
+// Счётчик у заголовка группы плиток: сколько их тут. Плашка, а не просто
+// число, — иначе оно сливается с названием в одно слово.
+.cards__count
+  padding: 2px 8px
+  border-radius: tokens.$radius-pill
+  background: tokens.$surface-hi
+  color: tokens.$text-faint
+  font-size: 11px
+  font-weight: 500
+
+// Пустое состояние группы. Не карточка: нажимать тут не на что, и плитка без
+// действия выглядела бы поломанной, а не пустой.
+.cards__empty
+  color: tokens.$text-faint
+  font-size: 13px
+
+.cards__empty a
+  color: tokens.$accent-hi
+
 // Адрес ленты внутри плитки. Моноширинный и приглушённый: это данные, а не
 // часть названия, но копировать их нужно.
 .card__link

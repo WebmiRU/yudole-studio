@@ -6,6 +6,8 @@
 
 import '../sass/rooms.sass';
 import {ALL_KINDS, EVENT_GROUPS, labelOf} from './events.js';
+import {el} from './dom.js';
+import {UNTITLED, chatURL, openChat, roomCard, roomNote} from './room-cards.js';
 
 // Гарнитуры. Взяты те, что реально стоят в системе и есть в любом браузере без
 // загрузки файлов. Первый — тот, которым сейчас рисуется лента: system-ui на
@@ -21,10 +23,6 @@ const FONTS = [
 
 const THEMES_API = '/api/themes';
 const ROOMS_API = '/api/rooms';
-
-// Заголовок пустым сохранять можно — человек снял текст и хочет без него. Но в
-// списке пустая строка выглядит как дырка, поэтому там подставляется это.
-const UNTITLED = 'Без названия';
 
 const state = {
     rooms: [],
@@ -82,43 +80,13 @@ function renderRooms() {
         return;
     }
 
-    // Плитка, а не строка списка: те же карточки, что на главной. Плитка
-    // сделана кнопкой, потому что она не уводит со страницы, а открывает
-    // настройки под собой.
+    // Плитка, а не строка списка: те же карточки, что на главной, и она же
+    // открывает настройки под собой.
     roomsEl.replaceChildren(...state.rooms.map((room) => {
-        const selectedNow = room.id === state.selectedId;
-
-        const button = el('button', {
-            type: 'button',
-            class: `card${selectedNow ? ' is-selected' : ''}`,
-            'aria-pressed': String(selectedNow),
-            'data-room': room.id,
-        }, [
-            el('span', {class: 'card__title'}, [room.title || UNTITLED]),
-            el('span', {class: 'card__note'}, [roomNote(room)]),
-            el('span', {class: 'card__link'}, [chatURL(room.id)]),
-        ]);
+        const button = roomCard(room, state.themes, {selected: room.id === state.selectedId});
         button.addEventListener('click', () => select(room.id));
-
         return button;
     }));
-}
-
-// roomNote — коротко о том, как комната выглядит: сколько событий она
-// показывает и какая тема. Без этого плитки с одинаковыми названиями
-// не отличить друг от друга.
-function roomNote(room) {
-    const events = room.events?.length ?? 0;
-    const themes = new Map(state.themes.map((t) => [t.id, t.title]));
-    const theme = themes.get(room.theme) ?? room.theme ?? 'системная';
-    const shown = events === 0 ? 'без событий' : `событий: ${events}`;
-    return `${shown} · ${theme}`;
-}
-
-// chatURL собирает полный адрес ленты: плитка показывает его, чтобы человек не
-// искал его в настройках выбранной комнаты.
-function chatURL(id) {
-    return new URL(`/chat?roomId=${encodeURIComponent(id)}`, location.origin).href;
 }
 
 function renderOptions() {
@@ -186,10 +154,7 @@ function renderOptions() {
 // текст: по ней можно кликнуть и открыть ленту, а правой кнопкой — скопировать,
 // и человек получит ровно то, что сам открыл.
 function chatLink(id) {
-    // Полный адрес, а не путь: ссылку копируют и отправляют кому-то, а
-    // «/chat?roomId=2» без хоста ни о чём не говорит. Хост берём свой же, так
-    // что на :1080 получится localhost:1080, на :1081 — localhost:1081.
-    const url = new URL(`/chat?roomId=${encodeURIComponent(id)}`, location.origin).href;
+    const url = chatURL(id);
 
     const link = el('a', {
         class: 'room-link',
@@ -203,11 +168,7 @@ function chatLink(id) {
     // в контекстном меню.
     link.addEventListener('click', (event) => {
         event.preventDefault();
-        // 400x800: узкое высокое окно — лента читается в него, как в панель
-        // стрима. popup=yes обязателен: без него браузер откроет вкладку и
-        // размеры проигнорирует.
-        window.open(url, 'studio-chat',
-            'popup=yes,width=400,height=800,left=80,top=60,noopener,noreferrer');
+        openChat(url);
     });
 
     return link;
@@ -503,17 +464,5 @@ function sentence(text) {
 
 // el собирает элемент. Тот же помощник, что на странице чат-клиентов: правила
 // одни, а на каждой странице он живёт отдельно — модуль на страницу.
-function el(tag, attrs = {}, children = []) {
-    const node = document.createElement(tag);
-    for (const [name, value] of Object.entries(attrs)) {
-        if (value === undefined || value === null || value === false) {
-            continue;
-        }
-        node.setAttribute(name, value === true ? '' : value);
-    }
-    node.append(...children);
-    return node;
-}
-
 document.getElementById('rooms-add')?.addEventListener('click', add);
 load();
