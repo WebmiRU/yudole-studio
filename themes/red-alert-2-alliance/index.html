@@ -1,0 +1,108 @@
+<!-- Red Alert 2 — Альянс. Faction-inspired CSS theme built on the system theme format. -->
+<style rel="stylesheet">
+/* Red Alert 2 inspired faction theme: Allied high-tech command network. */
+:root {
+  color-scheme: dark;
+  --ra-bg: #071522;
+  --ra-surface: #0c2133;
+  --ra-panel: #102a3b;
+  --ra-border: #235574;
+  --ra-border-hi: #4f99bd;
+  --ra-accent: #36b9ed;
+  --ra-accent-hi: #b5f1ff;
+  --ra-cold: #8be7ff;
+  --ra-text: #dceef8;
+  --ra-dim: #91b7cc;
+  --ra-shadow: rgba(0, 8, 17, .64);
+}
+html, body {
+  min-height: 100%;
+  margin: 0;
+  background-color: var(--ra-bg);
+  background-image: linear-gradient(135deg, rgba(5, 19, 32, .93), rgba(8, 31, 48, .88)), url("./texture.svg");
+  background-repeat: repeat;
+  color: var(--ra-text);
+  font-family: "Eurostile", "Segoe UI", system-ui, sans-serif;
+}
+body.page-chat { background-attachment: fixed; }
+.topbar {
+  background: linear-gradient(180deg, #16435e 0%, #0b263b 50%, #071a2a 100%);
+  border-bottom: 1px solid #4e9abb;
+  box-shadow: 0 3px 18px rgba(0, 0, 0, .48), inset 0 1px 0 rgba(201, 244, 255, .17);
+}
+.brand { color: #e5f8ff; letter-spacing: .035em; }
+.brand__mark {
+  color: transparent; font-size: 0; line-height: 0;
+  background: url("./emblem.svg") center / contain no-repeat;
+  border: 1px solid #57c9f1; border-radius: 5px;
+  box-shadow: 0 0 0 2px #0b2235, 0 0 14px rgba(50, 187, 242, .2);
+}
+.topbar__title { color: #8dcee7; border-left-color: #285c79; }
+.topbar__state { color: #94c3d7; }
+.topbar__state .dot { background: #5b879c; }
+.topbar__state[data-state="online"] .dot { background: #63e8d6; box-shadow: 0 0 0 3px rgba(99, 232, 214, .14), 0 0 10px rgba(99, 232, 214, .55); }
+.topbar__state[data-state="connecting"] .dot,
+.topbar__state[data-state="reconnecting"] .dot { background: #eacb73; }
+.topbar__state[data-state="offline"] .dot { background: #f16b78; }
+.select__label, .switch__label { color: #8fb6c9; }
+.select__input {
+  color: #ddf7ff; border: 1px solid #2e7699; border-radius: 4px;
+  background: linear-gradient(#15384e, #0a2235); box-shadow: inset 0 0 0 1px rgba(129, 224, 255, .04);
+}
+.switch__track { border: 1px solid #2a7191; border-radius: 4px; background: #102e43; }
+.switch__knob { border-radius: 3px; background: #79a9c0; }
+.switch__input:checked + .switch__track { background: #125b7d; border-color: #59d5ff; box-shadow: 0 0 10px rgba(54, 185, 237, .2); }
+.switch__input:checked + .switch__track .switch__knob { background: #c6f5ff; }
+.feed { background: linear-gradient(rgba(6, 23, 36, .05), rgba(6, 23, 36, .12)); }
+.feed .msg {
+  position: relative; overflow: hidden; isolation: isolate;
+  margin: 0 0 15px; padding: 12px 16px 13px;
+  border: 1px solid #20516b; border-left: 3px solid var(--ra-accent);
+  border-radius: 3px;
+  background: linear-gradient(112deg, rgba(14, 42, 61, .98), rgba(7, 25, 40, .99) 55%, rgba(10, 34, 51, .98));
+  box-shadow: 0 5px 14px var(--ra-shadow), inset 0 1px 0 rgba(184, 240, 255, .12);
+}
+.feed .msg::before {
+  content: ""; position: absolute; z-index: 0; inset: 0 0 auto 0; height: 2px;
+  background: linear-gradient(90deg, #b9f5ff, #35bce9 25%, rgba(53, 188, 233, .06) 82%);
+  pointer-events: none;
+}
+.feed .msg::after {
+  content: ""; position: absolute; z-index: 0; right: 8px; top: 7px;
+  width: 72px; height: 72px; background: url("./emblem.svg") center / contain no-repeat;
+  opacity: .09; pointer-events: none;
+}
+.feed .msg__head, .feed .msg__rule, .feed .msg__text { position: relative; z-index: 1; }
+.msg__head { display: flex; align-items: center; gap: 8px; min-height: 20px; }
+.msg__author { color: #c5f3ff; font-size: 14px; font-weight: 650; text-shadow: 0 0 8px rgba(61, 198, 244, .16); }
+.msg__author--plugin { color: #82c4dd; font-weight: 550; }
+.msg__service { display: inline-flex; flex: none; opacity: .98; filter: drop-shadow(0 0 3px rgba(73, 203, 255, .42)); }
+.msg__rule {
+  height: 1px; margin: 8px 0 10px; border: 0;
+  background: linear-gradient(90deg, #4dc8f2, rgba(104, 220, 255, .65) 28%, rgba(52, 128, 163, .24) 78%, transparent);
+  box-shadow: 0 1px 0 rgba(0,0,0,.7);
+}
+.msg__rule::after {
+  content: ""; display: block; position: relative; top: -2px; left: 14px;
+  width: 6px; height: 3px; border: 1px solid #b2f4ff; background: #53d0fb;
+  box-shadow: 0 0 8px rgba(66, 211, 255, .6);
+}
+.msg__text { color: var(--ra-text); font-size: 15px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.msg__channel { color: #93eaff; font-weight: 700; }
+.msg[data-severity="info"] { --severity: #60c7f3; }
+.msg[data-severity="success"] { --severity: #65dfc4; }
+.msg[data-severity="warning"] { --severity: #e8ce7d; }
+.msg[data-severity="error"] { --severity: #ff7184; }
+.msg[data-severity="info"], .msg[data-severity="success"], .msg[data-severity="warning"], .msg[data-severity="error"] { border-left-color: var(--severity); }
+.msg.is-notice { opacity: .84; }
+.smile, .chat-emote { filter: drop-shadow(0 0 2px rgba(83, 208, 251, .2)); }
+.statusbar { color: #8eb4c9; border-top: 1px solid #1d4c65; background: linear-gradient(#0b2234, #061523); }
+a { color: #77dafa; }
+::selection { background: #156b91; color: #effcff; }
+*:focus-visible { outline: 2px solid #83e8ff; outline-offset: 2px; }
+@media (max-width: 720px) {
+  .topbar { border-bottom-width: 1px; }
+  .feed .msg { padding: 9px 11px 11px; }
+  .feed .msg::after { width: 48px; height: 48px; right: 4px; top: 4px; }
+}
+</style>

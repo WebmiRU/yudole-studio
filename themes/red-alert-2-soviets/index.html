@@ -1,0 +1,107 @@
+<!-- Red Alert 2 — Советы. Faction-inspired CSS theme built on the system theme format. -->
+<style rel="stylesheet">
+/* Red Alert 2 inspired faction theme: Soviet industrial war machine. */
+:root {
+  color-scheme: dark;
+  --ra-bg: #101312;
+  --ra-surface: #191d1a;
+  --ra-panel: #1b201d;
+  --ra-border: #56362e;
+  --ra-border-hi: #886342;
+  --ra-accent: #c82b35;
+  --ra-accent-hi: #ff665e;
+  --ra-cold: #73c8d0;
+  --ra-text: #e9e1d5;
+  --ra-dim: #aaa397;
+  --ra-shadow: rgba(0, 0, 0, .62);
+}
+html, body {
+  min-height: 100%;
+  margin: 0;
+  background-color: var(--ra-bg);
+  background-image: linear-gradient(135deg, rgba(15, 20, 17, .95), rgba(15, 18, 16, .91)), url("./texture.svg");
+  background-repeat: repeat;
+  color: var(--ra-text);
+  font-family: "Bahnschrift", "Arial Narrow", system-ui, sans-serif;
+}
+body.page-chat { background-attachment: fixed; }
+.topbar {
+  background: linear-gradient(180deg, #30352f 0%, #1d221e 45%, #101310 100%);
+  border-bottom: 2px solid #8d302f;
+  box-shadow: 0 3px 12px var(--ra-shadow), inset 0 1px 0 rgba(255, 230, 185, .09);
+}
+.brand { color: #eee0c9; text-transform: uppercase; letter-spacing: .055em; }
+.brand__mark {
+  color: transparent; font-size: 0; line-height: 0;
+  background: url("./emblem.svg") center / contain no-repeat;
+  border: 1px solid #9d5542; border-radius: 2px;
+  box-shadow: 0 0 0 2px #171b17, 0 0 12px rgba(207, 39, 45, .22);
+}
+.topbar__title { color: #c6ad8e; border-left-color: #6e4a38; }
+.topbar__state { color: #b3b2a7; }
+.topbar__state .dot { background: #86897f; box-shadow: 0 0 0 2px rgba(115, 123, 108, .13); }
+.topbar__state[data-state="online"] .dot { background: #c9b36b; box-shadow: 0 0 0 3px rgba(201, 179, 107, .13); }
+.topbar__state[data-state="connecting"] .dot,
+.topbar__state[data-state="reconnecting"] .dot { background: #dc7c39; }
+.topbar__state[data-state="offline"] .dot { background: #d42d38; }
+.select__label, .switch__label { color: #b4ad9e; }
+.select__input {
+  color: #eee1cb; border: 1px solid #654738; border-radius: 2px;
+  background: linear-gradient(#282b25, #171a17); box-shadow: inset 0 1px 3px #0a0c0a;
+}
+.switch__track { border: 1px solid #624136; border-radius: 2px; background: #242722; }
+.switch__knob { border-radius: 1px; background: #8f8d7e; }
+.switch__input:checked + .switch__track { background: #79242c; border-color: #b83a3e; }
+.switch__input:checked + .switch__track .switch__knob { background: #f1c47b; }
+.feed { background: linear-gradient(90deg, rgba(5, 8, 6, .26), transparent 14%, transparent 86%, rgba(5, 8, 6, .24)); }
+.feed .msg {
+  position: relative; overflow: hidden; isolation: isolate;
+  margin: 0 0 15px; padding: 11px 16px 13px;
+  border: 1px solid var(--ra-border); border-left: 4px solid var(--ra-accent);
+  border-radius: 1px;
+  background: linear-gradient(110deg, rgba(33, 38, 32, .98), rgba(16, 20, 17, .98) 57%, rgba(27, 23, 19, .98));
+  box-shadow: 0 5px 12px var(--ra-shadow), inset 0 1px 0 rgba(255, 229, 190, .08), inset 0 0 0 3px rgba(0,0,0,.18);
+}
+.feed .msg::before {
+  content: ""; position: absolute; z-index: 0; inset: 0 0 auto 0; height: 3px;
+  background: linear-gradient(90deg, #ff6a60, #a5202a 27%, transparent 78%);
+  opacity: .9; pointer-events: none;
+}
+.feed .msg::after {
+  content: ""; position: absolute; z-index: 0; right: 9px; top: 8px;
+  width: 68px; height: 68px; background: url("./emblem.svg") center / contain no-repeat;
+  opacity: .075; pointer-events: none; filter: saturate(.75);
+}
+.feed .msg__head, .feed .msg__rule, .feed .msg__text { position: relative; z-index: 1; }
+.msg__head { display: flex; align-items: center; gap: 8px; min-height: 20px; }
+.msg__author { color: #f1d8ac; font-size: 14px; font-weight: 700; text-shadow: 0 1px 2px #000, 0 0 7px rgba(220, 50, 50, .18); }
+.msg__author--plugin { color: #caa478; font-weight: 600; }
+.msg__service { display: inline-flex; flex: none; opacity: .95; filter: drop-shadow(0 0 2px rgba(104, 195, 211, .25)); }
+.msg__rule {
+  height: 2px; margin: 8px 0 10px; border: 0;
+  background: linear-gradient(90deg, #9d2c32, #c88350 18%, rgba(106, 116, 102, .55) 55%, transparent);
+  box-shadow: 0 1px 0 rgba(0,0,0,.8);
+}
+.msg__rule::after {
+  content: ""; display: block; position: relative; top: -2px; left: 15px;
+  width: 5px; height: 5px; border: 1px solid #e4bd7f; border-radius: 50%; background: #b62b34;
+}
+.msg__text { color: var(--ra-text); font-size: 15px; line-height: 1.5; white-space: pre-wrap; word-break: break-word; }
+.msg__channel { color: #f5bf78; font-weight: 700; }
+.msg[data-severity="info"] { --severity: #b7a36a; }
+.msg[data-severity="success"] { --severity: #a1b276; }
+.msg[data-severity="warning"] { --severity: #e5a34e; }
+.msg[data-severity="error"] { --severity: #ed4a4b; }
+.msg[data-severity="info"], .msg[data-severity="success"], .msg[data-severity="warning"], .msg[data-severity="error"] { border-left-color: var(--severity); }
+.msg.is-notice { opacity: .82; }
+.smile, .chat-emote { filter: drop-shadow(0 1px 2px rgba(0,0,0,.8)); }
+.statusbar { color: #a59d8d; border-top: 1px solid #56362e; background: linear-gradient(#181c18, #0e110f); }
+a { color: #ef7668; }
+::selection { background: #a9202b; color: #fff0d6; }
+*:focus-visible { outline: 2px solid #e3b879; outline-offset: 2px; }
+@media (max-width: 720px) {
+  .topbar { border-bottom-width: 1px; }
+  .feed .msg { padding: 9px 11px 11px; }
+  .feed .msg::after { width: 48px; height: 48px; right: 4px; top: 4px; }
+}
+</style>

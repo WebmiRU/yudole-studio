@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="none">
+  <defs><pattern id="psi" width="128" height="128" patternUnits="userSpaceOnUse">
+    <circle cx="64" cy="64" r="22" stroke="#a85ee1" stroke-opacity=".13"/>
+    <circle cx="64" cy="64" r="39" stroke="#a85ee1" stroke-opacity=".09"/>
+    <circle cx="64" cy="64" r="56" stroke="#a85ee1" stroke-opacity=".045"/>
+    <path d="M8 64C23 38 41 35 64 64S105 90 120 64M64 8C38 23 35 41 64 64S90 105 64 120" stroke="#5ce0cd" stroke-opacity=".075"/>
+    <circle cx="64" cy="64" r="2" fill="#c58ef2" fill-opacity=".3"/>
+  </pattern></defs>
+  <rect width="256" height="256" fill="url(#psi)"/>
+  <path d="M0 127H256M127 0V256" stroke="#8f54bd" stroke-opacity=".035"/>
+</svg>
