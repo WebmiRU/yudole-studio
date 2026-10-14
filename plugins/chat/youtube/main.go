@@ -1176,7 +1176,7 @@ func emitChatMessage(channel string, message *ytproto.LiveChatMessage) error {
 			send(protocol.KindMessageDeleted, protocol.DeletedMessagePayload{
 				Channel:   channel,
 				MessageID: details.GetDeletedMessageId(),
-				By:        login,
+				User:      &protocol.ChatUser{Name: name, ID: login, Login: login},
 			})
 		}
 		return nil
@@ -1185,7 +1185,7 @@ func emitChatMessage(channel string, message *ytproto.LiveChatMessage) error {
 			send(protocol.KindMessageDeleted, protocol.DeletedMessagePayload{
 				Channel:   channel,
 				MessageID: details.GetRetractedMessageId(),
-				By:        login,
+				User:      &protocol.ChatUser{Name: name, ID: login, Login: login},
 			})
 		}
 		return nil

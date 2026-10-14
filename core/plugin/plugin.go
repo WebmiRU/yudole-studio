@@ -219,7 +219,7 @@ func (p *Plugin) forward(line []byte) bool {
 	if err != nil {
 		return false
 	}
-	if !protocol.IsChatKind(message.Kind) && !protocol.IsChannelKind(message.Kind) {
+	if !protocol.IsChatKind(message.Kind) && !protocol.IsChannelKind(message.Kind) && message.Kind != protocol.KindSystemMessageWarning {
 		return false
 	}
 

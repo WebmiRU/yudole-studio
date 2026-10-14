@@ -959,7 +959,7 @@ func processPush(raw json.RawMessage, byID map[string]vkChannel, seen *seenIDs, 
 		send(protocol.KindChannelInfo, protocol.ChannelInfoPayload{
 			Channel:  channel.Slug,
 			Name:     event.Title,
-			Streamer: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick),
+			User: &protocol.ChatUser{Name: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick)},
 			Started:  state.started,
 			Clients:  event.Viewers,
 			Users:    event.Viewers,
@@ -976,14 +976,14 @@ func processPush(raw json.RawMessage, byID map[string]vkChannel, seen *seenIDs, 
 		state.announced = true
 		send(protocol.KindChannelInfo, protocol.ChannelInfoPayload{
 			Channel:  channel.Slug,
-			Streamer: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick),
+			User: &protocol.ChatUser{Name: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick)},
 			Started:  state.started,
 		})
 	case "stream_end":
 		delete(states, channel.ID)
 		send(protocol.KindChannelInfo, protocol.ChannelInfoPayload{
 			Channel:  channel.Slug,
-			Streamer: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick),
+			User: &protocol.ChatUser{Name: firstNonEmpty(channel.DisplayName, channel.OwnerName, channel.OwnerNick)},
 			Clients:  0,
 			Users:    0,
 		})

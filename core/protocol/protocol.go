@@ -17,24 +17,26 @@ import (
 	"encoding/json/jsontext"
 	"encoding/json/v2"
 	"fmt"
+	stdhtml "html"
+	"strings"
 )
 
 // Kinds of messages.
 const (
 	// A plugin introduces itself right after it starts.
-	KindPluginChat = "plugin.chat"
+	KindPluginChat = "system.plugin.hello"
 	// The kernel hands the plugin the values the user filled in.
-	KindSetOptions = "set_options"
+	KindSetOptions = "system.plugin.options.set"
 	// The plugin confirms it took the options.
-	KindAck = "ack"
+	KindAck = "system.message.ack"
 	// Something went wrong inside the plugin.
-	KindError = "error"
+	KindError = "system.message.error"
 	// The plugin is busy: it will answer the request later.
-	KindWaiting = "waiting"
+	KindWaiting = "system.message.waiting"
 	// Anything the plugin wants to say to the kernel log.
-	KindLog = "log"
+	KindLog = "system.log"
 	// The kernel asks the plugin to finish.
-	KindQuit = "quit"
+	KindQuit = "system.plugin.quit"
 
 	// The kernel asks a plugin to do something that is not about its options:
 	// refresh its base of smileys. Начинается с system., потому что команда
@@ -45,6 +47,29 @@ const (
 	// direct conversation.
 	KindMessagePublic  = "chat.message.public"
 	KindMessagePrivate = "chat.message.private"
+
+	KindSystemMessageWarning = "system.message.warning"
+	KindChatSnapshot = "system.chat.snapshot"
+	KindPluginsSnapshot = "system.plugins.snapshot"
+	KindPluginState = "system.plugin.state"
+
+	KindThemesList = "system.themes.list"
+	KindRoomsList = "system.rooms.list"
+	KindRoomCreate = "system.room.create"
+	KindRoomCreated = "system.room.created"
+	KindRoomSave = "system.room.save"
+	KindRoomSaved = "system.room.saved"
+	KindRoomDelete = "system.room.delete"
+	KindRoomDeleted = "system.room.deleted"
+	KindPluginsList = "system.plugins.list"
+	KindPluginView = "system.plugin.view"
+	KindPluginOptionsSave = "system.plugin.options.save"
+	KindPluginOptionsSaved = "system.plugin.options.saved"
+	KindPluginActionComplete = "system.plugin.action.completed"
+	KindPluginEnable = "system.plugin.enable"
+	KindPluginEnabled = "system.plugin.enabled"
+	KindPluginDisable = "system.plugin.disable"
+	KindPluginDisabled = "system.plugin.disabled"
 
 	// What the plugin does with the channels it was given. These four are the
 	// same for every chat service: Twitch, YouTube, GoodGame — разница только
@@ -98,11 +123,13 @@ type Message struct {
 
 // New builds an envelope with a payload of any shape.
 func New(kind string, payload any) (Message, error) {
-	raw, err := json.Marshal(payload, json.Deterministic(true))
-	if err != nil {
-		return Message{}, fmt.Errorf("encode the %s payload: %w", kind, err)
-	}
-	return Message{Kind: kind, Payload: raw}, nil
+	if kind == "" { return Message{}, fmt.Errorf("message without a kind") }
+	if payload == nil { return Message{Kind: kind}, nil }
+	raw, err := json.Marshal(wirePayload(payload), json.Deterministic(true))
+	if err != nil { return Message{}, fmt.Errorf("encode the %s payload: %w", kind, err) }
+	message := Message{Kind: kind, Payload: raw}
+	if err := Validate(message); err != nil { return Message{}, err }
+	return message, nil
 }
 
 // MustNew is New for payloads that cannot fail to encode.
@@ -116,14 +143,72 @@ func MustNew(kind string, payload any) Message {
 
 // PayloadInto decodes the payload of a message into v.
 func (m Message) PayloadInto(v any) error {
-	if len(m.Payload) == 0 {
-		return fmt.Errorf("message %q has no payload", m.Kind)
+	if len(m.Payload) == 0 { return fmt.Errorf("message %q has no payload", m.Kind) }
+	switch out := v.(type) {
+	case *AckPayload:
+		var wire struct { Values map[string]any `json:"values"`; Message jsontext.Value `json:"message"` }
+		if err := json.Unmarshal(m.Payload, &wire); err != nil { return err }
+		text, err := readMessageText(wire.Message); if err != nil { return err }; out.Values, out.Message = wire.Values, text; return nil
+	case *LogPayload:
+		var wire struct { Level string `json:"level"`; Message jsontext.Value `json:"message"` }
+		if err := json.Unmarshal(m.Payload, &wire); err != nil { return err }
+		text, err := readMessageText(wire.Message); if err != nil { return err }; out.Level, out.Message = wire.Level, text; return nil
+	case *WaitingPayload:
+		var wire struct { Message jsontext.Value `json:"message"` }
+		if err := json.Unmarshal(m.Payload, &wire); err != nil { return err }
+		text, err := readMessageText(wire.Message); if err != nil { return err }; out.Message = text; return nil
+	case *ErrorPayload:
+		var wire struct { Message jsontext.Value `json:"message"`; Fields map[string]string `json:"fields"`; Items map[string]map[string]string `json:"items"` }
+		if err := json.Unmarshal(m.Payload, &wire); err != nil { return err }
+		text, err := readMessageText(wire.Message); if err != nil { return err }; out.Message, out.Fields, out.Items = text, wire.Fields, wire.Items; return nil
+	case *ChannelPayload:
+		var wire struct { Channel string `json:"channel"`; Name string `json:"name"`; Message jsontext.Value `json:"message"`; Reason string `json:"reason"` }
+		if err := json.Unmarshal(m.Payload, &wire); err != nil { return err }
+		text, err := readMessageText(wire.Message); if err != nil { return err }; if text == "" { text = wire.Reason }; out.Channel, out.Name, out.Reason = wire.Channel, wire.Name, text; return nil
+	case *ConnectionPayload:
+		var wire struct { State string `json:"state"`; Service string `json:"service"`; Message jsontext.Value `json:"message"`; Reason string `json:"reason"`; Attempt int `json:"attempt"` }
+		if err := json.Unmarshal(m.Payload, &wire); err != nil { return err }
+		text, err := readMessageText(wire.Message); if err != nil { return err }; if text == "" { text = wire.Reason }; out.State, out.Service, out.Reason, out.Attempt = wire.State, wire.Service, text, wire.Attempt; return nil
+	default:
+		return json.Unmarshal(m.Payload, v)
 	}
-	return json.Unmarshal(m.Payload, v)
+}
+
+func readMessageText(raw jsontext.Value) (string, error) {
+	if len(raw) == 0 { return "", nil }
+	var body MessageContent
+	if err := json.Unmarshal(raw, &body); err == nil { if body.Text != "" { return body.Text, nil }; return body.Src, nil }
+	var legacy string
+	if err := json.Unmarshal(raw, &legacy); err == nil { return legacy, nil }
+	return "", fmt.Errorf("payload.message must be an object with src/text/html")
+}
+
+// wirePayload normalizes all human-readable text into the shared message body.
+func wirePayload(payload any) any {
+	switch value := payload.(type) {
+	case AckPayload:
+		return struct { Values map[string]any `json:"values,omitempty"`; Message *MessageContent `json:"message,omitempty"` }{value.Values, messageBody(value.Message)}
+	case LogPayload:
+		return struct { Level string `json:"level"`; Message *MessageContent `json:"message,omitempty"` }{value.Level, messageBody(value.Message)}
+	case WaitingPayload:
+		return struct { Message *MessageContent `json:"message,omitempty"` }{messageBody(value.Message)}
+	case ErrorPayload:
+		return struct { Message *MessageContent `json:"message,omitempty"`; Fields map[string]string `json:"fields,omitempty"`; Items map[string]map[string]string `json:"items,omitempty"` }{messageBody(value.Message), value.Fields, value.Items}
+	case ChannelPayload:
+		return struct { Channel string `json:"channel"`; Name string `json:"name,omitempty"`; Message *MessageContent `json:"message,omitempty"` }{value.Channel, value.Name, messageBody(value.Reason)}
+	case ConnectionPayload:
+		return struct { State string `json:"state"`; Service string `json:"service,omitempty"`; Message *MessageContent `json:"message,omitempty"`; Attempt int `json:"attempt,omitempty"` }{value.State, value.Service, messageBody(value.Reason), value.Attempt}
+	default: return payload
+	}
+}
+
+func messageBody(text string) *MessageContent {
+	if text == "" { return nil }; body := PlainMessage(text); return &body
 }
 
 // Encode renders a message as one protocol line.
 func Encode(message Message) ([]byte, error) {
+	if err := Validate(message); err != nil { return nil, err }
 	data, err := json.Marshal(message, json.Deterministic(true))
 	if err != nil {
 		return nil, err
@@ -141,7 +226,50 @@ func Decode(line []byte) (Message, error) {
 	if message.Kind == "" {
 		return Message{}, fmt.Errorf("message without a kind: %s", line)
 	}
+	message.Kind = canonicalKind(message.Kind)
+	if err := Validate(message); err != nil { return Message{}, err }
 	return message, nil
+}
+
+// canonicalKind accepts legacy short control kinds on input. Encode always uses
+// the current constants, so all newly emitted messages share the same namespace.
+func canonicalKind(kind string) string {
+	switch kind {
+	case "plugin.chat": return KindPluginChat
+	case "set_options": return KindSetOptions
+	case "ack": return KindAck
+	case "error": return KindError
+	case "waiting": return KindWaiting
+	case "log": return KindLog
+	case "quit": return KindQuit
+	default: return kind
+	}
+}
+
+// Validate enforces only the semantics that are intrinsic to a kind. Unknown
+// kinds remain extensible; their payload schemas belong to their producers.
+func Validate(message Message) error {
+	if message.Kind == "" { return fmt.Errorf("message without a kind") }
+	if !IsChatKind(message.Kind) && message.Kind != KindSystemMessageWarning { return nil }
+	var payload map[string]any
+	if len(message.Payload) == 0 || string(message.Payload) == "null" { return fmt.Errorf("message %q requires a payload", message.Kind) }
+	if err := json.Unmarshal(message.Payload, &payload); err != nil { return fmt.Errorf("message %q payload: %w", message.Kind, err) }
+	body, _ := payload["message"].(map[string]any)
+	if body == nil { return fmt.Errorf("message %q requires payload.message", message.Kind) }
+	for _, key := range []string{"src", "text", "html"} {
+		if _, ok := body[key]; !ok { return fmt.Errorf("message %q requires payload.message.%s", message.Kind, key) }
+	}
+	if message.Kind == KindSystemMessageWarning {
+		text, _ := body["text"].(string)
+		if strings.TrimSpace(text) == "" { return fmt.Errorf("message %q requires non-empty payload.message.text", message.Kind) }
+		return nil
+	}
+	channel, _ := payload["channel"].(string)
+	if strings.TrimSpace(channel) == "" { return fmt.Errorf("message %q requires payload.channel", message.Kind) }
+	user, _ := payload["user"].(map[string]any)
+	name, _ := user["name"].(string)
+	if strings.TrimSpace(name) == "" { return fmt.Errorf("message %q requires payload.user.name", message.Kind) }
+	return nil
 }
 
 // --- Payloads --------------------------------------------------------------
@@ -175,39 +303,24 @@ type SetOptionsPayload struct {
 	Values map[string]any `json:"values"`
 }
 
-// AckPayload confirms that the plugin took the options. It may also carry the
-// values it actually ended up with: a plugin is allowed to normalize them (turn
-// a nickname or a link into a channel id), and the kernel saves what the plugin
-// works with, not what the user happened to type.
-type AckPayload struct {
-	Values map[string]any `json:"values,omitempty"`
-	// Message is what the plugin did, in words. Ядро в этом ничего не понимает и
-	// просто показывает: человек нажал кнопку и должен понять, что вышло, а не
-	// разглядывать «готово».
-	Message string `json:"message,omitempty"`
+// MessageContent is the common representation of human-readable text.
+type MessageContent struct {
+	Src string `json:"src"`
+	Text string `json:"text"`
+	Html string `json:"html"`
 }
 
-// LogPayload is a line for the kernel log.
-type LogPayload struct {
-	Level   string `json:"level"`
-	Message string `json:"message"`
+// PlainMessage builds a text-only message. HTML text is escaped by default.
+func PlainMessage(text string) MessageContent {
+	return MessageContent{Src: text, Text: text, Html: stdhtml.EscapeString(text)}
 }
 
-// WaitingPayload says what the plugin is busy with, so the options page can
-// keep the save button disabled instead of pretending nothing happens.
-type WaitingPayload struct {
-	Message string `json:"message"`
-}
+type MessagePayload struct { Message MessageContent `json:"message"` }
 
-// ErrorPayload explains what went wrong. Fields, when set, point at the exact
-// options the user has to fix: the kernel does not save the values and the
-// options page highlights those fields. Items narrows it further for list
-// fields: which of the entries is the problem, keyed by what the user typed.
-type ErrorPayload struct {
-	Message string                       `json:"message"`
-	Fields  map[string]string            `json:"fields,omitempty"`
-	Items   map[string]map[string]string `json:"items,omitempty"`
-}
+type AckPayload struct { Values map[string]any `json:"values,omitempty"`; Message string `json:"-"` }
+type LogPayload struct { Level string `json:"level"`; Message string `json:"-"` }
+type WaitingPayload struct { Message string `json:"-"` }
+type ErrorPayload struct { Message string `json:"-"`; Fields map[string]string `json:"fields,omitempty"`; Items map[string]map[string]string `json:"items,omitempty"` }
 
 // ChatPayload is one line of chat, as chat.message.public or
 // chat.message.private.
@@ -233,22 +346,8 @@ type ChatUser struct {
 	Login string `json:"login"`
 }
 
-// ChatLine is one line of chat in three forms: as the service sent it, as
-// plain text, and as html for a rich view.
-// ChatLine is one chat line in three forms. Все три — одна и та же реплика,
-// просто каждая приспособлена под свою задачу.
-type ChatLine struct {
-	// Src is the line exactly as it came in, with the service's own markup.
-	// Ни экранирования, ни вырезания: кто-то захочет увидеть именно то, что
-	// прислал сервис.
-	Src string `json:"src"`
-	// Text is the line for reading: без кодов смайлов и без bbcode, только то,
-	// что человек написал сам.
-	Text string `json:"text"`
-	// Html is the same line with the codes turned into pictures. Пустой, если
-	// кодов не было: тогда показывать Text.
-	Html string `json:"html"`
-}
+// ChatLine is an alias for the shared text representation.
+type ChatLine = MessageContent
 
 // DecodeChat reads one chat line and checks that the kind is a chat kind.
 func DecodeChat(line []byte) (ChatPayload, error) {
@@ -283,57 +382,39 @@ func DecodeChatMessage(message Message) (ChatPayload, error) {
 	return chat, nil
 }
 
-// ChannelPayload is what a join, unjoin or a change in a channel carries. The
-// three kinds differ only in the kind itself.
+// ChannelPayload describes a channel transition. Failure explanations are
+// encoded in payload.message using the shared text shape.
 type ChannelPayload struct {
-	// Channel is the value the plugin stores in the config, not the service's
-	// own id: it is what the user wrote and what we will reconnect to.
 	Channel string `json:"channel"`
-	// Name is what that channel is called in the plugin's settings. Настройки
-	// знает только плагин, поэтому и имя кладёт он — из своих настроек, с
-	// которыми он работает.
 	Name string `json:"name,omitempty"`
-	// Reason is filled in for the failed kinds only.
-	Reason string `json:"reason,omitempty"`
+	Reason string `json:"-"`
 }
 
-// ChannelInfoPayload is what the service tells about a channel we are in.
+// ChannelInfoPayload reports information about a channel. A person involved in
+// the event always uses the common payload.user.name/id/login structure.
 type ChannelInfoPayload struct {
 	Channel string `json:"channel"`
-	// Name is the channel title at the service.
 	Name string `json:"name,omitempty"`
-	// Streamer is who streams there, when the service says.
-	Streamer string `json:"streamer,omitempty"`
-	// Started is when the stream began, in unix seconds; 0 means it is not
-	// running.
+	User *ChatUser `json:"user,omitempty"`
 	Started int64 `json:"started,omitempty"`
-	// Clients and Users are how many people are in the channel and how many of
-	// them are signed in. Services send this on their own every few seconds,
-	// so a plugin can count on it arriving without asking.
 	Clients int `json:"clients,omitempty"`
-	Users   int `json:"users,omitempty"`
-	// PremiumOnly marks a channel that only its own subscribers may enter.
+	Users int `json:"users,omitempty"`
 	PremiumOnly bool `json:"premiumOnly,omitempty"`
-	// SmileOnly marks a channel where only smilies may be sent.
 	SmileOnly bool `json:"smileOnly,omitempty"`
 }
 
-// DeletedMessagePayload is a message a moderator took out of the chat.
+// DeletedMessagePayload describes a message removed from a channel.
 type DeletedMessagePayload struct {
-	Channel   string `json:"channel"`
+	Channel string `json:"channel"`
 	MessageID string `json:"messageId"`
-	// By is who removed it, when the service says.
-	By string `json:"by,omitempty"`
+	User *ChatUser `json:"user,omitempty"`
 }
 
-// ConnectionPayload is the state of the plugin's connection to the service.
+// ConnectionPayload describes the plugin connection. Human-readable context
+// is encoded via the shared payload.message object.
 type ConnectionPayload struct {
-	// State is one of the Connection* constants.
 	State string `json:"state"`
-	// Service is the chat the plugin talks to, for the log.
 	Service string `json:"service,omitempty"`
-	// Reason says why the connection went down or could not be made.
-	Reason string `json:"reason,omitempty"`
-	// Attempt counts the reconnects since the last good connection.
+	Reason string `json:"-"`
 	Attempt int `json:"attempt,omitempty"`
 }
