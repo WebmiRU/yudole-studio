@@ -6,8 +6,16 @@
 
 import '../sass/chat.sass';
 import {serviceLogo} from './service-icons.js';
+import {labelOf} from './events.js';
+import {resolveRoom, apply} from './room-view.js';
 
 const API_CHAT = '/api/chat';
+const API_ROOMS = '/api/rooms';
+const API_THEMES = '/api/themes';
+
+// Комната приходит адресом: /chat?roomId=123. Так ссылку можно скопировать и
+// передать кому угодно — она сама несёт и внешний вид ленты, и набор событий.
+const ROOM_PARAM = 'roomId';
 
 const state = {
     socket: null,
@@ -27,6 +35,18 @@ const state = {
     // stuck — прижата ли лента к низу.
     stuck: true,
     seen: 0,
+
+    // room — комната из адреса; null, когда её указать нечем.
+    room: null,
+    // roomProblem — что не нашлось: «id не указан», «комнаты 999 нет». Показывается
+    // сообщением в ленте, а не молчалив откатом на умолчания.
+    roomProblem: '',
+    // shown — какие события комната показывает. null означает «все»: так работает
+    // лента без комнаты и комната, у которой список событий пуст не должен
+    // означать пустую ленту.
+    shown: null,
+    // fonts — гарнитуры по названию, из списка настроек комнаты.
+    fonts: new Set(),
 };
 
 const feedEl = document.getElementById('feed');
@@ -132,6 +152,7 @@ function redraw() {
     // Держим не больше сотни строк: иначе страница растёт бесконечно.
     // Неизвестные события не дают блока, поэтому null убираем.
     const trimmed = shown.slice(-100).map(line).filter(Boolean);
+
     feedEl.replaceChildren(...trimmed);
 
     if (state.stuck) {
@@ -158,6 +179,21 @@ const SEVERITIES = ['neutral', 'info', 'success', 'warning', 'error'];
 
 // line is one block: a chat line, or a note about a channel.
 function line(entry) {
+    const node = render(entry);
+    if (!node) {
+        return null;
+    }
+
+    // Событие, которого комната не показывает, прячем, а не выкидываем: узел
+    // остаётся в ленте на своём месте и просто не виден. Так разбор «куда делось
+    // сообщение» упирается в узел, а не в пустоту.
+    if (state.shown && !state.shown.has(entry.kind)) {
+        node.style.display = 'none';
+    }
+    return node;
+}
+
+function render(entry) {
     if (isLine(entry)) {
         const message = entry.payload?.message ?? {};
         const head = authorHead(entry);
@@ -506,4 +542,39 @@ function el(tag, attrs = {}, children = []) {
     return node;
 }
 
+// showProblem выводит строку о том, что с комнатой не так, — под шапкой, а не в
+// ленте. В ленте она уезжала бы за верхний край: та прокручивается вниз.
+function showProblem(text) {
+    const bar = document.getElementById('room-problem');
+    if (!bar) {
+        return;
+    }
+    bar.textContent = text;
+    bar.hidden = !text;
+}
+
+// setupRoom читает комнату из адреса и накрывает ею ленту.
+//
+// Разбор идёт параллельно с подключением: пока он ходит в ядро за комнатами,
+// websocket уже набирает историю, и она не потеряется — события придут в state
+// раньше, чем покажется, а redraw пройдёт по ним позже с уже готовой комнатой.
+async function setupRoom() {
+    const view = await resolveRoom('roomId');
+
+    state.room = view.room;
+    state.roomProblem = view.problem;
+    state.shown = view.shown === null ? null : new Set(view.shown);
+    apply(view, feedEl);
+
+    // Заголовок: с комнатой — её название, без — как было.
+    const titleEl = document.getElementById('room-title');
+    if (titleEl) {
+        titleEl.textContent = view.room?.title || 'Все каналы';
+    }
+
+    showProblem(view.problem);
+    redraw();
+}
+
 connect();
+setupRoom();

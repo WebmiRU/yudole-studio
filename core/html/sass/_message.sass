@@ -46,7 +46,9 @@
   gap: 6px
   align-items: center
   color: tokens.$accent-hi
-  font-size: 14px
+  // Размер и гарнитуру задаёт комната. Значения по умолчанию — те же, что были
+  // до появления комнат, чтобы лента без комнаты выглядела как раньше.
+  font-size: var(--room-author-size, 14px)
   font-weight: 600
 
 // Значок сервиса слева от ника. В одной ленте сидят несколько площадок, и без
@@ -83,7 +85,7 @@
 
 .msg__text
   color: tokens.$text
-  font-size: 15px
+  font-size: var(--room-message-size, 15px)
   line-height: 1.5
   white-space: pre-wrap
   word-break: break-word

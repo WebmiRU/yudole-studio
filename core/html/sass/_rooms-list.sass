@@ -71,3 +71,21 @@
   color: tokens.$text-faint
   font-size: 13px
   text-align: center
+
+// Ссылка на ленту комнаты рядом с названием. Моноширинная: это адрес, а не
+// проза, и моноширинный шрифт даёт понять, что его копируют целиком.
+.room-link
+  display: inline-block
+  margin-top: 6px
+  padding: 2px 8px
+  border: 1px solid tokens.$border
+  border-radius: tokens.$radius-sm
+  color: tokens.$text-faint
+  font-family: tokens.$mono
+  font-size: 12px
+  text-decoration: none
+  transition: color 0.12s ease, border-color 0.12s ease
+
+.room-link:hover
+  color: tokens.$accent-hi
+  border-color: tokens.$border-hi

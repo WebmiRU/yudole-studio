@@ -123,6 +123,7 @@ function renderOptions() {
             el('div', {}, [
                 el('h2', {class: 'options__title'}, [room.title || UNTITLED]),
                 el('p', {class: 'options__desc'}, ['Как эта комната выглядит в ленте сообщений.']),
+                chatLink(room.id),
             ]),
         ]),
         el('div', {class: 'options__body'}, [
@@ -156,6 +157,19 @@ function renderOptions() {
     if (state.error) {
         optionsEl.append(el('p', {class: 'options__problem'}, [state.error]));
     }
+}
+
+// chatLink — ссылка на ленту этой комнаты, рядом с её названием. Ссылка, а не
+// текст: по ней можно кликнуть и открыть ленту, а правой кнопкой — скопировать,
+// и человек получит ровно то, что сам открыл.
+function chatLink(id) {
+    return el('a', {
+        class: 'room-link',
+        href: `/chat?roomId=${encodeURIComponent(id)}`,
+        target: '_blank',
+        rel: 'noopener',
+        title: 'Открыть ленту этой комнаты',
+    }, [`/chat?roomId=${id}`]);
 }
 
 // eventsField — крышки событий. Список берётся из реестра, а не из самой
